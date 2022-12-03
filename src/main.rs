@@ -1,8 +1,9 @@
 use std::ptr::null_mut;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::thread;
 use std::thread::JoinHandle;
-use crate::heap::allocator::{HeapObject, object_lock, object_unlock};
+use crate::heap::allocator::{HeapAllocator, HeapObject, object_lock, object_unlock};
+use crate::module::object_type::ObjectType;
 use crate::util::concurrent::SpinLock;
 
 mod heap;
@@ -17,34 +18,30 @@ unsafe impl Send for HeapObject {
 fn main() {
     println!("Hello, world!");
 
-    let mut object = SpinLock::new();
-
     unsafe {
-        let raw_pointer = &mut object as *mut SpinLock;
-        let mut i = 0;
-        let int_ptr = &mut i as *mut i32;
+        let object_type = Box::into_raw(Box::new(ObjectType {
+            is_cyclic: AtomicBool::new(true)
+        }));
+        let mut allocator = HeapAllocator::new(null_mut(), 1024, 1);
 
-        let mut joins: Vec<JoinHandle<()>> = Vec::new();
-        for i in 0..20 {
-            let raw_ptr = raw_pointer as usize;
-            let int_raw_ptr = int_ptr as usize;
-            let handle = thread::spawn(move || {
-                println!("START!");
-                for i in 0..100000 {
-                    (*(raw_ptr as *mut SpinLock)).lock();
-                    (*(int_raw_ptr as *mut i32)) += 1;
-                    (*(raw_ptr as *mut SpinLock)).unlock();
-                }
-                println!("END!");
-            });
+        let mut objects: Vec<*mut HeapObject> = Vec::new();
 
-            joins.push(handle);
+        let mut chunk_search_start_index = 0;
+        for i in 0..50000000 {
+            let object = (&mut *allocator).malloc(object_type, 2, &mut chunk_search_start_index);
+            if object == null_mut() {
+                panic!("NULL!!!");
+            }
+            (*object).reference_count.fetch_add(1, Ordering::Relaxed);
+            objects.push(object);
         }
 
-        for handle in joins {
-            handle.join().expect("TODO: panic message");
+        for object in objects.iter() {
+            if (**object).reference_count.load(Ordering::Acquire) != 2 {
+                panic!("NOT 2!!");
+            }
         }
-
-        println!("result = {}", i);
     }
+
+    println!("COMPLETE!");
 }

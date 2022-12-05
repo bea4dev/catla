@@ -1,3 +1,4 @@
+use std::hint;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct SpinLock {
@@ -13,17 +14,19 @@ impl SpinLock {
     }
 
     #[inline(always)]
-    pub unsafe fn lock(&mut self) {
+    pub fn lock(&mut self) {
         loop {
             if !self.lock_flag.swap(true, Ordering::Acquire) {
-                break
+                break;
             }
-            while self.lock_flag.load(Ordering::Relaxed) {}
+            while self.lock_flag.load(Ordering::Relaxed) {
+                hint::spin_loop();
+            }
         }
     }
 
     #[inline(always)]
-    pub unsafe fn unlock(&mut self) {
+    pub fn unlock(&mut self) {
         self.lock_flag.store(false, Ordering::Release);
     }
 }

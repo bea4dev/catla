@@ -27,7 +27,7 @@ fn main() {
         let mut objects: Vec<*mut HeapObject> = Vec::new();
 
         let mut chunk_search_start_index = 0;
-        for i in 0..50000000 {
+        for i in 0..1000 {
             let object = (&mut *allocator).malloc(object_type, 2, &mut chunk_search_start_index);
             if object == null_mut() {
                 panic!("NULL!!!");

@@ -3,6 +3,7 @@ use std::mem;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{fence, Ordering};
 use std::sync::Mutex;
+use libc::printf;
 use crate::{HeapObject, object_lock, object_unlock, SpinLock};
 use crate::heap::allocator::{OBJECT_STATE_DEAD, OBJECT_STATE_LIVE, OBJECT_STATE_WAITING_FOR_GC};
 use crate::vm::tortie::TortieVM;
@@ -262,7 +263,7 @@ impl CycleCollector {
 pub unsafe fn increment_reference_count(cycle_collector: *mut CycleCollector, object: *mut HeapObject) {
     let previous_count = (*object).reference_count.fetch_add(1, Ordering::Relaxed);
     if previous_count == 1 && (*object).is_cyclic_type {
-        if (*object).gc_release.swap(true, Ordering::Relaxed) {
+        if !(*object).gc_release.swap(true, Ordering::Relaxed) {
             (*cycle_collector).add_suspected_object(object);
         }
     }

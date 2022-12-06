@@ -1,8 +1,9 @@
 use std::ptr::null_mut;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, fence, Ordering};
 use std::{mem, thread};
 use std::collections::HashSet;
 use std::thread::JoinHandle;
+use std::time::Instant;
 use crate::heap::allocator::{HeapAllocator, HeapObject, object_lock, OBJECT_STATE_DEAD, object_unlock};
 use crate::heap::gc::{CycleCollector, decrement_reference_count, increment_reference_count};
 use crate::module::object_type::ObjectType;
@@ -86,6 +87,8 @@ fn main() {
 
         let object_type = ObjectType::new(true);
 
+        let start = Instant::now();
+
         let mut chunk_search_start_index = 0;
         let allocator = &mut *(&*main_thread).get_heap_allocator();
         let module_object = allocator.malloc(object_type, 10, &mut chunk_search_start_index);
@@ -128,7 +131,7 @@ fn main() {
                 let module_object = module_object_ptr as *mut HeapObject;
                 let objects = &mut *(objects_ptr as *mut HashSet<*mut HeapObject>);
                 let object_type = object_type_ptr as *mut ObjectType;
-                for i in i..1000000 {
+                for i in i..10000000 {
                     if get_10(i) % 2 == 0 {
                         let obj1 = allocator.malloc(object_type, 2, &mut chunk_search_start_index);
                         let obj2 = allocator.malloc(object_type, 2, &mut chunk_search_start_index);
@@ -169,23 +172,45 @@ fn main() {
             handles.push(handle);
         }
 
+        let mut flag = AtomicBool::new(false);
+        let flag_ptr = &mut flag as *mut AtomicBool as usize;
+        let cycle_collector_ptr = (*virtual_machine).get_cycle_collector() as usize;
+        let handle = thread::spawn(move || {
+            loop {
+                let flag = (*(flag_ptr as *mut AtomicBool)).load(Ordering::Acquire);
+                if flag {
+                    return;
+                }
+                let cycle_collector = &mut *(cycle_collector_ptr as *mut CycleCollector);
+                //cycle_collector.gc_collect();
+            }
+        });
+
         for handle in handles {
             handle.join().expect("Failed to wait.");
         }
+        flag.store(true, Ordering::Release);
+        fence(Ordering::Acquire);
+        handle.join().expect("Failed to wait.");
 
         decrement_reference_count(module_object);
 
         (*(*virtual_machine).get_cycle_collector()).gc_collect();
 
+        let end = start.elapsed();
+
         println!("-------- LIVING OBJECTS INFO --------");
         for object in objects.iter() {
             if (**object).state.load(Ordering::Acquire) != OBJECT_STATE_DEAD {
-                println!("NOT DEAD! {}", *object as usize);
+                println!("NOT DEAD! {} : {} : {}", *object as usize, (**object).reference_count.load(Ordering::Relaxed), (**object).state.load(Ordering::Relaxed));
             } else {
                 //println!("DEAD! {}", *object as usize);
             }
         }
         println!("-------------------------------------");
+
+        println!("list : {}", (*(*virtual_machine).get_cycle_collector()).suspected_object_list.len());
+        println!("{}[ms]", end.as_millis());
     }
 
     println!("COMPLETE!");

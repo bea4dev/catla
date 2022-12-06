@@ -10,7 +10,7 @@ use crate::vm::tortie::TortieVM;
 
 pub struct CycleCollector {
     virtual_machine: *mut TortieVM,
-    suspected_object_list: HashSet<*mut HeapObject>,
+    pub suspected_object_list: HashSet<*mut HeapObject>,
     list_lock: SpinLock,
     collector_lock: Mutex<()>,
 }
@@ -194,7 +194,7 @@ impl CycleCollector {
 
                 let mut non_cyclic_objects: HashSet<*mut HeapObject> = HashSet::new();
                 let mut current_object = *root;
-                let mut ready_to_release = false;
+                let mut ready_to_release = true;
 
                 loop {
                     if (*current_object).state.load(Ordering::Acquire) != OBJECT_STATE_WAITING_FOR_GC {

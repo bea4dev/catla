@@ -1,18 +1,18 @@
 use std::collections::{HashMap, HashSet};
 use std::mem;
+use std::mem::swap;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{fence, Ordering};
 use std::sync::Mutex;
 use libc::printf;
-use crate::{HeapObject, object_lock, object_unlock, SpinLock};
+use crate::{HeapObject, object_lock, object_unlock, SpinLock, VMThread};
 use crate::heap::allocator::{OBJECT_STATE_DEAD, OBJECT_STATE_LIVE, OBJECT_STATE_WAITING_FOR_GC};
 use crate::vm::tortie::TortieVM;
 
 pub struct CycleCollector {
     virtual_machine: *mut TortieVM,
-    pub suspected_object_list: HashSet<*mut HeapObject>,
-    list_lock: SpinLock,
     collector_lock: Mutex<()>,
+    retry_objects: HashSet<*mut HeapObject>
 }
 
 const OBJECT_COLOR_RED: u8 = 0;
@@ -25,29 +25,34 @@ impl CycleCollector {
     pub fn new(virtual_machine: *mut TortieVM) -> *mut Self {
         let boxed = Box::new(Self {
             virtual_machine,
-            suspected_object_list: HashSet::new(),
-            list_lock: SpinLock::new(),
-            collector_lock: Mutex::new(())
+            collector_lock: Mutex::new(()),
+            retry_objects: HashSet::new()
         });
         return Box::into_raw(boxed);
-    }
-
-    #[inline(always)]
-    pub fn add_suspected_object(&mut self, object: *mut HeapObject) {
-        self.list_lock.lock();
-        self.suspected_object_list.insert(object);
-        self.list_lock.unlock();
     }
 
     pub unsafe fn gc_collect(&mut self) {
         //Lock to limit single thread
         let _ = self.collector_lock.lock().expect("Failed to lock.");
 
-        //Swap list
-        self.list_lock.lock();
+        //Get suspected objects
         let mut roots: HashSet<*mut HeapObject> = HashSet::new();
-        mem::swap(&mut roots, &mut self.suspected_object_list);
-        self.list_lock.unlock();
+        (*self.virtual_machine).thread_list_lock.lock();
+        let threads = (*self.virtual_machine).threads.clone();
+        (*self.virtual_machine).thread_list_lock.unlock();
+        for thread in threads.iter() {
+            let thread = *thread;
+            let mut temp: HashSet<*mut HeapObject> = HashSet::new();
+            (*thread).object_set_lock.lock();
+            swap(&mut (*thread).suspected_cycle_objects, &mut temp);
+            (*thread).object_set_lock.unlock();
+            for root in temp.iter() {
+                roots.insert(*root);
+            }
+        }
+        for root in self.retry_objects.iter() {
+            roots.insert(*root);
+        }
 
         let mut release_objects: HashSet<*mut HeapObject> = HashSet::new();
 
@@ -228,10 +233,14 @@ impl CycleCollector {
 
         for object in release_objects.iter() {
             roots.remove(object);
+            self.retry_objects.remove(object);
             if (**object).is_cyclic_type && (**object).gc_release.load(Ordering::Acquire) {
-                self.list_lock.lock();
-                self.suspected_object_list.remove(object);
-                self.list_lock.unlock();
+                for thread in threads.iter() {
+                    let thread = *thread;
+                    (*thread).object_set_lock.lock();
+                    (*thread).suspected_cycle_objects.remove(object);
+                    (*thread).object_set_lock.unlock();
+                }
             }
 
             let fields_ptr = (*object as usize) + mem::size_of::<HeapObject>();
@@ -251,7 +260,7 @@ impl CycleCollector {
         }
 
         for root in roots.iter() {
-            self.add_suspected_object(*root);
+            self.retry_objects.insert(*root);
         }
 
     }
@@ -260,11 +269,11 @@ impl CycleCollector {
 
 
 #[inline(always)]
-pub unsafe fn increment_reference_count(cycle_collector: *mut CycleCollector, object: *mut HeapObject) {
+pub unsafe fn increment_reference_count(vm_thread: *mut VMThread, object: *mut HeapObject) {
     let previous_count = (*object).reference_count.fetch_add(1, Ordering::Relaxed);
     if previous_count == 1 && (*object).is_cyclic_type {
         if !(*object).gc_release.swap(true, Ordering::Relaxed) {
-            (*cycle_collector).add_suspected_object(object);
+            (*vm_thread).add_suspected_object(object);
         }
     }
 }

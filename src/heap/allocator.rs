@@ -1,8 +1,8 @@
-use std::mem;
+use std::{hint, mem};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
-use crate::module;
-use crate::module::object_type::ObjectType;
+use crate::vm::module;
+use crate::vm::module::object_type::ObjectType;
 use crate::util::concurrent::SpinLock;
 use crate::vm;
 use crate::vm::tortie::TortieVM;
@@ -32,7 +32,9 @@ pub unsafe fn object_lock(object: *mut HeapObject) {
         if !(*object).lock_flag.swap(true, Ordering::Acquire) {
             break
         }
-        while (*object).lock_flag.load(Ordering::Relaxed) {}
+        while (*object).lock_flag.load(Ordering::Relaxed) {
+            hint::spin_loop();
+        }
     }
 }
 

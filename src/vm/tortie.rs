@@ -1,9 +1,11 @@
+use std::collections::HashSet;
 use std::ptr::null_mut;
-use crate::{CycleCollector, HeapAllocator};
+use crate::{CycleCollector, HeapAllocator, HeapObject, SpinLock};
 
 #[repr(C)]
 pub struct TortieVM {
-    threads: Vec<*mut VMThread>,
+    pub threads: Vec<*mut VMThread>,
+    pub thread_list_lock: SpinLock,
     cycle_collector: *mut CycleCollector
 }
 
@@ -11,7 +13,9 @@ pub struct TortieVM {
 pub struct VMThread {
     virtual_machine: *mut TortieVM,
     stack_size: usize,
-    heap_allocator: *mut HeapAllocator
+    heap_allocator: *mut HeapAllocator,
+    pub suspected_cycle_objects: HashSet<*mut HeapObject>,
+    pub object_set_lock: SpinLock
 }
 
 
@@ -20,6 +24,7 @@ impl TortieVM {
     pub unsafe fn new() -> *mut TortieVM {
         let mut virtual_machine = Self {
             threads: Vec::new(),
+            thread_list_lock: SpinLock::new(),
             cycle_collector: null_mut()
         };
         let vm_ptr = Box::into_raw(Box::new(virtual_machine));
@@ -29,7 +34,9 @@ impl TortieVM {
 
     pub unsafe fn create_thread(&mut self, stack_size: usize) -> *mut VMThread {
         let vm_thread = VMThread::new(self as *mut TortieVM, stack_size);
+        self.thread_list_lock.lock();
         self.threads.push(vm_thread);
+        self.thread_list_lock.unlock();
         return vm_thread;
     }
 
@@ -47,24 +54,27 @@ impl VMThread {
         let boxed = Box::new(Self {
             virtual_machine,
             stack_size,
-            heap_allocator: HeapAllocator::new(virtual_machine, 1024, 1)
+            heap_allocator: HeapAllocator::new(virtual_machine, 1024, 1),
+            suspected_cycle_objects: HashSet::new(),
+            object_set_lock: SpinLock::new()
         });
         return Box::into_raw(boxed);
     }
 
     #[inline(always)]
-    pub fn get_virtual_machine(&self) -> *mut TortieVM {
-        return self.virtual_machine;
-    }
+    pub fn get_virtual_machine(&self) -> *mut TortieVM { return self.virtual_machine; }
 
     #[inline(always)]
-    pub fn get_stack_size(&self) -> usize {
-        return self.stack_size;
-    }
+    pub fn get_stack_size(&self) -> usize { return self.stack_size; }
 
     #[inline(always)]
-    pub fn get_heap_allocator(&self) -> *mut HeapAllocator {
-        return self.heap_allocator;
+    pub fn get_heap_allocator(&self) -> *mut HeapAllocator { return self.heap_allocator; }
+
+    #[inline(always)]
+    pub fn add_suspected_object(&mut self, object: *mut HeapObject) {
+        self.object_set_lock.lock();
+        self.suspected_cycle_objects.insert(object);
+        self.object_set_lock.unlock();
     }
 
 }

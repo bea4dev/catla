@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 libc = "0.2"
+num_cpus = "1.0"
+thiserror = "1.0"
+regex = "1.7.0"

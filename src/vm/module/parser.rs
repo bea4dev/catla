@@ -22,7 +22,7 @@ pub fn parse_module(code: &str) {
                 let result = parse_const_value(code, code_length, &mut current_position, &mut const_value_list);
                 match result {
                     Ok(_) => {},
-                    Err(err) => panic!("{}", err)
+                    Err(err) => panic!("{:?}", err)
                 }
             }
             _ => {}

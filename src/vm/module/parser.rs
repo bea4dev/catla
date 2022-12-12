@@ -1,28 +1,68 @@
 use std::{num::{ParseIntError, ParseFloatError}, result};
+use std::fmt::{Debug, Display, Formatter, write};
 
 use regex::Regex;
-use thiserror::Error;
 
 use crate::vm::module::const_value::ConstValue;
+use crate::vm::module::object_type::Type;
+
+
+#[derive(Clone)]
+pub struct FieldInfo {
+    field_name: String,
+    type_info: TypeInfo
+}
+
+#[derive(Clone)]
+pub enum TypeInfo {
+    PrimitiveType { primitive_type: Type },
+    DefinedType { import_module_index: usize, type_name: String }
+}
+
+#[derive(Clone)]
+pub struct TypeDefineInfo {
+    type_name: String,
+    field_info_list: Vec<FieldInfo>,
+    extends_type_info: Option<TypeInfo>
+}
+
+
 
 pub fn parse_module(code: &str) {
     let code_length = code.chars().count();
     let mut current_position: usize = 0;
+    let mut current_line_index: usize = 0;
 
     let mut const_value_list: Vec<ConstValue> = Vec::new();
+    let mut import_module_name_list: Vec<String> = Vec::new();
+    let mut type_define_list: Vec<TypeDefineInfo> = Vec::new();
 
     loop {
-        let line = read_line(code, code_length, &mut current_position);
+        let line = read_line(code, code_length, &mut current_position, &mut current_line_index);
         if current_position == code_length - 1 {
             break;
         }
-        println!("{}", line);
+        println!("line : {}", line);
         match line.as_str() {
             "$const" => {
-                let result = parse_const_value(code, code_length, &mut current_position, &mut const_value_list);
+                let result = parse_const_value(code, code_length, &mut current_position, &mut current_line_index, &mut const_value_list);
                 match result {
                     Ok(_) => {},
-                    Err(err) => panic!("{:?}", err)
+                    Err(err) => panic!("{}", err)
+                }
+            },
+            "$import" => {
+                let result = parse_imports(code, code_length, &mut current_position, &mut current_line_index, &mut import_module_name_list, &const_value_list);
+                match result {
+                    Ok(_) => {},
+                    Err(err) => panic!("{}", err)
+                }
+            },
+            "$typedef" => {
+                let result = parse_typedef(code, code_length, &mut current_position, &mut current_line_index, &const_value_list, &mut type_define_list);
+                match result {
+                    Ok(_) => {},
+                    Err(err) => panic!("{}", err)
                 }
             }
             _ => {}
@@ -37,9 +77,22 @@ pub fn parse_module(code: &str) {
             ConstValue::String(v) => println!("const str : {}", v.clone())
         }
     }
+
+    for module_name in import_module_name_list.iter() {
+        println!("import : {}", module_name);
+    }
+
+    for type_define_info in type_define_list.iter() {
+        let type_define_info: &TypeDefineInfo = type_define_info;
+        println!("type : {}", type_define_info.type_name);
+        for field_info in (&type_define_info.field_info_list).iter() {
+            let field_info: &FieldInfo = field_info;
+            println!("field : {}", field_info.field_name);
+        }
+    }
 }
 
-pub fn read_line(code: &str, code_length: usize, current_position: &mut usize) -> String {
+pub fn read_line(code: &str, code_length: usize, current_position: &mut usize, current_line_index: &mut usize) -> String {
     let mut line: String = String::new();
 
     for i in *current_position..code_length {
@@ -50,6 +103,8 @@ pub fn read_line(code: &str, code_length: usize, current_position: &mut usize) -
             } else {
                 *current_position = i + 1;
             }
+            *current_line_index += 1;
+
             return line;
         }
         line.push(char);
@@ -59,36 +114,44 @@ pub fn read_line(code: &str, code_length: usize, current_position: &mut usize) -
     return line;
 }
 
-pub fn read_until(code: &str, code_length: usize, target_char: char, current_position: &mut usize) -> Result<String, ByteCodeParseError> {
+pub fn read_until(code: &str, code_length: usize, target_char: char, current_position: &mut usize,
+                  current_line_index: &mut usize) -> Result<String, ByteCodeParseError> {
     let mut line: String = String::new();
 
     for i in *current_position..code_length {
         let char = code.chars().nth(i).unwrap();
+        if char == '\n' {
+            *current_line_index += 1;
+        }
         if char == target_char {
             *current_position = i;
-            return Result::Ok(line);
+            return Ok(line);
         }
         line.push(char);
     }
 
-    return Result::Err(ByteCodeParseError::NotFoundCharError(*current_position, target_char));
+    return Err(ByteCodeParseError::NotFoundCharError(*current_position, target_char));
 }
 
-pub fn parse_const_value(code: &str, code_length: usize, current_position: &mut usize, const_value_list: &mut Vec<ConstValue>) -> Result<(), ByteCodeParseError> {
+pub fn parse_const_value(code: &str, code_length: usize, current_position: &mut usize,
+                         current_line_index: &mut usize, const_value_list: &mut Vec<ConstValue>) -> Result<(), ByteCodeParseError> {
     let info_reg = Regex::new(r"(\d+):(\d+):(\w)").unwrap();
     let mut current_index = 0;
 
     loop {
         let mut position_temp = *current_position;
-        let line = read_line(code, code_length, &mut position_temp);
+        let mut line_index_temp = *current_line_index;
+        let line = read_line(code, code_length, &mut position_temp, &mut line_index_temp);
         if line.as_str() == "$end" {
             *current_position = position_temp;
-            return Result::Ok(());
+            *current_line_index = line_index_temp;
+            return Ok(());
         }
 
-        let info = match read_until(code, code_length, '#', current_position) {
+        let current_line = *current_line_index;
+        let info = match read_until(code, code_length, '#', current_position, current_line_index) {
             Ok(info_str) => info_str,
-            Err(err) => return Result::Err(err),
+            Err(err) => return Err(err),
         };
         if *current_position + 1 != code_length {
             *current_position += 1;
@@ -96,26 +159,26 @@ pub fn parse_const_value(code: &str, code_length: usize, current_position: &mut 
 
         let caps = match info_reg.captures(info.as_str()) {
             Some(caps) => caps,
-            None => return Result::Err(ByteCodeParseError::InvalidConstValueError(*current_position, "Info not match.".to_string()))
+            None => return Err(ByteCodeParseError::InvalidConstValueError(current_line, "Info not match.".to_string()))
         };
 
         let index: usize = match (&caps[1]).parse() {
             Ok(index) => index,
-            Err(err) => return Result::Err(ByteCodeParseError::InvalidConstValueError(*current_position, err.to_string()))
+            Err(err) => return Err(ByteCodeParseError::InvalidConstValueError(current_line, err.to_string()))
         };
 
         if index != current_index {
-            return Result::Err(ByteCodeParseError::InvalidConstValueError(*current_position, "Invalid value index.".to_string()));
+            return Err(ByteCodeParseError::InvalidConstValueError(current_line, "Invalid value index.".to_string()));
         }
 
         let length: usize = match (&caps[2]).parse() {
             Ok(length) => length,
-            Err(_) => return Result::Err(ByteCodeParseError::InvalidConstValueError(*current_position, "Length is not unsigned integer".to_string()))
+            Err(_) => return Err(ByteCodeParseError::InvalidConstValueError(current_line, "Length is not unsigned integer".to_string()))
         };
 
         let char = match (&caps[3]).chars().nth(0) {
             Some(char) => char,
-            None => return Result::Err(ByteCodeParseError::InvalidConstValueError(*current_position, "Invalid type.".to_string()))
+            None => return Err(ByteCodeParseError::InvalidConstValueError(current_line, "Invalid type.".to_string()))
         };
 
         let mut value_string = String::new();
@@ -126,27 +189,28 @@ pub fn parse_const_value(code: &str, code_length: usize, current_position: &mut 
         }
 
         *current_position = position + length;
-        read_line(code, code_length, current_position);
+        let current_line = *current_line_index;
+        read_line(code, code_length, current_position, current_line_index);
 
         let value = match char {
             'i' => ConstValue::Integer(match value_string.parse::<i64>() 
                 {
                     Ok(v) => v,
-                    Err(err) => return Result::Err(ByteCodeParseError::InvalidConstValueError(*current_position, err.to_string()))
+                    Err(err) => return Err(ByteCodeParseError::InvalidConstValueError(current_line, err.to_string()))
                 }),
             'u' => ConstValue::UnsignedInteger(match value_string.parse::<u64>() 
                 {
                     Ok(v) => v,
-                    Err(err) => return Result::Err(ByteCodeParseError::InvalidConstValueError(*current_position, err.to_string()))
+                    Err(err) => return Err(ByteCodeParseError::InvalidConstValueError(current_line, err.to_string()))
                 }),
             'f' => ConstValue::Float(match value_string.parse::<f64>() 
                 {
                     Ok(v) => v,
-                    Err(err) => return Result::Err(ByteCodeParseError::InvalidConstValueError(*current_position, err.to_string()))
+                    Err(err) => return Err(ByteCodeParseError::InvalidConstValueError(current_line, err.to_string()))
                 }),
             's' => ConstValue::String(value_string),
 
-            _ => return Result::Err(ByteCodeParseError::ConstValueParseError(position))
+            _ => return Err(ByteCodeParseError::ConstValueParseError(current_line))
         };
 
         const_value_list.push(value);
@@ -155,15 +219,258 @@ pub fn parse_const_value(code: &str, code_length: usize, current_position: &mut 
     }
 }
 
+pub fn parse_imports(code: &str, code_length: usize, current_position: &mut usize, current_line_index: &mut usize,
+                     import_module_name_list: &mut Vec<String>, const_value_list: &Vec<ConstValue>) -> Result<(), ByteCodeParseError> {
 
-#[derive(Error, Debug)]
+    let info_reg = Regex::new(r"(\d+):(.+)").unwrap();
+    let mut current_index = 0;
+
+    loop {
+        let current_line = *current_line_index;
+        let line = read_line(code, code_length, current_position, current_line_index);
+        if line.as_str() == "$end" {
+            return Ok(());
+        }
+
+        let line_str = line.as_str();
+
+        match info_reg.captures(line_str) {
+            Some(captures) => {
+                let index = (&captures[1]).parse::<usize>().unwrap();
+                if index != current_index {
+                    return Err(ByteCodeParseError::InvalidImportIndexError(current_line, index));
+                }
+
+                let import_string = (&captures[2]).to_string();
+                let import_module_name = if import_string.as_str() == "this" {
+                    import_string.clone()
+                } else {
+                    match get_const_value_string(import_string.as_str(), current_line, const_value_list) {
+                        Ok(string) => string,
+                        Err(err) => { return Err(err) }
+                    }
+                };
+
+                import_module_name_list.push(import_module_name);
+            },
+            _ => {
+                return Err(ByteCodeParseError::ImportParseError(current_line, line.clone()));
+            }
+        };
+
+        current_index += 1;
+    }
+}
+
+pub fn parse_typedef(code: &str, code_length: usize, current_position: &mut usize, current_line_index: &mut usize,
+                     const_value_list: &Vec<ConstValue>, type_define_list: &mut Vec<TypeDefineInfo>) -> Result<(), ByteCodeParseError> {
+    let has_extends_reg = Regex::new(r"(.+):\((.+)\):(.+)").unwrap();
+    let normal_reg = Regex::new(r"(.+):\((.+)\)").unwrap();
+    let field_info_defined_reg = Regex::new(r"(.+):(.+:.+)").unwrap();
+    let field_info_primitive_reg = Regex::new(r"(.+):(.+)").unwrap();
+
+    loop {
+        let current_line = *current_line_index;
+        let line = read_line(code, code_length, current_position, current_line_index);
+        if line.as_str() == "$end" {
+            return Ok(());
+        }
+
+        let mut name_info: String;
+        let mut fields_info: String;
+        let mut extends_type_info: Option<TypeInfo>;
+        match has_extends_reg.captures(line.as_str()) {
+            Some(captures) => {
+                name_info = (&captures[1]).to_string();
+                fields_info = (&captures[2]).to_string();
+                extends_type_info = Some(match parse_type_info(&captures[3], current_line, const_value_list) {
+                    Ok(info) => {
+                        match &info {
+                            TypeInfo::DefinedType { import_module_index, type_name } => info,
+                            TypeInfo::PrimitiveType { primitive_type } => { return Err(ByteCodeParseError::InvalidTypeDefineError(current_line, line.clone())); }
+                        }
+                    },
+                    Err(err) => { return Err(err); }
+                });
+            },
+            _ => {
+                match normal_reg.captures(line.as_str()) {
+                    Some(captures) => {
+                        name_info = (&captures[1]).to_string();
+                        fields_info = (&captures[2]).to_string();
+                        extends_type_info = None;
+                    },
+                    _ => { return Err(ByteCodeParseError::InvalidTypeDefineError(current_line, line.clone())) }
+                }
+            }
+        }
+
+        let type_name = match get_const_value_string(name_info.as_str(), current_line, const_value_list) {
+            Ok(name) => name,
+            Err(err) => { return Err(err); }
+        };
+
+        let mut field_info_list: Vec<FieldInfo> = Vec::new();
+        for field_info_str in fields_info.split(",") {
+            match field_info_defined_reg.captures(field_info_str) {
+                Some(captures) => {
+                    let field_name = match get_const_value_string(&captures[1], current_line, const_value_list) {
+                        Ok(name) => name,
+                        Err(err) => { return Err(err); }
+                    };
+
+                    let type_info = match parse_type_info(&captures[2], current_line, const_value_list) {
+                        Ok(info) => info,
+                        Err(err) => { return Err(err); }
+                    };
+
+                    field_info_list.push(FieldInfo {field_name, type_info});
+                },
+                _ => {
+                    match field_info_primitive_reg.captures(field_info_str) {
+                        Some(captures) => {
+                            let field_name = match get_const_value_string(&captures[1], current_line, const_value_list) {
+                                Ok(name) => name,
+                                Err(err) => { return Err(err); }
+                            };
+
+                            let type_info = match parse_type_info(&captures[2], current_line, const_value_list) {
+                                Ok(field_type) => field_type,
+                                Err(err) => { return Err(err); }
+                            };
+
+                            field_info_list.push(FieldInfo {field_name, type_info });
+                        },
+                        _ => { return Err(ByteCodeParseError::InvalidTypeDefineError(current_line, field_info_str.to_string())); }
+                    }
+                }
+            }
+        }
+
+        type_define_list.push(TypeDefineInfo {type_name, field_info_list, extends_type_info});
+    }
+}
+
+
+
+pub fn get_const_value_string(code: &str, line: usize, const_value_list: &Vec<ConstValue>) -> Result<String, ByteCodeParseError> {
+    let index = match parse_const_index(code, line) {
+        Ok(index) => index,
+        Err(err) => { return Err(err); }
+    };
+
+    let const_value = match const_value_list.get(index) {
+        Some(const_value) => const_value,
+        _ => { return Err(ByteCodeParseError::ConstValueNotFoundError(line, index)) }
+    };
+
+    return match const_value {
+        ConstValue::Integer(_) => Err(ByteCodeParseError::InvalidConstValueTypeError(line, "string".to_string(), "integer".to_string())),
+        ConstValue::UnsignedInteger(_) => Err(ByteCodeParseError::InvalidConstValueTypeError(line, "string".to_string(), "unsigned integer".to_string())),
+        ConstValue::Float(_) => Err(ByteCodeParseError::InvalidConstValueTypeError(line, "string".to_string(), "integer".to_string())),
+        ConstValue::String(string) => Ok(string.clone())
+    }
+}
+
+pub fn parse_const_index(code: &str, line: usize) -> Result<usize, ByteCodeParseError> {
+    let index_reg = Regex::new(r"const#(\d+)").unwrap();
+    return match index_reg.captures(code) {
+        Some(s) => Ok((&s[1]).parse::<usize>().unwrap()),
+        _ => {
+            match code.parse::<usize>() {
+                Ok(index) => Ok(index),
+                Err(_) => Err(ByteCodeParseError::ConstIndexParseError(line, code.to_string()))
+            }
+        }
+    }
+}
+
+pub fn parse_primitive_type(code: &str, line: usize) -> Result<Type, ByteCodeParseError> {
+    return match code {
+        "i8" => Ok(Type::I8),
+        "i16" => Ok(Type::I16),
+        "i32" => Ok(Type::I32),
+        "i64" => Ok(Type::I64),
+        "u8" => Ok(Type::U8),
+        "u16" => Ok(Type::U16),
+        "u32" => Ok(Type::U32),
+        "u64" => Ok(Type::U64),
+        "f32" => Ok(Type::F32),
+        "f64" => Ok(Type::F64),
+        _ => Err(ByteCodeParseError::PrimitiveTypeParseError(line, code.to_string()))
+    }
+}
+
+pub fn parse_import_index(code: &str, line: usize) -> Result<usize, ByteCodeParseError> {
+    let index_reg = Regex::new(r"import#(\d+)").unwrap();
+    return match index_reg.captures(code) {
+        Some(s) => Ok((&s[1]).parse::<usize>().unwrap()),
+        _ => {
+            match code.parse::<usize>() {
+                Ok(index) => Ok(index),
+                Err(_) => Err(ByteCodeParseError::ImportIndexParseError(line, code.to_string()))
+            }
+        }
+    }
+}
+
+pub fn parse_type_info(code: &str, line: usize, const_value_list: &Vec<ConstValue>) -> Result<TypeInfo, ByteCodeParseError> {
+    let defined_type_reg = Regex::new(r"(.+):(.+)").unwrap();
+    return match defined_type_reg.captures(code) {
+        Some(captures) => {
+            let import_module_index = match parse_import_index(&captures[1], line) {
+                Ok(index) => index,
+                Err(err) => { return Err(err); }
+            };
+
+            let type_name = match get_const_value_string(&captures[2], line, const_value_list) {
+                Ok(name) => name,
+                Err(err) => { return Err(err); }
+            };
+
+            Ok(TypeInfo::DefinedType { import_module_index, type_name })
+        },
+        _ => {
+            let primitive_type = match parse_primitive_type(code, line) {
+                Ok(primitive_type) => primitive_type,
+                Err(err) => { return Err(err); }
+            };
+
+            Ok(TypeInfo::PrimitiveType { primitive_type })
+        }
+    }
+}
+
+
+#[derive(Debug)]
 pub enum ByteCodeParseError {
-    #[error("[position : {0}] | '{1}' is expected, but not fount.")]
     NotFoundCharError(usize, char),
-
-    #[error("[position : {0}] | Invalid const value. => {1}")]
     InvalidConstValueError(usize, String),
-
-    #[error("[position : {0}] | Failed to parse const value.")]
     ConstValueParseError(usize),
+    ConstIndexParseError(usize, String),
+    ImportIndexParseError(usize, String),
+    ImportParseError(usize, String),
+    InvalidImportIndexError(usize, usize),
+    ConstValueNotFoundError(usize, usize),
+    InvalidConstValueTypeError(usize, String, String),
+    InvalidTypeDefineError(usize, String),
+    PrimitiveTypeParseError(usize, String)
+}
+
+impl Display for ByteCodeParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ByteCodeParseError::NotFoundCharError(line, char) => write!(f, "{} | '{}' is expected, but not fount.", line, char),
+            ByteCodeParseError::InvalidConstValueError(line, string) => write!(f, "{} | Invalid const value. => {}", line, string),
+            ByteCodeParseError::ConstValueParseError(line) => write!(f, "{} | Failed to parse const value.", line),
+            ByteCodeParseError::ConstIndexParseError(line, string) => write!(f, "{} | Failed to parse const index. => {}", line, string),
+            ByteCodeParseError::ImportIndexParseError(line, string) => write!(f, "{} | Failed to parse import index. => {}", line, string),
+            ByteCodeParseError::ImportParseError(line, string) => write!(f, "{} | Invalid import. => {}", line, string),
+            ByteCodeParseError::InvalidImportIndexError(line, index) => write!(f, "{} | Invalid import index. => {}", line, index),
+            ByteCodeParseError::ConstValueNotFoundError(line, index) => write!(f, "{} | Const value is not found. => index:{}", line, index),
+            ByteCodeParseError::InvalidConstValueTypeError(line, string1, string2) => write!(f, "{} | Invalid const value type. => Expected '{}', but found '{}'.", line, string1, string2),
+            ByteCodeParseError::InvalidTypeDefineError(line, string) => write!(f, "{} | Invalid type define. => {}", line, string),
+            ByteCodeParseError::PrimitiveTypeParseError(line, string) => write!(f, "{} | Failed to parse primitive type. => {}", line, string),
+        }
+    }
 }

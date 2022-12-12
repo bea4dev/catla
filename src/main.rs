@@ -90,6 +90,17 @@ $const
   6:1:s#a
   7:1:s#b
   8:1:s#c
+  9:17:s#catla::collection
+$end
+
+$import
+  0:this
+  1:const#9
+$end
+
+$typedef
+  const#1:(const#6:i64,const#7:import#0:const#5):import#0:const#5
+  const#5:(const#8:i64)
 $end
 ";
     parse_module(code);

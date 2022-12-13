@@ -1,10 +1,15 @@
 use std::{num::{ParseIntError, ParseFloatError}, result};
+use std::cell::RefCell;
 use std::fmt::{Debug, Display, Formatter, write};
 
 use regex::Regex;
 
 use crate::vm::module::const_value::ConstValue;
+use crate::vm::module::function::{Function, FunctionLabelBlock};
 use crate::vm::module::object_type::Type;
+use crate::vm::module::order::orders::Order;
+use crate::vm::module::parser::ByteCodeParseError::VariableIndexParseError;
+use crate::vm::module::parser::RegOrVarIndex::{RegisterIndex, VariableIndex};
 
 
 #[derive(Clone)]
@@ -36,6 +41,7 @@ pub fn parse_module(code: &str) {
     let mut const_value_list: Vec<ConstValue> = Vec::new();
     let mut import_module_name_list: Vec<String> = Vec::new();
     let mut type_define_list: Vec<TypeDefineInfo> = Vec::new();
+    let mut using_type_info_list: Vec<TypeInfo> = Vec::new();
 
     loop {
         let line = read_line(code, code_length, &mut current_position, &mut current_line_index);
@@ -45,23 +51,30 @@ pub fn parse_module(code: &str) {
         println!("line : {}", line);
         match line.as_str() {
             "$const" => {
-                let result = parse_const_value(code, code_length, &mut current_position, &mut current_line_index, &mut const_value_list);
-                match result {
-                    Ok(_) => {},
+                let result = parse_const_value(code, code_length, &mut current_position, &mut current_line_index);
+                const_value_list = match result {
+                    Ok(list) => list,
                     Err(err) => panic!("{}", err)
                 }
             },
             "$import" => {
-                let result = parse_imports(code, code_length, &mut current_position, &mut current_line_index, &mut import_module_name_list, &const_value_list);
-                match result {
-                    Ok(_) => {},
+                let result = parse_imports(code, code_length, &mut current_position, &mut current_line_index, &const_value_list);
+                import_module_name_list = match result {
+                    Ok(list) => list,
                     Err(err) => panic!("{}", err)
                 }
             },
             "$typedef" => {
-                let result = parse_typedef(code, code_length, &mut current_position, &mut current_line_index, &const_value_list, &mut type_define_list);
-                match result {
-                    Ok(_) => {},
+                let result = parse_typedef(code, code_length, &mut current_position, &mut current_line_index, &const_value_list);
+                type_define_list = match result {
+                    Ok(list) => list,
+                    Err(err) => panic!("{}", err)
+                }
+            },
+            "$type" => {
+                let result = parse_using_types(code, code_length, &mut current_position, &mut current_line_index, &const_value_list);
+                using_type_info_list = match result {
+                    Ok(list) => list,
                     Err(err) => panic!("{}", err)
                 }
             }
@@ -88,6 +101,14 @@ pub fn parse_module(code: &str) {
         for field_info in (&type_define_info.field_info_list).iter() {
             let field_info: &FieldInfo = field_info;
             println!("field : {}", field_info.field_name);
+        }
+    }
+
+    for type_info in using_type_info_list.iter() {
+        let type_info: &TypeInfo = type_info;
+        match type_info {
+            TypeInfo::PrimitiveType { primitive_type } => { panic!("PRIMITIVE TYPE!"); }
+            TypeInfo::DefinedType { import_module_index, type_name } => println!("using : {}:{}", import_module_index, type_name)
         }
     }
 }
@@ -134,9 +155,10 @@ pub fn read_until(code: &str, code_length: usize, target_char: char, current_pos
 }
 
 pub fn parse_const_value(code: &str, code_length: usize, current_position: &mut usize,
-                         current_line_index: &mut usize, const_value_list: &mut Vec<ConstValue>) -> Result<(), ByteCodeParseError> {
+                         current_line_index: &mut usize) -> Result<Vec<ConstValue>, ByteCodeParseError> {
     let info_reg = Regex::new(r"(\d+):(\d+):(\w)").unwrap();
     let mut current_index = 0;
+    let mut const_value_list: Vec<ConstValue> = Vec::new();
 
     loop {
         let mut position_temp = *current_position;
@@ -145,7 +167,7 @@ pub fn parse_const_value(code: &str, code_length: usize, current_position: &mut 
         if line.as_str() == "$end" {
             *current_position = position_temp;
             *current_line_index = line_index_temp;
-            return Ok(());
+            return Ok(const_value_list);
         }
 
         let current_line = *current_line_index;
@@ -220,16 +242,17 @@ pub fn parse_const_value(code: &str, code_length: usize, current_position: &mut 
 }
 
 pub fn parse_imports(code: &str, code_length: usize, current_position: &mut usize, current_line_index: &mut usize,
-                     import_module_name_list: &mut Vec<String>, const_value_list: &Vec<ConstValue>) -> Result<(), ByteCodeParseError> {
+                     const_value_list: &Vec<ConstValue>) -> Result<Vec<String>, ByteCodeParseError> {
 
     let info_reg = Regex::new(r"(\d+):(.+)").unwrap();
     let mut current_index = 0;
+    let mut import_module_name_list: Vec<String> = Vec::new();
 
     loop {
         let current_line = *current_line_index;
         let line = read_line(code, code_length, current_position, current_line_index);
         if line.as_str() == "$end" {
-            return Ok(());
+            return Ok(import_module_name_list);
         }
 
         let line_str = line.as_str();
@@ -263,17 +286,19 @@ pub fn parse_imports(code: &str, code_length: usize, current_position: &mut usiz
 }
 
 pub fn parse_typedef(code: &str, code_length: usize, current_position: &mut usize, current_line_index: &mut usize,
-                     const_value_list: &Vec<ConstValue>, type_define_list: &mut Vec<TypeDefineInfo>) -> Result<(), ByteCodeParseError> {
+                     const_value_list: &Vec<ConstValue>) -> Result<Vec<TypeDefineInfo>, ByteCodeParseError> {
     let has_extends_reg = Regex::new(r"(.+):\((.+)\):(.+)").unwrap();
     let normal_reg = Regex::new(r"(.+):\((.+)\)").unwrap();
     let field_info_defined_reg = Regex::new(r"(.+):(.+:.+)").unwrap();
     let field_info_primitive_reg = Regex::new(r"(.+):(.+)").unwrap();
 
+    let mut type_define_list: Vec<TypeDefineInfo> = Vec::new();
+
     loop {
         let current_line = *current_line_index;
         let line = read_line(code, code_length, current_position, current_line_index);
         if line.as_str() == "$end" {
-            return Ok(());
+            return Ok(type_define_list);
         }
 
         let mut name_info: String;
@@ -351,6 +376,152 @@ pub fn parse_typedef(code: &str, code_length: usize, current_position: &mut usiz
     }
 }
 
+pub fn parse_using_types(code: &str, code_length: usize, current_position: &mut usize, current_line_index: &mut usize,
+                         const_value_list: &Vec<ConstValue>) -> Result<Vec<TypeInfo>, ByteCodeParseError> {
+    let info_reg = Regex::new(r"(\d+):(.+:.+)").unwrap();
+    let mut current_index = 0;
+
+    let mut using_type_info_list: Vec<TypeInfo> = Vec::new();
+
+    loop {
+        let current_line = *current_line_index;
+        let line = read_line(code, code_length, current_position, current_line_index);
+        if line.as_str() == "$end" {
+            return Ok(using_type_info_list);
+        }
+
+        match info_reg.captures(line.as_str()) {
+            Some(captures) => {
+                let index = match (&captures[1]).parse::<usize>() {
+                    Ok(index) => index,
+                    Err(_) => { return Err(ByteCodeParseError::InvalidIndexError(current_line, (&captures[1]).to_string())); }
+                };
+                if current_index != index {
+                    return Err(ByteCodeParseError::InvalidIndexError(current_line, (&captures[1]).to_string()));
+                }
+
+                let type_info = match parse_type_info(&captures[2], current_line, const_value_list) {
+                    Ok(type_info) => type_info,
+                    Err(err) => { return Err(err); }
+                };
+
+                using_type_info_list.push(type_info);
+
+                current_index += 1;
+            },
+            _ => { return Err(ByteCodeParseError::UsingTypeParseError(current_line, line.clone())); }
+        }
+    }
+}
+
+pub fn parse_functions(code: &str, code_length: usize, current_position: &mut usize,
+                       current_line_index: &mut usize, const_value_list: &Vec<ConstValue>) -> Result<Vec<Function>, ByteCodeParseError> {
+    let info_reg = Regex::new(r"(\d+):(.+)\((.+)\)->(.+)\{").unwrap();
+    let mut current_index = 0;
+
+    let mut function_list: Vec<Function> = Vec::new();
+
+    loop {
+        let current_line = *current_line_index;
+        let line = read_line(code, code_length, current_position, current_line_index);
+        if line.as_str() == "$end" {
+            return Ok(function_list);
+        }
+
+        match info_reg.captures(line.as_str()) {
+            Some(captures) => {
+                let index = match (&captures[1]).parse::<usize>() {
+                    Ok(index) => {index},
+                    Err(_) => { return Err(ByteCodeParseError::InvalidIndexError(current_line, (&captures[1]).to_string())); }
+                };
+
+                if index != current_index {
+                    return Err(ByteCodeParseError::InvalidIndexError(current_line, (&captures[1]).to_string()));
+                }
+
+                let name = match get_const_value_string(&captures[2], current_line, const_value_list) {
+                    Ok(name) => name,
+                    Err(err) => { return Err(err); }
+                };
+
+                let mut argument_type_info_list: Vec<TypeInfo> = Vec::new();
+                if (&captures[3]).is_empty() {
+                    for type_info_str in (&captures[3]).split(",") {
+                        let type_info = match parse_type_info(type_info_str, current_line, const_value_list) {
+                            Ok(info) => info,
+                            Err(err) => { return Err(err); }
+                        };
+                        argument_type_info_list.push(type_info);
+                    }
+                }
+
+                let return_type_info = match parse_type_info(&captures[4], current_line, const_value_list) {
+                    Ok(info) => info,
+                    Err(err) => { return Err(err); }
+                };
+
+                let mut label_block_list: Vec<FunctionLabelBlock> = match parse_function_label_blocks(code, code_length, current_position, current_line_index, const_value_list) {
+                    Ok(list) => list,
+                    Err(err) => { return Err(err); }
+                };
+
+                function_list.push(Function { name, argument_type_info_list, return_type_info, label_block_list })
+            },
+            _ => { return Err(ByteCodeParseError::UsingTypeParseError(current_line, line.clone())); }
+        }
+
+        current_index += 1;
+    }
+}
+
+pub fn parse_function_label_blocks(code: &str, code_length: usize, current_position: &mut usize,
+                                   current_line_index: &mut usize, const_value_list: &Vec<ConstValue>) -> Result<Vec<FunctionLabelBlock>, ByteCodeParseError> {
+    let end_reg = Regex::new(r"^ *}$").unwrap();
+    let label_reg = Regex::new(r"label:(.+)").unwrap();
+
+    let mut block_label_list: Vec<FunctionLabelBlock> = Vec::new();
+
+    loop {
+        let current_line = *current_line_index;
+        let line = read_line(code, code_length, current_position, current_line_index);
+        if end_reg.is_match(line.as_str()) {
+            return Ok(block_label_list);
+        }
+
+        let name = match label_reg.captures(line.as_str()) {
+            Some(name) => name,
+            _ => { return Err(ByteCodeParseError::ParseFunctionLabelError(current_line, line.to_string())); }
+        };
+
+
+
+    }
+}
+
+pub fn parse_function_orders(code: &str, code_length: usize, current_position: &mut usize,
+                             current_line_index: &mut usize, const_value_list: &Vec<ConstValue>) -> Result<Vec<Box<dyn Order>>, ByteCodeParseError> {
+    let end_reg = Regex::new(r"^ *label:end$").unwrap();
+    let assignment_order_reg = Regex::new(r"(.+)=(.+)").unwrap();
+
+    let mut order_list: Vec<Box<dyn Order>> = Vec::new();
+
+    loop {
+        let current_line = *current_line_index;
+        let line = read_line(code, code_length, current_position, current_line_index);
+        if end_reg.is_match(line.as_str()) {
+            return Ok(order_list);
+        }
+
+        match assignment_order_reg.captures(line.as_str()) {
+            Some(captures) => {
+
+            },
+            _ => {
+
+            }
+        }
+    }
+}
 
 
 pub fn get_const_value_string(code: &str, line: usize, const_value_list: &Vec<ConstValue>) -> Result<String, ByteCodeParseError> {
@@ -375,11 +546,81 @@ pub fn get_const_value_string(code: &str, line: usize, const_value_list: &Vec<Co
 pub fn parse_const_index(code: &str, line: usize) -> Result<usize, ByteCodeParseError> {
     let index_reg = Regex::new(r"const#(\d+)").unwrap();
     return match index_reg.captures(code) {
-        Some(s) => Ok((&s[1]).parse::<usize>().unwrap()),
+        Some(s) => {
+            match (&s[1]).parse::<usize>() {
+                Ok(index) => Ok(index),
+                Err(_) => Err(ByteCodeParseError::ConstIndexParseError(line, code.to_string()))
+            }
+        },
         _ => {
             match code.parse::<usize>() {
                 Ok(index) => Ok(index),
                 Err(_) => Err(ByteCodeParseError::ConstIndexParseError(line, code.to_string()))
+            }
+        }
+    }
+}
+
+pub fn parse_register_index(code: &str, line: usize) -> Result<usize, ByteCodeParseError> {
+    let index_reg = Regex::new(r"reg#(\d+)").unwrap();
+    return match index_reg.captures(code) {
+        Some(s) => {
+            match (&s[1]).parse::<usize>() {
+                Ok(index) => Ok(index),
+                Err(_) => Err(ByteCodeParseError::RegisterIndexParseError(line, code.to_string()))
+            }
+        },
+        _ => {
+            match code.parse::<usize>() {
+                Ok(index) => Ok(index),
+                Err(_) => Err(ByteCodeParseError::RegisterIndexParseError(line, code.to_string()))
+            }
+        }
+    }
+}
+
+pub fn parse_variable_index(code: &str, line: usize) -> Result<usize, ByteCodeParseError> {
+    let index_reg = Regex::new(r"var#(\d+)").unwrap();
+    return match index_reg.captures(code) {
+        Some(s) => {
+            match (&s[1]).parse::<usize>() {
+                Ok(index) => Ok(index),
+                Err(_) => Err(ByteCodeParseError::VariableIndexParseError(line, code.to_string()))
+            }
+        },
+        _ => {
+            match code.parse::<usize>() {
+                Ok(index) => Ok(index),
+                Err(_) => Err(ByteCodeParseError::VariableIndexParseError(line, code.to_string()))
+            }
+        }
+    }
+}
+
+pub enum RegOrVarIndex {
+    RegisterIndex(usize),
+    VariableIndex(usize)
+}
+
+pub fn parse_register_or_variable_index(code: &str, line: usize) -> Result<RegOrVarIndex, ByteCodeParseError> {
+    let register_reg = Regex::new(r"reg#(\d+)").unwrap();
+    let variable_reg = Regex::new(r"var#(\d+)").unwrap();
+    return match register_reg.captures(code) {
+        Some(s) => {
+            match (&s[1]).parse::<usize>() {
+                Ok(index) => Ok(RegisterIndex(index)),
+                Err(_) => Err(ByteCodeParseError::ParseAssignmentTargetError(line, code.to_string()))
+            }
+        },
+        _ => {
+            match variable_reg.captures(code) {
+                Some(s) => {
+                    match (&s[1]).parse::<usize>() {
+                        Ok(index) => Ok(VariableIndex(index)),
+                        Err(_) => Err(ByteCodeParseError::ParseAssignmentTargetError(line, code.to_string()))
+                    }
+                },
+                _ => Err(ByteCodeParseError::ParseAssignmentTargetError(line, code.to_string()))
             }
         }
     }
@@ -448,13 +689,20 @@ pub enum ByteCodeParseError {
     InvalidConstValueError(usize, String),
     ConstValueParseError(usize),
     ConstIndexParseError(usize, String),
+    RegisterIndexParseError(usize, String),
+    VariableIndexParseError(usize, String),
+    ParseAssignmentTargetError(usize, String),
     ImportIndexParseError(usize, String),
     ImportParseError(usize, String),
     InvalidImportIndexError(usize, usize),
     ConstValueNotFoundError(usize, usize),
     InvalidConstValueTypeError(usize, String, String),
     InvalidTypeDefineError(usize, String),
-    PrimitiveTypeParseError(usize, String)
+    PrimitiveTypeParseError(usize, String),
+    UsingTypeParseError(usize, String),
+    InvalidIndexError(usize, String),
+    InvalidRegVarLengthError(usize, String),
+    ParseFunctionLabelError(usize, String)
 }
 
 impl Display for ByteCodeParseError {
@@ -464,6 +712,9 @@ impl Display for ByteCodeParseError {
             ByteCodeParseError::InvalidConstValueError(line, string) => write!(f, "{} | Invalid const value. => {}", line, string),
             ByteCodeParseError::ConstValueParseError(line) => write!(f, "{} | Failed to parse const value.", line),
             ByteCodeParseError::ConstIndexParseError(line, string) => write!(f, "{} | Failed to parse const index. => {}", line, string),
+            ByteCodeParseError::RegisterIndexParseError(line, string) => write!(f, "{} | Failed to parse register index. => {}", line, string),
+            ByteCodeParseError::VariableIndexParseError(line, string) => write!(f, "{} | Failed to parse variable index. => {}", line, string),
+            ByteCodeParseError::ParseAssignmentTargetError(line, string) => write!(f, "{} | Failed to parse assignment target. => {}", line, string),
             ByteCodeParseError::ImportIndexParseError(line, string) => write!(f, "{} | Failed to parse import index. => {}", line, string),
             ByteCodeParseError::ImportParseError(line, string) => write!(f, "{} | Invalid import. => {}", line, string),
             ByteCodeParseError::InvalidImportIndexError(line, index) => write!(f, "{} | Invalid import index. => {}", line, index),
@@ -471,6 +722,10 @@ impl Display for ByteCodeParseError {
             ByteCodeParseError::InvalidConstValueTypeError(line, string1, string2) => write!(f, "{} | Invalid const value type. => Expected '{}', but found '{}'.", line, string1, string2),
             ByteCodeParseError::InvalidTypeDefineError(line, string) => write!(f, "{} | Invalid type define. => {}", line, string),
             ByteCodeParseError::PrimitiveTypeParseError(line, string) => write!(f, "{} | Failed to parse primitive type. => {}", line, string),
+            ByteCodeParseError::UsingTypeParseError(line, string) => write!(f, "{} | Failed to parse using type. => {}", line, string),
+            ByteCodeParseError::InvalidIndexError(line, string) => write!(f, "{} | Invalid index. => {}", line, string),
+            ByteCodeParseError::InvalidRegVarLengthError(line, string) => write!(f, "{} | Invalid length. => {}", line, string),
+            ByteCodeParseError::ParseFunctionLabelError(line, string) => write!(f, "{} | Failed to parse function label. => {}", line, string)
         }
     }
 }

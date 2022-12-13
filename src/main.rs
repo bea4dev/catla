@@ -99,8 +99,13 @@ $import
 $end
 
 $typedef
-  const#1:(const#6:i64,const#7:import#0:const#5):import#0:const#5
+  const#4:(const#6:i64,const#7:import#0:const#5):import#0:const#5
   const#5:(const#8:i64)
+$end
+
+$type
+  0:import#0:const#4
+  1:import#0:const#5
 $end
 ";
     parse_module(code);

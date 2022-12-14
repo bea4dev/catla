@@ -7,9 +7,8 @@ use regex::Regex;
 use crate::vm::module::const_value::ConstValue;
 use crate::vm::module::function::{Function, FunctionLabelBlock};
 use crate::vm::module::object_type::Type;
+use crate::vm::module::order::get_order::GetArgumentOrder;
 use crate::vm::module::order::orders::Order;
-use crate::vm::module::parser::ByteCodeParseError::VariableIndexParseError;
-use crate::vm::module::parser::RegOrVarIndex::{RegisterIndex, VariableIndex};
 
 
 #[derive(Clone)]
@@ -514,6 +513,11 @@ pub fn parse_function_orders(code: &str, code_length: usize, current_position: &
 
         match assignment_order_reg.captures(line.as_str()) {
             Some(captures) => {
+                let assignment_target_index = match parse_register_or_variable_index(&captures[1], current_line) {
+                    Ok(target) => target,
+                    Err(err) => { return Err(err); }
+                };
+
 
             },
             _ => {
@@ -521,6 +525,27 @@ pub fn parse_function_orders(code: &str, code_length: usize, current_position: &
             }
         }
     }
+}
+
+pub fn parse_register_assignment_right_order(code: &str, current_line: usize, target_index: usize) -> Result<Box<dyn Order>, ByteCodeParseError> {
+    let mut code_string = code.to_string();
+    code_string.retain(|c| c != ' ');
+
+    let code_arguments: Vec<&str> = code_string.split(',').collect();
+    let order: dyn Order = match code_arguments.len() {
+        2 => {
+            match code_arguments[0] {
+                "arg" => {
+                    let argument_index = match parse_argument_index(code_arguments[1], current_line) {
+                        Ok(index) => index,
+                        Err(err) => { return Err(err); }
+                    };
+                    GetArgumentOrder::new(target_index, argument_index);
+                },
+
+            }
+        }
+    };
 }
 
 
@@ -597,6 +622,24 @@ pub fn parse_variable_index(code: &str, line: usize) -> Result<usize, ByteCodePa
     }
 }
 
+pub fn parse_argument_index(code: &str, line: usize) -> Result<usize, ByteCodeParseError> {
+    let index_reg = Regex::new(r"arg#(\d+)").unwrap();
+    return match index_reg.captures(code) {
+        Some(s) => {
+            match (&s[1]).parse::<usize>() {
+                Ok(index) => Ok(index),
+                Err(_) => Err(ByteCodeParseError::VariableIndexParseError(line, code.to_string()))
+            }
+        },
+        _ => {
+            match code.parse::<usize>() {
+                Ok(index) => Ok(index),
+                Err(_) => Err(ByteCodeParseError::VariableIndexParseError(line, code.to_string()))
+            }
+        }
+    }
+}
+
 pub enum RegOrVarIndex {
     RegisterIndex(usize),
     VariableIndex(usize)
@@ -608,7 +651,7 @@ pub fn parse_register_or_variable_index(code: &str, line: usize) -> Result<RegOr
     return match register_reg.captures(code) {
         Some(s) => {
             match (&s[1]).parse::<usize>() {
-                Ok(index) => Ok(RegisterIndex(index)),
+                Ok(index) => Ok(RegOrVarIndex::RegisterIndex(index)),
                 Err(_) => Err(ByteCodeParseError::ParseAssignmentTargetError(line, code.to_string()))
             }
         },
@@ -616,7 +659,7 @@ pub fn parse_register_or_variable_index(code: &str, line: usize) -> Result<RegOr
             match variable_reg.captures(code) {
                 Some(s) => {
                     match (&s[1]).parse::<usize>() {
-                        Ok(index) => Ok(VariableIndex(index)),
+                        Ok(index) => Ok(RegOrVarIndex::VariableIndex(index)),
                         Err(_) => Err(ByteCodeParseError::ParseAssignmentTargetError(line, code.to_string()))
                     }
                 },
@@ -691,6 +734,7 @@ pub enum ByteCodeParseError {
     ConstIndexParseError(usize, String),
     RegisterIndexParseError(usize, String),
     VariableIndexParseError(usize, String),
+    ArgumentIndexParseError(usize, String),
     ParseAssignmentTargetError(usize, String),
     ImportIndexParseError(usize, String),
     ImportParseError(usize, String),
@@ -714,6 +758,7 @@ impl Display for ByteCodeParseError {
             ByteCodeParseError::ConstIndexParseError(line, string) => write!(f, "{} | Failed to parse const index. => {}", line, string),
             ByteCodeParseError::RegisterIndexParseError(line, string) => write!(f, "{} | Failed to parse register index. => {}", line, string),
             ByteCodeParseError::VariableIndexParseError(line, string) => write!(f, "{} | Failed to parse variable index. => {}", line, string),
+            ByteCodeParseError::ArgumentIndexParseError(line, string) => write!(f, "{} | Failed to parse argument index. => {}", line, string),
             ByteCodeParseError::ParseAssignmentTargetError(line, string) => write!(f, "{} | Failed to parse assignment target. => {}", line, string),
             ByteCodeParseError::ImportIndexParseError(line, string) => write!(f, "{} | Failed to parse import index. => {}", line, string),
             ByteCodeParseError::ImportParseError(line, string) => write!(f, "{} | Invalid import. => {}", line, string),

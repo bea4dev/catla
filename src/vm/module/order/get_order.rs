@@ -33,27 +33,24 @@ impl Order for GetArgumentOrder {
 
 pub struct GetConstValueOrder {
     target_index: usize,
-    const_value_index: usize,
-    get_type: Type
+    value_type: Type,
+    const_value_bits: u64
 }
 
 impl GetConstValueOrder {
-    pub fn new(target_index: usize, const_value_index: usize, get_type: Type) -> Self {
+    pub fn new(target_index: usize, value_type: Type, const_value_bits: u64) -> Self {
         Self {
             target_index,
-            const_value_index,
-            get_type
+            value_type,
+            const_value_bits
         }
     }
 }
 
 impl Order for GetConstValueOrder {
     fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &mut Vec<u64>) {
-        let const_value_ref = unsafe { &(*module).const_value_list[self.const_value_index] };
-
+        registers[self.target_index] = self.const_value_bits;
     }
 
-    fn link(&mut self, module: *mut Module, function: *mut Function) {
-        todo!()
-    }
+    fn link(&mut self, module: *mut Module, function: *mut Function) {/*None*/}
 }

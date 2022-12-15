@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::ptr::null_mut;
 use crate::{CycleCollector, HeapAllocator, HeapObject, SpinLock};
+use crate::vm::module::function::Function;
 
 #[repr(C)]
 pub struct TortieVM {
@@ -15,7 +16,9 @@ pub struct VMThread {
     stack_size: usize,
     heap_allocator: *mut HeapAllocator,
     pub suspected_cycle_objects: HashSet<*mut HeapObject>,
-    pub object_set_lock: SpinLock
+    pub object_set_lock: SpinLock,
+    pub current_function: *mut Function,
+    pub is_return_function: bool
 }
 
 
@@ -56,7 +59,9 @@ impl VMThread {
             stack_size,
             heap_allocator: HeapAllocator::new(virtual_machine, 1024, 1),
             suspected_cycle_objects: HashSet::new(),
-            object_set_lock: SpinLock::new()
+            object_set_lock: SpinLock::new(),
+            current_function: null_mut(),
+            is_return_function: false
         });
         return Box::into_raw(boxed);
     }

@@ -1,14 +1,19 @@
 use std::{num::{ParseIntError, ParseFloatError}, result};
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Formatter, write};
+use std::ptr::null_mut;
 
 use regex::Regex;
+use crate::TortieVM;
 
 use crate::vm::module::const_value::ConstValue;
 use crate::vm::module::function::{Function, FunctionLabelBlock};
 use crate::vm::module::object_type::Type;
-use crate::vm::module::order::get_order::GetArgumentOrder;
+use crate::vm::module::order::calc_order::AddIntegerOrder;
+use crate::vm::module::order::control_order::ReturnOrder;
+use crate::vm::module::order::get_order::{GetArgumentOrder, GetConstValueOrder};
 use crate::vm::module::order::orders::Order;
+use crate::vm::module::order::set_order::SetVariableOrder;
 
 
 #[derive(Clone)]
@@ -35,19 +40,20 @@ pub struct TypeDefineInfo {
 pub fn parse_module(code: &str) {
     let code_length = code.chars().count();
     let mut current_position: usize = 0;
-    let mut current_line_index: usize = 0;
+    let mut current_line_index: usize = 1;
 
     let mut const_value_list: Vec<ConstValue> = Vec::new();
     let mut import_module_name_list: Vec<String> = Vec::new();
     let mut type_define_list: Vec<TypeDefineInfo> = Vec::new();
     let mut using_type_info_list: Vec<TypeInfo> = Vec::new();
+    let mut function_list: Vec<Function> = Vec::new();
 
     loop {
         let line = read_line(code, code_length, &mut current_position, &mut current_line_index);
         if current_position == code_length - 1 {
             break;
         }
-        println!("line : {}", line);
+        println!("line : {} | {}", current_line_index - 1, line);
         match line.as_str() {
             "$const" => {
                 let result = parse_const_value(code, code_length, &mut current_position, &mut current_line_index);
@@ -73,6 +79,13 @@ pub fn parse_module(code: &str) {
             "$type" => {
                 let result = parse_using_types(code, code_length, &mut current_position, &mut current_line_index, &const_value_list);
                 using_type_info_list = match result {
+                    Ok(list) => list,
+                    Err(err) => panic!("{}", err)
+                }
+            }
+            "$function" => {
+                let result = parse_functions(code, code_length, &mut current_position, &mut current_line_index, &const_value_list, &using_type_info_list);
+                function_list = match result {
                     Ok(list) => list,
                     Err(err) => panic!("{}", err)
                 }
@@ -110,6 +123,26 @@ pub fn parse_module(code: &str) {
             TypeInfo::DefinedType { import_module_index, type_name } => println!("using : {}:{}", import_module_index, type_name)
         }
     }
+
+    let function = &mut function_list[0];
+    let mut registers: Vec<u64> = Vec::with_capacity(function.register_length + 1);
+    for i in 0..(function.register_length + 1) {
+        registers.push(0);
+    }
+    let mut variables: Vec<u64> = Vec::with_capacity(function.variable_length);
+    let mut arguments: Vec<u64> = Vec::new();
+
+    let vm_thread = unsafe { (*TortieVM::new()).create_thread(1024) };
+    unsafe { (*vm_thread).current_function = function as *mut Function }
+
+    for label in &function.label_block_list {
+        for order in &label.order_list {
+            let order = order.as_ref();
+            order.eval(vm_thread, null_mut(), &mut registers, &mut variables, &mut arguments);
+        }
+    }
+
+    println!("result = {}", registers[function.register_length]);
 }
 
 pub fn read_line(code: &str, code_length: usize, current_position: &mut usize, current_line_index: &mut usize) -> String {
@@ -414,8 +447,9 @@ pub fn parse_using_types(code: &str, code_length: usize, current_position: &mut 
 }
 
 pub fn parse_functions(code: &str, code_length: usize, current_position: &mut usize,
-                       current_line_index: &mut usize, const_value_list: &Vec<ConstValue>) -> Result<Vec<Function>, ByteCodeParseError> {
-    let info_reg = Regex::new(r"(\d+):(.+)\((.+)\)->(.+)\{").unwrap();
+                       current_line_index: &mut usize, const_value_list: &Vec<ConstValue>,
+                       using_type_list: &Vec<TypeInfo>) -> Result<Vec<Function>, ByteCodeParseError> {
+    let info_reg = Regex::new(r"(\d+):(.+):reg:(\d+):var:(\d+)\((.*)\)->(.+)\{").unwrap();
     let mut current_index = 0;
 
     let mut function_list: Vec<Function> = Vec::new();
@@ -443,10 +477,20 @@ pub fn parse_functions(code: &str, code_length: usize, current_position: &mut us
                     Err(err) => { return Err(err); }
                 };
 
+                let register_length = match (&captures[3]).parse::<usize>() {
+                    Ok(length) => length,
+                    Err(_) => { return Err(ByteCodeParseError::InvalidRegVarLengthError(current_line, (&captures[3]).to_string())); }
+                };
+
+                let variable_length = match (&captures[4]).parse::<usize>() {
+                    Ok(length) => length,
+                    Err(_) => { return Err(ByteCodeParseError::InvalidRegVarLengthError(current_line, (&captures[4]).to_string())); }
+                };
+
                 let mut argument_type_info_list: Vec<TypeInfo> = Vec::new();
-                if (&captures[3]).is_empty() {
-                    for type_info_str in (&captures[3]).split(",") {
-                        let type_info = match parse_type_info(type_info_str, current_line, const_value_list) {
+                if !(&captures[5]).is_empty() {
+                    for type_info_str in (&captures[5]).split(",") {
+                        let type_info = match parse_using_type(type_info_str, current_line, using_type_list) {
                             Ok(info) => info,
                             Err(err) => { return Err(err); }
                         };
@@ -454,7 +498,7 @@ pub fn parse_functions(code: &str, code_length: usize, current_position: &mut us
                     }
                 }
 
-                let return_type_info = match parse_type_info(&captures[4], current_line, const_value_list) {
+                let return_type_info = match parse_type_info(&captures[6], current_line, const_value_list) {
                     Ok(info) => info,
                     Err(err) => { return Err(err); }
                 };
@@ -464,9 +508,9 @@ pub fn parse_functions(code: &str, code_length: usize, current_position: &mut us
                     Err(err) => { return Err(err); }
                 };
 
-                function_list.push(Function { name, argument_type_info_list, return_type_info, label_block_list })
+                function_list.push(Function { name, register_length, variable_length, argument_type_info_list, return_type_info, label_block_list })
             },
-            _ => { return Err(ByteCodeParseError::UsingTypeParseError(current_line, line.clone())); }
+            _ => { return Err(ByteCodeParseError::ParseFunctionInfoError(current_line, line.clone())); }
         }
 
         current_index += 1;
@@ -488,12 +532,17 @@ pub fn parse_function_label_blocks(code: &str, code_length: usize, current_posit
         }
 
         let name = match label_reg.captures(line.as_str()) {
-            Some(name) => name,
+            Some(name) => (&name[1]).to_string(),
             _ => { return Err(ByteCodeParseError::ParseFunctionLabelError(current_line, line.to_string())); }
         };
 
+        let order_list = match parse_function_orders(code, code_length, current_position, current_line_index, const_value_list) {
+            Ok(list) =>list,
+            Err(err) => { return Err(err); }
+        };
 
-
+        let block_label = FunctionLabelBlock { name, order_list };
+        block_label_list.push(block_label);
     }
 }
 
@@ -518,34 +567,173 @@ pub fn parse_function_orders(code: &str, code_length: usize, current_position: &
                     Err(err) => { return Err(err); }
                 };
 
+                let order = match assignment_target_index {
+                    RegOrVarIndex::RegisterIndex(index) => {
+                        match parse_register_assignment_right_order(&captures[2], current_line, index, const_value_list) {
+                            Ok(order) => order,
+                            Err(err) => { return Err(err) }
+                        }
+                    },
+                    RegOrVarIndex::VariableIndex(index) => {
+                        let target_variable_index = match parse_variable_index(&captures[2], current_line) {
+                            Ok(index) => index,
+                            Err(err) => { return Err(err); }
+                        };
+                        Box::new(SetVariableOrder::new(target_variable_index, index))
+                    }
+                };
 
+                order_list.push(order);
             },
             _ => {
+                let order = match parse_control_order(line.as_str(), current_line) {
+                    Ok(order) => order,
+                    Err(err) => { return Err(err); }
+                };
 
+                order_list.push(order);
             }
         }
     }
 }
 
-pub fn parse_register_assignment_right_order(code: &str, current_line: usize, target_index: usize) -> Result<Box<dyn Order>, ByteCodeParseError> {
+pub fn parse_register_assignment_right_order(code: &str, current_line: usize, target_index: usize, const_value_list: &Vec<ConstValue>) -> Result<Box<dyn Order>, ByteCodeParseError> {
     let mut code_string = code.to_string();
     code_string.retain(|c| c != ' ');
 
     let code_arguments: Vec<&str> = code_string.split(',').collect();
-    let order: dyn Order = match code_arguments.len() {
+    let order_name = code_arguments[0];
+
+    let order: Box<dyn Order> = match code_arguments.len() {
         2 => {
-            match code_arguments[0] {
+            match order_name {
                 "arg" => {
                     let argument_index = match parse_argument_index(code_arguments[1], current_line) {
                         Ok(index) => index,
                         Err(err) => { return Err(err); }
                     };
-                    GetArgumentOrder::new(target_index, argument_index);
+                    Box::new(GetArgumentOrder::new(target_index, argument_index))
                 },
-
+                _ => { return Err(ByteCodeParseError::InvalidOrderNameError(current_line, code_arguments[0].to_string())); }
             }
-        }
+        },
+        3 => {
+            match order_name {
+                "const" => {
+                    let value_type = match parse_primitive_type(code_arguments[1], current_line) {
+                        Ok(value_type) => value_type,
+                        Err(err) => { return Err(err); }
+                    };
+
+                    let const_value_index = match parse_const_index(code_arguments[2], current_line) {
+                        Ok(index) => index,
+                        Err(err) => { return Err(err); }
+                    };
+
+                    let const_value = match const_value_list.get(const_value_index) {
+                        Some(value) => value,
+                        _ => { return Err(ByteCodeParseError::ConstValueNotFoundError(current_line, const_value_index)); }
+                    };
+
+                    let bits = match const_value {
+                        ConstValue::Integer(value) => {
+                            match &value_type {
+                                Type::I8 => *value as u64,
+                                Type::I16 => *value as u64,
+                                Type::I32 => *value as u64,
+                                Type::I64 => *value as u64,
+                                Type::U8 => *value as u64,
+                                Type::U16 => *value as u64,
+                                Type::U32 => *value as u64,
+                                Type::U64 => *value as u64,
+                                _ => { return Err(ByteCodeParseError::GetConstTypeMismatchError(current_line, code.to_string())); }
+                            }
+                        },
+                        ConstValue::UnsignedInteger(value) => {
+                            match &value_type {
+                                Type::I8 => *value,
+                                Type::I16 => *value,
+                                Type::I32 => *value,
+                                Type::I64 => *value,
+                                Type::U8 => *value,
+                                Type::U16 => *value,
+                                Type::U32 => *value,
+                                Type::U64 => *value,
+                                _ => { return Err(ByteCodeParseError::GetConstTypeMismatchError(current_line, code.to_string())); }
+                            }
+                        },
+                        ConstValue::Float(value) => {
+                            match &value_type {
+                                Type::F32 => ((*value) as f32).to_bits() as u64,
+                                Type::F64 => (*value).to_bits(),
+                                _ => { return Err(ByteCodeParseError::GetConstTypeMismatchError(current_line, code.to_string())); }
+                            }
+                        },
+                        ConstValue::String(value) => {
+                            return Err(ByteCodeParseError::GetConstTypeMismatchError(current_line, code.to_string()));
+                        }
+                    };
+
+                    Box::new(GetConstValueOrder::new(target_index, value_type, bits))
+                },
+                _ => { return Err(ByteCodeParseError::InvalidOrderNameError(current_line, code_arguments[0].to_string())); }
+            }
+        },
+        4 => {
+            match order_name {
+                "iadd" => {
+                    let value_type = match parse_primitive_type(code_arguments[1], current_line) {
+                        Ok(value_type) => value_type,
+                        Err(err) => { return Err(err); }
+                    };
+
+                    let register_index_1 = match parse_register_index(code_arguments[2], current_line) {
+                        Ok(index) => index,
+                        Err(err) => { return Err(err); }
+                    };
+
+                    let register_index_2 = match parse_register_index(code_arguments[3], current_line) {
+                        Ok(index) => index,
+                        Err(err) => { return Err(err); }
+                    };
+
+                    if !value_type.is_integer() { return Err(ByteCodeParseError::CalcOrderTypeMismatchError(current_line, code.to_string())); }
+
+                    Box::new(AddIntegerOrder::new(target_index, register_index_1, register_index_2, value_type))
+                },
+                _ => { return Err(ByteCodeParseError::InvalidOrderNameError(current_line, code.to_string())); }
+            }
+        },
+        _ => { return Err(ByteCodeParseError::InvalidOrderError(current_line, code.to_string())); }
     };
+
+    return Ok(order);
+}
+
+pub fn parse_control_order(code: &str, current_line: usize) -> Result<Box<dyn Order>, ByteCodeParseError> {
+    let mut code_string = code.to_string();
+    code_string.retain(|c| c != ' ');
+
+    let code_arguments: Vec<&str> = code_string.split(',').collect();
+    let order_name = code_arguments[0];
+
+    let order: Box<dyn Order> = match code_arguments.len() {
+        2 => {
+            match order_name {
+                "ret" => {
+                    let get_register_index = match parse_register_index(code_arguments[1], current_line) {
+                        Ok(index) => index,
+                        Err(err) => { return Err(err); }
+                    };
+                    Box::new(ReturnOrder::new(get_register_index))
+                },
+                _ => { return Err(ByteCodeParseError::InvalidOrderNameError(current_line, order_name.to_string())); }
+            }
+        },
+        _ => { return Err(ByteCodeParseError::InvalidOrderError(current_line, code.to_string())); }
+    };
+
+    return Ok(order);
 }
 
 
@@ -628,13 +816,13 @@ pub fn parse_argument_index(code: &str, line: usize) -> Result<usize, ByteCodePa
         Some(s) => {
             match (&s[1]).parse::<usize>() {
                 Ok(index) => Ok(index),
-                Err(_) => Err(ByteCodeParseError::VariableIndexParseError(line, code.to_string()))
+                Err(_) => Err(ByteCodeParseError::ArgumentIndexParseError(line, code.to_string()))
             }
         },
         _ => {
             match code.parse::<usize>() {
                 Ok(index) => Ok(index),
-                Err(_) => Err(ByteCodeParseError::VariableIndexParseError(line, code.to_string()))
+                Err(_) => Err(ByteCodeParseError::ArgumentIndexParseError(line, code.to_string()))
             }
         }
     }
@@ -725,6 +913,41 @@ pub fn parse_type_info(code: &str, line: usize, const_value_list: &Vec<ConstValu
     }
 }
 
+pub fn parse_using_type(code: &str, line: usize, using_type_list: &Vec<TypeInfo>) -> Result<TypeInfo, ByteCodeParseError> {
+    let info_reg = Regex::new(r"type#\d+").unwrap();
+    return if info_reg.is_match(code) {
+        parse_using_type_info(code, line, using_type_list)
+    } else {
+        match parse_primitive_type(code, line) {
+            Ok(primitive_type) => Ok(TypeInfo::PrimitiveType {primitive_type}),
+            Err(err) => Err(err)
+        }
+    }
+}
+
+pub fn parse_using_type_info(code: &str, line: usize, using_type_list: &Vec<TypeInfo>) -> Result<TypeInfo, ByteCodeParseError> {
+    let info_reg = Regex::new(r"type#(\d+)").unwrap();
+    let using_type_index = match info_reg.captures(code) {
+        Some(captures) => {
+            match (&captures[1]).parse::<usize>() {
+                Ok(index) => index,
+                Err(_) => { return Err(ByteCodeParseError::UsingTypeIndexParseError(line, code.to_string())); }
+            }
+        },
+        _ => {
+            match code.parse::<usize>() {
+                Ok(index) => index,
+                Err(_) => { return Err(ByteCodeParseError::UsingTypeIndexParseError(line, code.to_string())); }
+            }
+        }
+    };
+    let type_info = match using_type_list.get(using_type_index) {
+        Some(info) => (*info).clone(),
+        _ => { return Err(ByteCodeParseError::UsingTypeIndexParseError(line, code.to_string())); }
+    };
+    return Ok(type_info);
+}
+
 
 #[derive(Debug)]
 pub enum ByteCodeParseError {
@@ -735,6 +958,7 @@ pub enum ByteCodeParseError {
     RegisterIndexParseError(usize, String),
     VariableIndexParseError(usize, String),
     ArgumentIndexParseError(usize, String),
+    UsingTypeIndexParseError(usize, String),
     ParseAssignmentTargetError(usize, String),
     ImportIndexParseError(usize, String),
     ImportParseError(usize, String),
@@ -746,7 +970,12 @@ pub enum ByteCodeParseError {
     UsingTypeParseError(usize, String),
     InvalidIndexError(usize, String),
     InvalidRegVarLengthError(usize, String),
-    ParseFunctionLabelError(usize, String)
+    ParseFunctionInfoError(usize, String),
+    ParseFunctionLabelError(usize, String),
+    InvalidOrderNameError(usize, String),
+    GetConstTypeMismatchError(usize, String),
+    CalcOrderTypeMismatchError(usize, String),
+    InvalidOrderError(usize, String)
 }
 
 impl Display for ByteCodeParseError {
@@ -759,6 +988,7 @@ impl Display for ByteCodeParseError {
             ByteCodeParseError::RegisterIndexParseError(line, string) => write!(f, "{} | Failed to parse register index. => {}", line, string),
             ByteCodeParseError::VariableIndexParseError(line, string) => write!(f, "{} | Failed to parse variable index. => {}", line, string),
             ByteCodeParseError::ArgumentIndexParseError(line, string) => write!(f, "{} | Failed to parse argument index. => {}", line, string),
+            ByteCodeParseError::UsingTypeIndexParseError(line, string) => write!(f, "{} | Failed to parse argument index. => {}", line, string),
             ByteCodeParseError::ParseAssignmentTargetError(line, string) => write!(f, "{} | Failed to parse assignment target. => {}", line, string),
             ByteCodeParseError::ImportIndexParseError(line, string) => write!(f, "{} | Failed to parse import index. => {}", line, string),
             ByteCodeParseError::ImportParseError(line, string) => write!(f, "{} | Invalid import. => {}", line, string),
@@ -770,7 +1000,12 @@ impl Display for ByteCodeParseError {
             ByteCodeParseError::UsingTypeParseError(line, string) => write!(f, "{} | Failed to parse using type. => {}", line, string),
             ByteCodeParseError::InvalidIndexError(line, string) => write!(f, "{} | Invalid index. => {}", line, string),
             ByteCodeParseError::InvalidRegVarLengthError(line, string) => write!(f, "{} | Invalid length. => {}", line, string),
-            ByteCodeParseError::ParseFunctionLabelError(line, string) => write!(f, "{} | Failed to parse function label. => {}", line, string)
+            ByteCodeParseError::ParseFunctionInfoError(line, string) => write!(f, "{} | Failed to parse function info. => {}", line, string),
+            ByteCodeParseError::ParseFunctionLabelError(line, string) => write!(f, "{} | Failed to parse function label. => {}", line, string),
+            ByteCodeParseError::InvalidOrderNameError(line, string) => write!(f, "{} | Invalid order. => {}", line, string),
+            ByteCodeParseError::GetConstTypeMismatchError(line, string) => write!(f, "{} | Const value type is mismatch. => {}", line, string),
+            ByteCodeParseError::CalcOrderTypeMismatchError(line, string) => write!(f, "{} | Calc order type is mismatch. => {}", line, string),
+            ByteCodeParseError::InvalidOrderError(line, string) => write!(f, "{} | Invalid order. => {}", line, string)
         }
     }
 }

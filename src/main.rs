@@ -79,8 +79,7 @@ fn main() {
     println!("Hello, world!");
 
     let code =
-"
-$const
+"$const
   0:4:s#nyan
   1:2:i#20
   2:3:i#100
@@ -107,7 +106,19 @@ $type
   0:import#0:const#4
   1:import#0:const#5
 $end
-";
+
+$function
+  0:const#0:reg:5:var:0()->i64{
+    label:entry
+      reg#0 = const,i64,1
+      reg#1 = const,i64,2
+      reg#2 = iadd,i64,reg#0,reg#1
+      reg#3 = const,i64,3
+      reg#4 = iadd,i64,reg#2,reg#3
+      ret,reg#4
+    label:end
+  }
+$end";
     parse_module(code);
 
 

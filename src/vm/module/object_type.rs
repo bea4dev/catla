@@ -30,3 +30,19 @@ pub enum Type {
     F64,
     ObjectReference(*mut ObjectType)
 }
+
+impl Type {
+    pub fn is_integer(&self) -> bool {
+        return match self {
+            Type::I8 => true,
+            Type::I16 => true,
+            Type::I32 => true,
+            Type::I64 => true,
+            Type::U8 => true,
+            Type::U16 => true,
+            Type::U32 => true,
+            Type::U64 => true,
+            _ => false
+        }
+    }
+}

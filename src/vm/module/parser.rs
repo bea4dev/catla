@@ -14,6 +14,7 @@ use crate::vm::module::order::control_order::ReturnOrder;
 use crate::vm::module::order::get_order::{GetArgumentOrder, GetConstValueOrder};
 use crate::vm::module::order::orders::Order;
 use crate::vm::module::order::set_order::SetVariableOrder;
+use crate::vm::module::vm_module::Module;
 
 
 #[derive(Clone)]
@@ -37,112 +38,62 @@ pub struct TypeDefineInfo {
 
 
 
-pub fn parse_module(code: &str) {
+pub fn parse_module(code: &str) -> Result<Module, ByteCodeParseError> {
     let code_length = code.chars().count();
     let mut current_position: usize = 0;
     let mut current_line_index: usize = 1;
 
     let mut const_value_list: Vec<ConstValue> = Vec::new();
     let mut import_module_name_list: Vec<String> = Vec::new();
-    let mut type_define_list: Vec<TypeDefineInfo> = Vec::new();
+    let mut defined_type_info_list: Vec<TypeDefineInfo> = Vec::new();
     let mut using_type_info_list: Vec<TypeInfo> = Vec::new();
     let mut function_list: Vec<Function> = Vec::new();
 
     loop {
         let line = read_line(code, code_length, &mut current_position, &mut current_line_index);
         if current_position == code_length - 1 {
-            break;
+            return Ok(Module { is_initialized: false, const_value_list, import_module_name_list, import_module_list: Vec::new(),
+                defined_type_info_list, defined_type_list: Vec::new(), using_type_info_list, using_type_list: Vec::new(), function_list });
         }
-        println!("line : {} | {}", current_line_index - 1, line);
         match line.as_str() {
             "$const" => {
                 let result = parse_const_value(code, code_length, &mut current_position, &mut current_line_index);
                 const_value_list = match result {
                     Ok(list) => list,
-                    Err(err) => panic!("{}", err)
+                    Err(err) => { return Err(err); }
                 }
             },
             "$import" => {
                 let result = parse_imports(code, code_length, &mut current_position, &mut current_line_index, &const_value_list);
                 import_module_name_list = match result {
                     Ok(list) => list,
-                    Err(err) => panic!("{}", err)
+                    Err(err) => { return Err(err); }
                 }
             },
             "$typedef" => {
                 let result = parse_typedef(code, code_length, &mut current_position, &mut current_line_index, &const_value_list);
-                type_define_list = match result {
+                defined_type_info_list = match result {
                     Ok(list) => list,
-                    Err(err) => panic!("{}", err)
+                    Err(err) => { return Err(err); }
                 }
             },
             "$type" => {
                 let result = parse_using_types(code, code_length, &mut current_position, &mut current_line_index, &const_value_list);
                 using_type_info_list = match result {
                     Ok(list) => list,
-                    Err(err) => panic!("{}", err)
+                    Err(err) => { return Err(err); }
                 }
             }
             "$function" => {
                 let result = parse_functions(code, code_length, &mut current_position, &mut current_line_index, &const_value_list, &using_type_info_list);
                 function_list = match result {
                     Ok(list) => list,
-                    Err(err) => panic!("{}", err)
+                    Err(err) => { return Err(err); }
                 }
             }
             _ => {}
         }
     }
-
-    for value in const_value_list.iter() {
-        match value {
-            ConstValue::Integer(v) => println!("const i64 : {}", v),
-            ConstValue::UnsignedInteger(v) => println!("const u64 : {}", v),
-            ConstValue::Float(v) => println!("const f64 : {}", v),
-            ConstValue::String(v) => println!("const str : {}", v.clone())
-        }
-    }
-
-    for module_name in import_module_name_list.iter() {
-        println!("import : {}", module_name);
-    }
-
-    for type_define_info in type_define_list.iter() {
-        let type_define_info: &TypeDefineInfo = type_define_info;
-        println!("type : {}", type_define_info.type_name);
-        for field_info in (&type_define_info.field_info_list).iter() {
-            let field_info: &FieldInfo = field_info;
-            println!("field : {}", field_info.field_name);
-        }
-    }
-
-    for type_info in using_type_info_list.iter() {
-        let type_info: &TypeInfo = type_info;
-        match type_info {
-            TypeInfo::PrimitiveType { primitive_type } => { panic!("PRIMITIVE TYPE!"); }
-            TypeInfo::DefinedType { import_module_index, type_name } => println!("using : {}:{}", import_module_index, type_name)
-        }
-    }
-
-    let function = &mut function_list[0];
-    let mut registers: Vec<u64> = Vec::with_capacity(function.register_length + 1);
-    for i in 0..(function.register_length + 1) {
-        registers.push(0);
-    }
-    let mut variables: Vec<u64> = Vec::with_capacity(function.variable_length);
-    let mut arguments: Vec<u64> = Vec::new();
-
-    let vm_thread = unsafe { (*TortieVM::new()).create_thread(1024) };
-    unsafe { (*vm_thread).current_function = function as *mut Function }
-
-    for label in &function.label_block_list {
-        for order in &label.order_list {
-            let order = order.as_ref();
-            order.eval(vm_thread, null_mut(), &mut registers, &mut variables, &mut arguments);
-        }
-    }
-
-    println!("result = {}", registers[function.register_length]);
 }
 
 pub fn read_line(code: &str, code_length: usize, current_position: &mut usize, current_line_index: &mut usize) -> String {

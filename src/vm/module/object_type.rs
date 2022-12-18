@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 
-#[repr(C)]
 pub struct ObjectType {
-    pub is_cyclic: AtomicBool
+    pub name: String,
+    pub is_cyclic: AtomicBool,
+    pub field_map: HashMap<String, Type>
 }
 
 impl ObjectType {

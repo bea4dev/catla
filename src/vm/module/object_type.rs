@@ -1,17 +1,27 @@
 use std::collections::HashMap;
+use std::ptr::null_mut;
 use std::sync::atomic::AtomicBool;
+use crate::vm::module::parser::{FieldInfo, TypeDefineInfo, TypeInfo};
 
 pub struct ObjectType {
     pub name: String,
     pub is_cyclic: AtomicBool,
-    pub field_map: HashMap<String, Type>
+    pub field_info_map: HashMap<String, FieldInfo>,
+    pub field_map: HashMap<String, Type>,
+    pub extends_type_info: Option<TypeInfo>,
+    pub extends_type: *mut ObjectType
 }
 
 impl ObjectType {
 
-    pub unsafe fn new(is_cyclic: bool) -> *mut Self {
+    pub unsafe fn new(info: TypeDefineInfo) -> *mut Self {
         let boxed = Box::new(Self {
-            is_cyclic: AtomicBool::new(is_cyclic)
+            name: info.type_name,
+            is_cyclic: AtomicBool::new(false),
+            field_info_map: HashMap::new(),
+            field_map: HashMap::new(),
+            extends_type_info: info.extends_type_info.clone(),
+            extends_type: null_mut()
         });
         return Box::into_raw(boxed);
     }

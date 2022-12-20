@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::ptr::null_mut;
 use std::sync::RwLock;
-use crate::{CycleCollector, HeapAllocator, HeapObject, parse_module, SpinLock};
+use crate::{CycleCollector, HeapAllocator, HeapObject, ObjectType, parse_module, SpinLock};
 use crate::vm::module::function::Function;
 use crate::vm::module::parser::ByteCodeParseError;
 use crate::vm::module::vm_module::Module;
@@ -79,6 +79,10 @@ impl TortieVM {
                 (**module).import_module_list.push(*import_module);
             }
 
+            for defined_type in (**module).defined_type_info_list.iter() {
+                let object_type = ObjectType::new(defined_type);
+                (**module).defined_type_list.push(object_type);
+            }
 
 
             return Ok(());

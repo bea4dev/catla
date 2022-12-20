@@ -31,9 +31,9 @@ pub enum TypeInfo {
 
 #[derive(Clone)]
 pub struct TypeDefineInfo {
-    type_name: String,
-    field_info_list: Vec<FieldInfo>,
-    extends_type_info: Option<TypeInfo>
+    pub type_name: String,
+    pub field_info_list: Vec<FieldInfo>,
+    pub extends_type_info: Option<TypeInfo>
 }
 
 

@@ -71,18 +71,24 @@ impl TortieVM {
                 _ => { return Err(VMError::ModuleNotFoundError(name.clone())); }
             };
 
+            let mut uninitialized_module_list: Vec<*mut Module> = Vec::new();
+
             for import_module_name in (**module).import_module_name_list.iter() {
                 let import_module = match module_map.get(import_module_name) {
                     Some(module) => module,
                     _ => { return Err(VMError::ModuleHasNotBeenLoadedError(import_module_name.clone())); }
                 };
+                if !(**import_module).is_initialized {
+                    uninitialized_module_list.push(*import_module);
+                }
                 (**module).import_module_list.push(*import_module);
             }
 
             for defined_type in (**module).defined_type_info_list.iter() {
-                let object_type = ObjectType::new(defined_type);
+                let object_type = ObjectType::new((*defined_type).clone());
                 (**module).defined_type_list.push(object_type);
             }
+
 
 
             return Ok(());

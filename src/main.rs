@@ -94,7 +94,6 @@ $end
 
 $import
   0:this
-  1:const#9
 $end
 
 $typedef
@@ -108,7 +107,7 @@ $type
 $end
 
 $function
-  0:const#0:reg:5:var:0()->i64{
+  const#0:reg:5:var:0()->i64{
     label:entry
       reg#0 = const,i64,1
       reg#1 = const,i64,2
@@ -119,7 +118,25 @@ $function
     label:end
   }
 $end";
-    parse_module(code);
+
+    unsafe {
+        let virtual_machine = TortieVM::new();
+        (*virtual_machine).pre_load_module("test".to_string(), code.to_string()).expect("Parse error!");
+        let result = (*virtual_machine).load_module("test".to_string());
+        match result {
+            Ok(_) => {},
+            Err(err) => panic!("{}", err)
+        }
+
+        let vm_thread = (*virtual_machine).create_thread(1024);
+
+        let arguments: Vec<u64> = vec![];
+
+        let result = (*virtual_machine).run_function(&"test".to_string(), &"nyan".to_string(), &arguments);
+
+        println!("result = {}", result);
+
+    }
 
 
     println!("COMPLETE!");

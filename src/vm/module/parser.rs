@@ -1,5 +1,6 @@
 use std::{num::{ParseIntError, ParseFloatError}, result};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter, write};
 use std::ptr::null_mut;
 
@@ -19,8 +20,8 @@ use crate::vm::module::vm_module::Module;
 
 #[derive(Clone)]
 pub struct FieldInfo {
-    field_name: String,
-    type_info: TypeInfo
+    pub field_name: String,
+    pub type_info: TypeInfo
 }
 
 #[derive(Clone)]
@@ -36,6 +37,12 @@ pub struct TypeDefineInfo {
     pub extends_type_info: Option<TypeInfo>
 }
 
+#[derive(Clone)]
+pub struct ArgumentTypeInfo {
+    pub type_info: TypeInfo,
+    pub is_reference: bool
+}
+
 
 
 pub fn parse_module(code: &str) -> Result<Module, ByteCodeParseError> {
@@ -47,13 +54,13 @@ pub fn parse_module(code: &str) -> Result<Module, ByteCodeParseError> {
     let mut import_module_name_list: Vec<String> = Vec::new();
     let mut defined_type_info_list: Vec<TypeDefineInfo> = Vec::new();
     let mut using_type_info_list: Vec<TypeInfo> = Vec::new();
-    let mut function_list: Vec<Function> = Vec::new();
+    let mut function_map: HashMap<String, Function> = HashMap::new();
 
     loop {
         let line = read_line(code, code_length, &mut current_position, &mut current_line_index);
         if current_position == code_length - 1 {
             return Ok(Module { is_initialized: false, const_value_list, import_module_name_list, import_module_list: Vec::new(),
-                defined_type_info_list, defined_type_list: Vec::new(), using_type_info_list, using_type_list: Vec::new(), function_list });
+                defined_type_info_list, defined_type_map: HashMap::new(), using_type_info_list, using_type_list: Vec::new(), function_map });
         }
         match line.as_str() {
             "$const" => {
@@ -86,7 +93,7 @@ pub fn parse_module(code: &str) -> Result<Module, ByteCodeParseError> {
             }
             "$function" => {
                 let result = parse_functions(code, code_length, &mut current_position, &mut current_line_index, &const_value_list, &using_type_info_list);
-                function_list = match result {
+                function_map = match result {
                     Ok(list) => list,
                     Err(err) => { return Err(err); }
                 }
@@ -399,49 +406,39 @@ pub fn parse_using_types(code: &str, code_length: usize, current_position: &mut 
 
 pub fn parse_functions(code: &str, code_length: usize, current_position: &mut usize,
                        current_line_index: &mut usize, const_value_list: &Vec<ConstValue>,
-                       using_type_list: &Vec<TypeInfo>) -> Result<Vec<Function>, ByteCodeParseError> {
-    let info_reg = Regex::new(r"(\d+):(.+):reg:(\d+):var:(\d+)\((.*)\)->(.+)\{").unwrap();
-    let mut current_index = 0;
+                       using_type_list: &Vec<TypeInfo>) -> Result<HashMap<String, Function>, ByteCodeParseError> {
+    let info_reg = Regex::new(r"(.+):reg:(\d+):var:(\d+)\((.*)\)->(.+)\{").unwrap();
 
-    let mut function_list: Vec<Function> = Vec::new();
+    let mut function_map: HashMap<String, Function> = HashMap::new();
 
     loop {
         let current_line = *current_line_index;
         let line = read_line(code, code_length, current_position, current_line_index);
         if line.as_str() == "$end" {
-            return Ok(function_list);
+            return Ok(function_map);
         }
 
         match info_reg.captures(line.as_str()) {
             Some(captures) => {
-                let index = match (&captures[1]).parse::<usize>() {
-                    Ok(index) => {index},
-                    Err(_) => { return Err(ByteCodeParseError::InvalidIndexError(current_line, (&captures[1]).to_string())); }
-                };
-
-                if index != current_index {
-                    return Err(ByteCodeParseError::InvalidIndexError(current_line, (&captures[1]).to_string()));
-                }
-
-                let name = match get_const_value_string(&captures[2], current_line, const_value_list) {
+                let name = match get_const_value_string(&captures[1], current_line, const_value_list) {
                     Ok(name) => name,
                     Err(err) => { return Err(err); }
                 };
 
-                let register_length = match (&captures[3]).parse::<usize>() {
+                let register_length = match (&captures[2]).parse::<usize>() {
+                    Ok(length) => length,
+                    Err(_) => { return Err(ByteCodeParseError::InvalidRegVarLengthError(current_line, (&captures[2]).to_string())); }
+                };
+
+                let variable_length = match (&captures[3]).parse::<usize>() {
                     Ok(length) => length,
                     Err(_) => { return Err(ByteCodeParseError::InvalidRegVarLengthError(current_line, (&captures[3]).to_string())); }
                 };
 
-                let variable_length = match (&captures[4]).parse::<usize>() {
-                    Ok(length) => length,
-                    Err(_) => { return Err(ByteCodeParseError::InvalidRegVarLengthError(current_line, (&captures[4]).to_string())); }
-                };
-
-                let mut argument_type_info_list: Vec<TypeInfo> = Vec::new();
-                if !(&captures[5]).is_empty() {
-                    for type_info_str in (&captures[5]).split(",") {
-                        let type_info = match parse_using_type(type_info_str, current_line, using_type_list) {
+                let mut argument_type_info_list: Vec<ArgumentTypeInfo> = Vec::new();
+                if !(&captures[4]).is_empty() {
+                    for type_info_str in (&captures[4]).split(",") {
+                        let type_info = match parse_argument_type_info(type_info_str, current_line, using_type_list) {
                             Ok(info) => info,
                             Err(err) => { return Err(err); }
                         };
@@ -449,7 +446,7 @@ pub fn parse_functions(code: &str, code_length: usize, current_position: &mut us
                     }
                 }
 
-                let return_type_info = match parse_type_info(&captures[6], current_line, const_value_list) {
+                let return_type_info = match parse_type_info(&captures[5], current_line, const_value_list) {
                     Ok(info) => info,
                     Err(err) => { return Err(err); }
                 };
@@ -459,12 +456,10 @@ pub fn parse_functions(code: &str, code_length: usize, current_position: &mut us
                     Err(err) => { return Err(err); }
                 };
 
-                function_list.push(Function { name, register_length, variable_length, argument_type_info_list, return_type_info, label_block_list })
+                function_map.insert(name.clone(), Function { name, register_length, variable_length, argument_type_info_list, argument_type_list: Vec::new(), return_type_info, return_type: Type::I8, label_block_list })
             },
             _ => { return Err(ByteCodeParseError::ParseFunctionInfoError(current_line, line.clone())); }
-        }
-
-        current_index += 1;
+        };
     }
 }
 
@@ -820,6 +815,7 @@ pub fn parse_primitive_type(code: &str, line: usize) -> Result<Type, ByteCodePar
         "u64" => Ok(Type::U64),
         "f32" => Ok(Type::F32),
         "f64" => Ok(Type::F64),
+        "void" => Ok(Type::Void),
         _ => Err(ByteCodeParseError::PrimitiveTypeParseError(line, code.to_string()))
     }
 }
@@ -880,23 +876,66 @@ pub fn parse_using_type_info(code: &str, line: usize, using_type_list: &Vec<Type
     let info_reg = Regex::new(r"type#(\d+)").unwrap();
     let using_type_index = match info_reg.captures(code) {
         Some(captures) => {
-            match (&captures[1]).parse::<usize>() {
+            match parse_using_type_index(&captures[1], code, line) {
                 Ok(index) => index,
-                Err(_) => { return Err(ByteCodeParseError::UsingTypeIndexParseError(line, code.to_string())); }
+                Err(err) => { return Err(err); }
             }
         },
         _ => {
-            match code.parse::<usize>() {
+            match parse_using_type_index(code, code, line) {
                 Ok(index) => index,
-                Err(_) => { return Err(ByteCodeParseError::UsingTypeIndexParseError(line, code.to_string())); }
+                Err(err) => { return Err(err); }
             }
         }
     };
-    let type_info = match using_type_list.get(using_type_index) {
-        Some(info) => (*info).clone(),
-        _ => { return Err(ByteCodeParseError::UsingTypeIndexParseError(line, code.to_string())); }
+    let type_info = match get_using_type_info(code, using_type_list, using_type_index, line) {
+        Ok(info) => info,
+        Err(err) => { return Err(err); }
     };
     return Ok(type_info);
+}
+
+pub fn parse_argument_type_info(code: &str, line: usize, using_type_list: &Vec<TypeInfo>) -> Result<ArgumentTypeInfo, ByteCodeParseError> {
+    let ref_reg = Regex::new(r"ref#(\d+)").unwrap();
+
+    let mut is_reference = false;
+
+    let type_info = match ref_reg.captures(code) {
+        Some(captures) => {
+            let index = match parse_using_type_index(&captures[1], code, line) {
+                Ok(index) => index,
+                Err(err) => { return Err(err); }
+            };
+            is_reference = true;
+
+            match get_using_type_info(code, using_type_list, index, line) {
+                Ok(info) => info,
+                Err(err) => { return Err(err); }
+            }
+        },
+        _ => {
+            match parse_using_type_info(code, line, using_type_list) {
+                Ok(type_info) => type_info,
+                Err(err) => { return Err(err); }
+            }
+        }
+    };
+
+    return Ok(ArgumentTypeInfo { type_info, is_reference })
+}
+
+pub fn parse_using_type_index(code: &str, line_code: &str, line: usize) -> Result<usize, ByteCodeParseError> {
+    return match code.parse::<usize>() {
+        Ok(index) => Ok(index),
+        Err(_) => Err(ByteCodeParseError::UsingTypeIndexParseError(line, line_code.to_string()))
+    };
+}
+
+pub fn get_using_type_info(code: &str, using_type_list: &Vec<TypeInfo>, using_type_index: usize, line: usize) -> Result<TypeInfo, ByteCodeParseError> {
+    return match using_type_list.get(using_type_index) {
+        Some(info) => Ok((*info).clone()),
+        _ => Err(ByteCodeParseError::UsingTypeIndexParseError(line, code.to_string()))
+    }
 }
 
 

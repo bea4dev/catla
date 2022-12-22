@@ -16,7 +16,7 @@ impl ReturnOrder {
 }
 
 impl Order for ReturnOrder {
-    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &mut Vec<u64>) {
+    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &Vec<u64>) {
         unsafe {
             let function = (*vm_thread).current_function;
             registers[(*function).register_length] = registers[self.get_register_index];

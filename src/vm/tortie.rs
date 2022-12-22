@@ -1,10 +1,13 @@
+use std::borrow::BorrowMut;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::ptr::null_mut;
 use std::sync::RwLock;
 use crate::{CycleCollector, HeapAllocator, HeapObject, ObjectType, parse_module, SpinLock};
-use crate::vm::module::function::Function;
-use crate::vm::module::parser::ByteCodeParseError;
+use crate::vm::module::function::{Function, FunctionLabelBlock};
+use crate::vm::module::object_type;
+use crate::vm::module::object_type::Type;
+use crate::vm::module::parser::{ArgumentTypeInfo, ByteCodeParseError, TypeInfo};
 use crate::vm::module::vm_module::Module;
 
 #[repr(C)]
@@ -12,7 +15,7 @@ pub struct TortieVM {
     pub threads: Vec<*mut VMThread>,
     pub thread_list_lock: SpinLock,
     cycle_collector: *mut CycleCollector,
-    pub module_map: RwLock<HashMap<String, *mut Module>>
+    module_map: RwLock<HashMap<String, *mut Module>>
 }
 
 #[repr(C)]
@@ -23,7 +26,8 @@ pub struct VMThread {
     pub suspected_cycle_objects: HashSet<*mut HeapObject>,
     pub object_set_lock: SpinLock,
     pub current_function: *mut Function,
-    pub is_return_function: bool
+    pub is_return_function: bool,
+    pub current_label_block: *mut FunctionLabelBlock
 }
 
 
@@ -50,51 +54,246 @@ impl TortieVM {
     }
 
     #[inline(always)]
-    pub fn get_cycle_collector(&self) -> *mut CycleCollector {
-        return self.cycle_collector;
+    pub fn get_cycle_collector(&self) -> *mut CycleCollector { return self.cycle_collector; }
+
+    pub fn get_module(&self, name: String) -> Option<*mut Module> {
+        let mut module_map = self.module_map.read().unwrap();
+        return match module_map.get(&name) {
+            Some(module) => Some(*module),
+            _ => None
+        }
     }
 
-    pub fn pre_load_module(&mut self, name: String, code: String) -> Result<(), VMError> {
+    pub fn pre_load_module(&mut self, name: String, code: String) -> Result<(), ModuleLoadError> {
         let module = match parse_module(code.as_str()) {
             Ok(module) => module,
-            Err(err) => { return Err(VMError::ModulePreLoadError(err)); }
+            Err(err) => { return Err(ModuleLoadError::ModulePreLoadError(err)); }
         };
         self.module_map.write().unwrap().insert(name, Box::into_raw(Box::new(module)));
         return Ok(());
     }
 
-    pub fn load_module(&mut self, name: String) -> Result<(), VMError> {
+    pub fn load_module(&mut self, name: String) -> Result<(), ModuleLoadError> {
         unsafe {
+            let mut check_modules: Vec<*mut Module> = Vec::new();
+            let mut uninitialized_modules: HashSet<*mut Module> = HashSet::new();
             let mut module_map = self.module_map.write().unwrap();
-            let module = match module_map.get(&name) {
+            let mut current_module = *match module_map.get(&name) {
                 Some(module) => module,
-                _ => { return Err(VMError::ModuleNotFoundError(name.clone())); }
+                _ => { return Err(ModuleLoadError::ModuleNotFoundError(name.clone())); }
             };
 
-            let mut uninitialized_module_list: Vec<*mut Module> = Vec::new();
+            loop {
+                uninitialized_modules.insert(current_module);
 
-            for import_module_name in (**module).import_module_name_list.iter() {
-                let import_module = match module_map.get(import_module_name) {
-                    Some(module) => module,
-                    _ => { return Err(VMError::ModuleHasNotBeenLoadedError(import_module_name.clone())); }
-                };
-                if !(**import_module).is_initialized {
-                    uninitialized_module_list.push(*import_module);
+                for import_module_name in (*current_module).import_module_name_list.iter() {
+                    let import_module = if import_module_name.as_str() == "this" {
+                        current_module
+                    } else {
+                        match module_map.get(import_module_name) {
+                            Some(module) => *module,
+                            _ => { return Err(ModuleLoadError::ModuleHasNotBeenLoadedError(import_module_name.clone())); }
+                        }
+                    };
+                    if !(*import_module).is_initialized {
+                        check_modules.push(import_module);
+                        (*import_module).is_initialized = true;
+                    }
+                    (*current_module).import_module_list.push(import_module);
                 }
-                (**module).import_module_list.push(*import_module);
+
+                for defined_type in (*current_module).defined_type_info_list.iter() {
+                    let object_type = ObjectType::new((*defined_type).clone());
+                    (*current_module).defined_type_map.insert(defined_type.type_name.clone(), object_type);
+                }
+
+                current_module = match check_modules.pop() {
+                    Some(module) => module,
+                    _ => { break }
+                };
             }
 
-            for defined_type in (**module).defined_type_info_list.iter() {
-                let object_type = ObjectType::new((*defined_type).clone());
-                (**module).defined_type_list.push(object_type);
+            for module in &uninitialized_modules {
+                let module = *module;
+                for defined_type in (*module).defined_type_map.values() {
+                    let defined_type = *defined_type;
+                    match (*defined_type).extends_type_info.clone() {
+                        Some(info) => {
+                            match info {
+                                TypeInfo::DefinedType {import_module_index, type_name} => {
+                                    let object_type = match get_defined_type(module, import_module_index, &type_name) {
+                                        Ok(object_type) => object_type,
+                                        Err(err) => { return Err(err); }
+                                    };
+                                    (*defined_type).extends_type = object_type;
+                                },
+                                TypeInfo::PrimitiveType {primitive_type} => {}
+                            }
+                        },
+                        _ => {}
+                    }
+
+                    for field_info in (*defined_type).field_info_map.values() {
+                        let field_name = field_info.field_name.clone();
+                        let field_type = match &field_info.type_info {
+                            TypeInfo::DefinedType {import_module_index, type_name} => {
+                                let object_type = match get_defined_type(module, *import_module_index, type_name) {
+                                    Ok(object_type) => object_type,
+                                    Err(err) => { return Err(err); }
+                                };
+                                Type::ObjectReference(object_type)
+                            },
+                            TypeInfo::PrimitiveType {primitive_type} => {
+                                (*primitive_type).clone()
+                            }
+                        };
+                        (*defined_type).field_map.insert(field_name, field_type);
+                    }
+                }
             }
 
+            for module in &uninitialized_modules {
+                let module = *module;
+                for using_type_info in (*module).using_type_info_list.iter() {
+                    let using_type_info = using_type_info.clone();
+                    match using_type_info {
+                        TypeInfo::DefinedType {import_module_index, type_name} => {
+                            let object_type = match get_defined_type(module, import_module_index, &type_name) {
+                                Ok(object_type) => object_type,
+                                Err(err) => { return Err(err); }
+                            };
+                            (*module).using_type_list.push(object_type);
+                        },
+                        TypeInfo::PrimitiveType {primitive_type} => {}
+                    }
+                }
+            }
 
+            for module in &uninitialized_modules {
+                let module = *module;
+                for function in (*module).function_map.values_mut() {
+                    let return_type_info = &function.return_type_info;
+                    let return_type = match get_type(module, return_type_info) {
+                        Ok(object_type) => object_type,
+                        Err(err) => { return Err(err); }
+                    };
+                    function.return_type = return_type;
+                }
+
+                for function in (*module).function_map.values_mut() {
+                    for argument_type_info in function.argument_type_info_list.iter() {
+                        let argument_type = match get_argument_type(module, argument_type_info) {
+                            Ok(object_type) => object_type,
+                            Err(err) => { return Err(err); }
+                        };
+                        function.argument_type_list.push(argument_type);
+                    }
+                }
+            }
+
+            for module in &uninitialized_modules {
+                let module = *module;
+                for function in (*module).function_map.values_mut() {
+                    let function = function as *mut Function;
+                    for label_block in (*function).label_block_list.iter_mut() {
+                        for order in label_block.order_list.iter_mut() {
+                            order.link(module, function);
+                        }
+                    }
+                }
+            }
 
             return Ok(());
         }
     }
 
+    pub fn run_function(&mut self, module_name: &String, function_name: &String, arguments: &Vec<u64>) -> u64 {
+        unsafe {
+            let vm_thread = self.create_thread(1024);
+            let module = self.get_module(module_name.clone()).unwrap();
+            let function = (*module).get_function_ptr(function_name).unwrap();
+
+            let mut registers: Vec<u64> = Vec::with_capacity((*function).register_length + 1);
+            let mut variables: Vec<u64> = Vec::with_capacity((*function).variable_length);
+
+            for i in 0..((*function).register_length + 1) {
+                registers.push(0);
+            }
+            for i in 0..(*function).variable_length {
+                variables.push(0);
+            }
+
+            (*vm_thread).current_function = function;
+            (*vm_thread).is_return_function = false;
+
+            let first_label_block = match (*function).label_block_list.get_mut(0) {
+                Some(label_block) => label_block,
+                _ => { return 0; }
+            };
+            (*vm_thread).current_label_block = first_label_block as *mut FunctionLabelBlock;
+
+            loop {
+                for order in (*(*vm_thread).current_label_block).order_list.iter() {
+                    order.eval(vm_thread, module, &mut registers, &mut variables, arguments);
+                }
+
+                if (*vm_thread).current_label_block == null_mut() || (*vm_thread).is_return_function {
+                    break;
+                }
+            }
+
+            return registers[(*function).register_length];
+        }
+    }
+
+}
+
+#[inline(always)]
+unsafe fn get_defined_type(module: *mut Module, import_module_index: usize, type_name: &String) -> Result<*mut ObjectType, ModuleLoadError> {
+    let module = *match (*module).import_module_list.get(import_module_index) {
+        Some(module) => module,
+        _ => { return Err(ModuleLoadError::ModuleNotFoundError(import_module_index.to_string())); }
+    };
+    let object_type = *match (*module).defined_type_map.get(type_name) {
+        Some(object_type) => object_type,
+        _ => { return Err(ModuleLoadError::DefinedTypeNotFoundError((*type_name).clone())); }
+    };
+    return Ok(object_type);
+}
+
+#[inline(always)]
+unsafe fn get_type(module: *mut Module, type_info: &TypeInfo) -> Result<Type, ModuleLoadError> {
+    return match type_info {
+        TypeInfo::DefinedType {import_module_index, type_name} => {
+            let object_type = match get_defined_type(module, *import_module_index, type_name) {
+                Ok(object_type) => object_type,
+                Err(err) => { return Err(err); }
+            };
+            Ok(Type::ObjectReference(object_type))
+        },
+        TypeInfo::PrimitiveType {primitive_type} => Ok(primitive_type.clone())
+    };
+}
+
+#[inline(always)]
+unsafe fn get_argument_type(module: *mut Module, type_info: &ArgumentTypeInfo) -> Result<Type, ModuleLoadError> {
+    let is_reference = type_info.is_reference;
+    let type_info = &type_info.type_info;
+
+    return match type_info {
+        TypeInfo::DefinedType {import_module_index, type_name} => {
+            let object_type = match get_defined_type(module, *import_module_index, type_name) {
+                Ok(object_type) => object_type,
+                Err(err) => { return Err(err); }
+            };
+            if is_reference {
+                Ok(Type::ObjectReferenceReference(object_type))
+            } else {
+                Ok(Type::ObjectReference(object_type))
+            }
+        },
+        TypeInfo::PrimitiveType {primitive_type} => Ok(primitive_type.clone())
+    };
 }
 
 
@@ -108,7 +307,8 @@ impl VMThread {
             suspected_cycle_objects: HashSet::new(),
             object_set_lock: SpinLock::new(),
             current_function: null_mut(),
-            is_return_function: false
+            is_return_function: false,
+            current_label_block: null_mut()
         });
         return Box::into_raw(boxed);
     }
@@ -133,20 +333,22 @@ impl VMThread {
 
 
 #[derive(Debug)]
-pub enum VMError {
+pub enum ModuleLoadError {
     ModulePreLoadError(ByteCodeParseError),
     ModuleNotFoundError(String),
-    ModuleHasNotBeenLoadedError(String)
+    ModuleHasNotBeenLoadedError(String),
+    DefinedTypeNotFoundError(String),
 }
 
-impl Display for VMError {
+impl Display for ModuleLoadError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let error_string = match self {
-            VMError::ModulePreLoadError(err) => format!("ModuleLoadError\n{}", err),
-            VMError::ModuleNotFoundError(name) => format!("ModuleNotFoundError | '{}' is not found.", name),
-            VMError::ModuleHasNotBeenLoadedError(name) => format!("ModuleHasNotLoadedError| '{}' has not yet been loaded.", name)
+            ModuleLoadError::ModulePreLoadError(err) => format!("ModuleLoadError\n{}", err),
+            ModuleLoadError::ModuleNotFoundError(name) => format!("ModuleNotFoundError | '{}' is not found.", name),
+            ModuleLoadError::ModuleHasNotBeenLoadedError(name) => format!("ModuleHasNotBeenLoadedError | '{}' has not yet been loaded.", name),
+            ModuleLoadError::DefinedTypeNotFoundError(name) => format!("DefinedTypeNotFoundError | '{}' is not found.", name)
         };
 
-        return write!(f, "VMError | {}", error_string);
+        return write!(f, "ModuleLoadError | {}", error_string);
     }
 }

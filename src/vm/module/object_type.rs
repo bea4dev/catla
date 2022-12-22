@@ -40,7 +40,9 @@ pub enum Type {
     U64,
     F32,
     F64,
-    ObjectReference(*mut ObjectType)
+    Void,
+    ObjectReference(*mut ObjectType),
+    ObjectReferenceReference(*mut ObjectType)
 }
 
 impl Type {
@@ -57,4 +59,10 @@ impl Type {
             _ => false
         }
     }
+}
+
+
+pub struct Field {
+    pub field_name: String,
+    pub field_type: Type
 }

@@ -4,7 +4,7 @@ use crate::VMThread;
 
 pub trait Order {
 
-    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &mut Vec<u64>);
+    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &Vec<u64>);
 
     fn link(&mut self, module: *mut Module, function: *mut Function);
 

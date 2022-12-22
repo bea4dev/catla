@@ -18,8 +18,8 @@ impl SetVariableOrder {
 }
 
 impl Order for SetVariableOrder {
-    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &mut Vec<u64>) {
-        arguments[self.target_variable_index] = registers[self.get_register_index];
+    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &Vec<u64>) {
+        variables[self.target_variable_index] = registers[self.get_register_index];
     }
 
     fn link(&mut self, module: *mut Module, function: *mut Function) {/*None*/}

@@ -20,7 +20,7 @@ impl GetArgumentOrder {
 }
 
 impl Order for GetArgumentOrder {
-    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &mut Vec<u64>) {
+    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &Vec<u64>) {
         registers[self.target_index] = arguments[self.argument_index];
     }
 
@@ -48,7 +48,7 @@ impl GetConstValueOrder {
 }
 
 impl Order for GetConstValueOrder {
-    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &mut Vec<u64>) {
+    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &Vec<u64>) {
         registers[self.target_index] = self.const_value_bits;
     }
 

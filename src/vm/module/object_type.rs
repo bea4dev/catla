@@ -41,8 +41,7 @@ pub enum Type {
     F32,
     F64,
     Void,
-    ObjectReference(*mut ObjectType),
-    ObjectReferenceReference(*mut ObjectType)
+    ObjectReference(*mut ObjectType, bool)
 }
 
 impl Type {

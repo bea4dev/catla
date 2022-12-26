@@ -1,6 +1,7 @@
 use std::borrow::BorrowMut;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
+use std::{env, panic};
 use std::ptr::null_mut;
 use std::sync::RwLock;
 use crate::{CycleCollector, HeapAllocator, HeapObject, ObjectType, parse_module, SpinLock};
@@ -9,6 +10,7 @@ use crate::vm::module::object_type;
 use crate::vm::module::object_type::Type;
 use crate::vm::module::parser::{ArgumentTypeInfo, ByteCodeParseError, TypeInfo};
 use crate::vm::module::vm_module::Module;
+use crate::vm::runtime::error::RuntimeException;
 
 #[repr(C)]
 pub struct TortieVM {
@@ -23,6 +25,7 @@ pub struct VMThread {
     virtual_machine: *mut TortieVM,
     stack_size: usize,
     heap_allocator: *mut HeapAllocator,
+    pub runtime_exception: *mut RuntimeException,
     pub suspected_cycle_objects: HashSet<*mut HeapObject>,
     pub object_set_lock: SpinLock,
     pub current_function: *mut Function,
@@ -41,7 +44,10 @@ impl TortieVM {
             module_map: RwLock::new(HashMap::new())
         };
         let vm_ptr = Box::into_raw(Box::new(virtual_machine));
-        (&mut *vm_ptr).cycle_collector = CycleCollector::new(vm_ptr);
+        (*vm_ptr).cycle_collector = CycleCollector::new(vm_ptr);
+
+        add_custom_panic_hook();
+
         return vm_ptr;
     }
 
@@ -141,7 +147,7 @@ impl TortieVM {
                                     Ok(object_type) => object_type,
                                     Err(err) => { return Err(err); }
                                 };
-                                Type::ObjectReference(object_type)
+                                Type::ObjectReference(object_type, false)
                             },
                             TypeInfo::PrimitiveType {primitive_type} => {
                                 (*primitive_type).clone()
@@ -235,6 +241,10 @@ impl TortieVM {
             loop {
                 for order in (*(*vm_thread).current_label_block).order_list.iter() {
                     order.eval(vm_thread, module, &mut registers, &mut variables, arguments);
+
+                    if (*vm_thread).runtime_exception != null_mut() {
+                        break;
+                    }
                 }
 
                 if (*vm_thread).current_label_block == null_mut() || (*vm_thread).is_return_function {
@@ -269,7 +279,7 @@ unsafe fn get_type(module: *mut Module, type_info: &TypeInfo) -> Result<Type, Mo
                 Ok(object_type) => object_type,
                 Err(err) => { return Err(err); }
             };
-            Ok(Type::ObjectReference(object_type))
+            Ok(Type::ObjectReference(object_type, false))
         },
         TypeInfo::PrimitiveType {primitive_type} => Ok(primitive_type.clone())
     };
@@ -277,7 +287,7 @@ unsafe fn get_type(module: *mut Module, type_info: &TypeInfo) -> Result<Type, Mo
 
 #[inline(always)]
 unsafe fn get_argument_type(module: *mut Module, type_info: &ArgumentTypeInfo) -> Result<Type, ModuleLoadError> {
-    let is_reference = type_info.is_reference;
+    let is_local_object = type_info.is_local_object;
     let type_info = &type_info.type_info;
 
     return match type_info {
@@ -286,14 +296,27 @@ unsafe fn get_argument_type(module: *mut Module, type_info: &ArgumentTypeInfo) -
                 Ok(object_type) => object_type,
                 Err(err) => { return Err(err); }
             };
-            if is_reference {
-                Ok(Type::ObjectReferenceReference(object_type))
-            } else {
-                Ok(Type::ObjectReference(object_type))
-            }
+            Ok(Type::ObjectReference(object_type, is_local_object))
         },
         TypeInfo::PrimitiveType {primitive_type} => Ok(primitive_type.clone())
     };
+}
+
+
+#[inline(always)]
+fn add_custom_panic_hook() {
+    env::set_var("RUST_BACKTRACE", "1");
+
+    let default_hook = panic::take_hook();
+
+    panic::set_hook(Box::new(move |panic_info| {
+        let header = "!!!!!!!!!! VM Panic !!!!!!!!!!\
+        A fatal error has occurred.\
+        ".to_string();
+
+        eprintln!("{}\n{:?}", header, panic_info);
+        default_hook(panic_info);
+    }));
 }
 
 

@@ -40,7 +40,7 @@ pub struct TypeDefineInfo {
 #[derive(Clone)]
 pub struct ArgumentTypeInfo {
     pub type_info: TypeInfo,
-    pub is_reference: bool
+    pub is_local_object: bool
 }
 
 
@@ -898,7 +898,7 @@ pub fn parse_using_type_info(code: &str, line: usize, using_type_list: &Vec<Type
 pub fn parse_argument_type_info(code: &str, line: usize, using_type_list: &Vec<TypeInfo>) -> Result<ArgumentTypeInfo, ByteCodeParseError> {
     let ref_reg = Regex::new(r"ref#(\d+)").unwrap();
 
-    let mut is_reference = false;
+    let mut is_local_object = false;
 
     let type_info = match ref_reg.captures(code) {
         Some(captures) => {
@@ -906,7 +906,7 @@ pub fn parse_argument_type_info(code: &str, line: usize, using_type_list: &Vec<T
                 Ok(index) => index,
                 Err(err) => { return Err(err); }
             };
-            is_reference = true;
+            is_local_object = true;
 
             match get_using_type_info(code, using_type_list, index, line) {
                 Ok(info) => info,
@@ -921,7 +921,7 @@ pub fn parse_argument_type_info(code: &str, line: usize, using_type_list: &Vec<T
         }
     };
 
-    return Ok(ArgumentTypeInfo { type_info, is_reference })
+    return Ok(ArgumentTypeInfo { type_info, is_local_object })
 }
 
 pub fn parse_using_type_index(code: &str, line_code: &str, line: usize) -> Result<usize, ByteCodeParseError> {

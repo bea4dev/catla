@@ -327,6 +327,7 @@ impl VMThread {
             virtual_machine,
             stack_size,
             heap_allocator: HeapAllocator::new(virtual_machine, 1024, 1),
+            runtime_exception: null_mut(),
             suspected_cycle_objects: HashSet::new(),
             object_set_lock: SpinLock::new(),
             current_function: null_mut(),

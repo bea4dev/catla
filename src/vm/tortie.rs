@@ -1,16 +1,18 @@
-use std::borrow::BorrowMut;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::{env, panic};
-use std::ptr::null_mut;
+use std::ffi::c_void;
+use std::ops::{Index, IndexMut};
+use std::ptr::{null_mut};
 use std::sync::RwLock;
 use crate::{CycleCollector, HeapAllocator, HeapObject, ObjectType, parse_module, SpinLock};
+use crate::cxx::wrapper::{create_jump_buffer_wrapped, run_function_for_set_jump_branch};
 use crate::vm::module::function::{Function, FunctionLabelBlock};
-use crate::vm::module::object_type;
 use crate::vm::module::object_type::Type;
 use crate::vm::module::parser::{ArgumentTypeInfo, ByteCodeParseError, TypeInfo};
 use crate::vm::module::vm_module::Module;
-use crate::vm::runtime::error::RuntimeException;
+use crate::vm::runtime::error::RuntimeError;
+
 
 #[repr(C)]
 pub struct TortieVM {
@@ -20,24 +22,78 @@ pub struct TortieVM {
     module_map: RwLock<HashMap<String, *mut Module>>
 }
 
+
 #[repr(C)]
 pub struct VMThread {
     virtual_machine: *mut TortieVM,
     stack_size: usize,
     heap_allocator: *mut HeapAllocator,
-    pub runtime_exception: *mut RuntimeException,
+    pub runtime_exception: *mut RuntimeError,
+    pub jump_buffer_stack: Vec<*mut c_void>,
     pub suspected_cycle_objects: HashSet<*mut HeapObject>,
     pub object_set_lock: SpinLock,
     pub current_function: *mut Function,
     pub is_return_function: bool,
-    pub current_label_block: *mut FunctionLabelBlock
+    pub current_label_block: *mut FunctionLabelBlock,
+    pub registers: *mut StackedVec<u64>,
+    pub variables: *mut StackedVec<u64>,
+    pub arguments: *mut StackedVec<u64>
+}
+
+#[no_mangle]
+unsafe extern "C" fn add_jump_buffer(vm_thread: *mut VMThread) -> *mut c_void {
+    let jump_buffer = create_jump_buffer_wrapped();
+    (*vm_thread).jump_buffer_stack.push(jump_buffer);
+    return jump_buffer;
+}
+
+
+pub struct StackedVec<T> {
+    pub vec_stack: Vec<Vec<T>>,
+}
+
+impl<T> Index<usize> for StackedVec<T> {
+    type Output = Vec<T>;
+    fn index(&self, index: usize) -> &Self::Output {
+        return &self.vec_stack[index];
+    }
+}
+
+impl<T> IndexMut<usize> for StackedVec<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        return &mut self.vec_stack[index];
+    }
+}
+
+impl<T: Copy> StackedVec<T> {
+    pub fn new() -> Self {
+        let instance: StackedVec<T> = Self {
+            vec_stack: Vec::new()
+        };
+        return instance;
+    }
+
+    pub fn push(&mut self, size: usize, default: T) -> &mut Vec<T> {
+        let mut inr: Vec<T> = Vec::with_capacity(size);
+        for _ in 0..size {
+            inr.push(default);
+        }
+        self.vec_stack.push(inr);
+
+        let length = self.vec_stack.len();
+        return &mut self.vec_stack[length - 1];
+    }
+
+    pub fn pop(&mut self) {
+        self.vec_stack.pop();
+    }
 }
 
 
 impl TortieVM {
 
     pub unsafe fn new() -> *mut TortieVM {
-        let mut virtual_machine = Self {
+        let virtual_machine = Self {
             threads: Vec::new(),
             thread_list_lock: SpinLock::new(),
             cycle_collector: null_mut(),
@@ -63,7 +119,7 @@ impl TortieVM {
     pub fn get_cycle_collector(&self) -> *mut CycleCollector { return self.cycle_collector; }
 
     pub fn get_module(&self, name: String) -> Option<*mut Module> {
-        let mut module_map = self.module_map.read().unwrap();
+        let module_map = self.module_map.read().unwrap();
         return match module_map.get(&name) {
             Some(module) => Some(*module),
             _ => None
@@ -71,7 +127,7 @@ impl TortieVM {
     }
 
     pub fn pre_load_module(&mut self, name: String, code: String) -> Result<(), ModuleLoadError> {
-        let module = match parse_module(code.as_str()) {
+        let module = match parse_module(name.clone(), code.as_str()) {
             Ok(module) => module,
             Err(err) => { return Err(ModuleLoadError::ModulePreLoadError(err)); }
         };
@@ -83,7 +139,7 @@ impl TortieVM {
         unsafe {
             let mut check_modules: Vec<*mut Module> = Vec::new();
             let mut uninitialized_modules: HashSet<*mut Module> = HashSet::new();
-            let mut module_map = self.module_map.write().unwrap();
+            let module_map = self.module_map.write().unwrap();
             let mut current_module = *match module_map.get(&name) {
                 Some(module) => module,
                 _ => { return Err(ModuleLoadError::ModuleNotFoundError(name.clone())); }
@@ -133,7 +189,7 @@ impl TortieVM {
                                     };
                                     (*defined_type).extends_type = object_type;
                                 },
-                                TypeInfo::PrimitiveType {primitive_type} => {}
+                                TypeInfo::PrimitiveType {primitive_type: _} => {}
                             }
                         },
                         _ => {}
@@ -170,7 +226,7 @@ impl TortieVM {
                             };
                             (*module).using_type_list.push(object_type);
                         },
-                        TypeInfo::PrimitiveType {primitive_type} => {}
+                        TypeInfo::PrimitiveType {primitive_type: _} => {}
                     }
                 }
             }
@@ -213,50 +269,57 @@ impl TortieVM {
         }
     }
 
-    pub fn run_function(&mut self, module_name: &String, function_name: &String, arguments: &Vec<u64>) -> u64 {
+    pub fn run_function(&mut self, module_name: &String, function_name: &String, arguments: &Vec<u64>) -> Result<u64, RuntimeError> {
         unsafe {
             let vm_thread = self.create_thread(1024);
             let module = self.get_module(module_name.clone()).unwrap();
             let function = (*module).get_function_ptr(function_name).unwrap();
 
-            let mut registers: Vec<u64> = Vec::with_capacity((*function).register_length + 1);
-            let mut variables: Vec<u64> = Vec::with_capacity((*function).variable_length);
+            let result = run_function_for_set_jump_branch(vm_thread, module, function, arguments, function, arguments);
 
-            for i in 0..((*function).register_length + 1) {
-                registers.push(0);
-            }
-            for i in 0..(*function).variable_length {
-                variables.push(0);
-            }
-
-            (*vm_thread).current_function = function;
-            (*vm_thread).is_return_function = false;
-
-            let first_label_block = match (*function).label_block_list.get_mut(0) {
-                Some(label_block) => label_block,
-                _ => { return 0; }
-            };
-            (*vm_thread).current_label_block = first_label_block as *mut FunctionLabelBlock;
-
-            loop {
-                for order in (*(*vm_thread).current_label_block).order_list.iter() {
-                    order.eval(vm_thread, module, &mut registers, &mut variables, arguments);
-
-                    if (*vm_thread).runtime_exception != null_mut() {
-                        break;
-                    }
-                }
-
-                if (*vm_thread).current_label_block == null_mut() || (*vm_thread).is_return_function {
-                    break;
-                }
-            }
-
-            return registers[(*function).register_length];
+            return Ok(result);
         }
     }
 
 }
+
+
+#[no_mangle]
+pub unsafe extern "C" fn run_function(vm_thread: *mut VMThread, module: *mut Module, function: *mut Function, arguments: *const Vec<u64>) -> u64 {
+    let registers: &mut Vec<u64> = (*(*vm_thread).registers).push((*function).register_length + 1, 0);
+    let variables: &mut Vec<u64> = (*(*vm_thread).variables).push((*function).variable_length, 0);
+
+    (*vm_thread).current_function = function;
+    (*vm_thread).is_return_function = false;
+
+    let first_label_block = match (*function).label_block_list.get_mut(0) {
+        Some(label_block) => label_block,
+        _ => { return 0; }
+    };
+    (*vm_thread).current_label_block = first_label_block as *mut FunctionLabelBlock;
+
+
+    let order_list = &mut (*(*vm_thread).current_label_block).order_list;
+
+    loop {
+        for i in 0..order_list.len() {
+            let order = &order_list[i];
+            order.eval(vm_thread, module, registers, variables, &*arguments);
+
+            if (*vm_thread).runtime_exception != null_mut() {
+                break;
+            }
+        }
+
+        if (*vm_thread).current_label_block == null_mut() || (*vm_thread).is_return_function {
+            break;
+        }
+    }
+
+    return registers[(*function).register_length];
+}
+
+
 
 #[inline(always)]
 unsafe fn get_defined_type(module: *mut Module, import_module_index: usize, type_name: &String) -> Result<*mut ObjectType, ModuleLoadError> {
@@ -328,11 +391,15 @@ impl VMThread {
             stack_size,
             heap_allocator: HeapAllocator::new(virtual_machine, 1024, 1),
             runtime_exception: null_mut(),
+            jump_buffer_stack: Vec::new(),
             suspected_cycle_objects: HashSet::new(),
             object_set_lock: SpinLock::new(),
             current_function: null_mut(),
             is_return_function: false,
-            current_label_block: null_mut()
+            current_label_block: null_mut(),
+            registers: Box::into_raw(Box::new(StackedVec::new())),
+            variables: Box::into_raw(Box::new(StackedVec::new())),
+            arguments: Box::into_raw(Box::new(StackedVec::new()))
         });
         return Box::into_raw(boxed);
     }

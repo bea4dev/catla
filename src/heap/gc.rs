@@ -1,11 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::mem;
 use std::mem::swap;
-use std::ptr::{null, null_mut};
+use std::ptr::{null_mut};
 use std::sync::atomic::{fence, Ordering};
 use std::sync::Mutex;
-use libc::printf;
-use crate::{HeapObject, object_lock, object_unlock, SpinLock, VMThread};
+use crate::{HeapObject, object_lock, object_unlock, VMThread};
 use crate::heap::allocator::{OBJECT_STATE_DEAD, OBJECT_STATE_LIVE, OBJECT_STATE_WAITING_FOR_GC};
 use crate::vm::tortie::TortieVM;
 
@@ -33,7 +32,7 @@ impl CycleCollector {
 
     pub unsafe fn gc_collect(&mut self) {
         //Lock to limit single thread
-        let _ = self.collector_lock.lock().expect("Failed to lock.");
+        let _unused = self.collector_lock.lock().expect("Failed to lock.");
 
         //Get suspected objects
         let mut roots: HashSet<*mut HeapObject> = HashSet::new();

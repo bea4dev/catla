@@ -1,10 +1,8 @@
 use std::{hint, mem};
-use std::ptr::{null, null_mut};
+use std::ptr::{null_mut};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
-use crate::vm::module;
 use crate::vm::module::object_type::ObjectType;
 use crate::util::concurrent::SpinLock;
-use crate::vm;
 use crate::vm::tortie::TortieVM;
 
 
@@ -106,7 +104,7 @@ impl HeapAllocator {
             lock: SpinLock::new(),
             chunk_cells_size
         });
-        for i in 0..number_of_chunks {
+        for _ in 0..number_of_chunks {
             boxed.create_new_chunk(chunk_cells_size);
         }
         return Box::into_raw(boxed);
@@ -117,8 +115,8 @@ impl HeapAllocator {
                   field_length: usize, chunk_search_start_index: &mut usize) -> *mut HeapObject {
         let byte_size = mem::size_of::<HeapObject>() + (field_length << 3);
 
-        let mut index;
-        let mut block_size;
+        let index;
+        let block_size;
         if byte_size < BLOCK_SIZE8 {
             if byte_size <= BLOCK_SIZE0 {
                 index = 0;
@@ -132,7 +130,7 @@ impl HeapAllocator {
             }
             block_size = BLOCK_SIZE0 + (index << 3);
         } else if byte_size <= BLOCK_SIZE12 {
-            let mut index_temp;
+            let index_temp;
             if byte_size <= BLOCK_SIZE9 {
                 index_temp = 0;
             } else {
@@ -258,7 +256,7 @@ impl HeapChunk {
             let mut current_entry_index = block_info.current_position;
             let mut current_entry_ptr = block_entry_ptr + current_entry_index * block_size;
 
-            for i in 0..cells_size_ {
+            for _ in 0..cells_size_ {
                 let object = current_entry_ptr as *mut HeapObject;
                 if (*object).state.load(Ordering::Acquire) != OBJECT_STATE_DEAD {
                     current_entry_ptr += block_size;

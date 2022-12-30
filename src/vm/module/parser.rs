@@ -1,11 +1,7 @@
-use std::{num::{ParseIntError, ParseFloatError}, result};
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter, write};
-use std::ptr::null_mut;
+use std::fmt::{Debug, Display, Formatter};
 
 use regex::Regex;
-use crate::TortieVM;
 
 use crate::vm::module::const_value::ConstValue;
 use crate::vm::module::function::{Function, FunctionLabelBlock};
@@ -45,7 +41,7 @@ pub struct ArgumentTypeInfo {
 
 
 
-pub fn parse_module(code: &str) -> Result<Module, ByteCodeParseError> {
+pub fn parse_module(name: String, code: &str) -> Result<Module, ByteCodeParseError> {
     let code_length = code.chars().count();
     let mut current_position: usize = 0;
     let mut current_line_index: usize = 1;
@@ -59,7 +55,7 @@ pub fn parse_module(code: &str) -> Result<Module, ByteCodeParseError> {
     loop {
         let line = read_line(code, code_length, &mut current_position, &mut current_line_index);
         if current_position == code_length - 1 {
-            return Ok(Module { is_initialized: false, const_value_list, import_module_name_list, import_module_list: Vec::new(),
+            return Ok(Module { is_initialized: false, name, const_value_list, import_module_name_list, import_module_list: Vec::new(),
                 defined_type_info_list, defined_type_map: HashMap::new(), using_type_info_list, using_type_list: Vec::new(), function_map });
         }
         match line.as_str() {
@@ -291,9 +287,9 @@ pub fn parse_typedef(code: &str, code_length: usize, current_position: &mut usiz
             return Ok(type_define_list);
         }
 
-        let mut name_info: String;
-        let mut fields_info: String;
-        let mut extends_type_info: Option<TypeInfo>;
+        let name_info: String;
+        let fields_info: String;
+        let extends_type_info: Option<TypeInfo>;
         match has_extends_reg.captures(line.as_str()) {
             Some(captures) => {
                 name_info = (&captures[1]).to_string();
@@ -301,8 +297,8 @@ pub fn parse_typedef(code: &str, code_length: usize, current_position: &mut usiz
                 extends_type_info = Some(match parse_type_info(&captures[3], current_line, const_value_list) {
                     Ok(info) => {
                         match &info {
-                            TypeInfo::DefinedType { import_module_index, type_name } => info,
-                            TypeInfo::PrimitiveType { primitive_type } => { return Err(ByteCodeParseError::InvalidTypeDefineError(current_line, line.clone())); }
+                            TypeInfo::DefinedType { import_module_index: _, type_name: _ } => info,
+                            TypeInfo::PrimitiveType { primitive_type: _ } => { return Err(ByteCodeParseError::InvalidTypeDefineError(current_line, line.clone())); }
                         }
                     },
                     Err(err) => { return Err(err); }
@@ -451,7 +447,7 @@ pub fn parse_functions(code: &str, code_length: usize, current_position: &mut us
                     Err(err) => { return Err(err); }
                 };
 
-                let mut label_block_list: Vec<FunctionLabelBlock> = match parse_function_label_blocks(code, code_length, current_position, current_line_index, const_value_list) {
+                let label_block_list: Vec<FunctionLabelBlock> = match parse_function_label_blocks(code, code_length, current_position, current_line_index, const_value_list) {
                     Ok(list) => list,
                     Err(err) => { return Err(err); }
                 };
@@ -615,7 +611,7 @@ pub fn parse_register_assignment_right_order(code: &str, current_line: usize, ta
                                 _ => { return Err(ByteCodeParseError::GetConstTypeMismatchError(current_line, code.to_string())); }
                             }
                         },
-                        ConstValue::String(value) => {
+                        ConstValue::String(_) => {
                             return Err(ByteCodeParseError::GetConstTypeMismatchError(current_line, code.to_string()));
                         }
                     };

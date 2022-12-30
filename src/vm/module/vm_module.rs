@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use crate::{ObjectType, vm};
+use crate::{ObjectType};
 use crate::vm::module::const_value::ConstValue;
 use crate::vm::module::function::Function;
 use crate::vm::module::parser::{TypeDefineInfo, TypeInfo};
@@ -8,6 +7,7 @@ use crate::vm::module::parser::{TypeDefineInfo, TypeInfo};
 pub struct Module {
     pub is_initialized: bool,
 
+    pub name: String,
     pub const_value_list: Vec<ConstValue>,
     pub import_module_name_list: Vec<String>,
     pub import_module_list: Vec<*mut Module>,

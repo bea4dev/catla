@@ -2,15 +2,18 @@
 name = "catla"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [profile.release]
 panic = 'abort'
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[build-dependencies]
+cc = "1.0"
 
 [dependencies]
 libc = "0.2"
 num_cpus = "1.0"
 thiserror = "1.0"
 regex = "1.7.0"
-setjmp = "0.1.4"
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm14-0"] }
+threadpool = "1.8.1"

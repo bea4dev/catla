@@ -1,10 +1,8 @@
 use std::ptr::null_mut;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, fence, Ordering};
-use std::{mem, thread};
-use std::collections::HashSet;
-use std::thread::JoinHandle;
-use std::time::Instant;
-use crate::heap::allocator::{HeapAllocator, HeapObject, object_lock, OBJECT_STATE_DEAD, object_unlock};
+use std::{mem};
+use inkwell::context::Context;
+use inkwell::OptimizationLevel;
+use crate::heap::allocator::{HeapAllocator, HeapObject, object_lock, object_unlock};
 use crate::heap::gc::{CycleCollector, decrement_reference_count, increment_reference_count};
 use vm::module::object_type::ObjectType;
 use crate::util::concurrent::SpinLock;
@@ -14,6 +12,8 @@ use crate::vm::tortie::{TortieVM, VMThread};
 mod heap;
 mod vm;
 mod util;
+mod cxx;
+mod llvm;
 
 pub fn set_move_object_field(object: *mut HeapObject, field_index: usize, field_object: *mut HeapObject) {
     unsafe {
@@ -128,13 +128,14 @@ $end";
             Err(err) => panic!("{}", err)
         }
 
-        let vm_thread = (*virtual_machine).create_thread(1024);
-
         let arguments: Vec<u64> = vec![];
 
         let result = (*virtual_machine).run_function(&"test".to_string(), &"nyan".to_string(), &arguments);
 
-        println!("result = {}", result);
+        match result {
+            Ok(result) => println!("Result = {}", result),
+            Err(err) => println!("Error:\n{}", err)
+        }
 
     }
 

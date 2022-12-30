@@ -23,7 +23,7 @@ impl AddIntegerOrder {
 }
 
 impl Order for AddIntegerOrder {
-    fn eval(&self, vm_thread: *mut VMThread, module: *mut Module, registers: &mut Vec<u64>, variables: &mut Vec<u64>, arguments: &Vec<u64>) {
+    fn eval(&self, _: *mut VMThread, _: *mut Module, registers: &mut Vec<u64>, _: &mut Vec<u64>, _: &Vec<u64>) {
         let value: u64 = match &self.integer_type {
             Type::I8 => (registers[self.argument_register_left] as i8 + registers[self.argument_register_right] as i8) as u64,
             Type::I16 => (registers[self.argument_register_left] as i16 + registers[self.argument_register_right] as i16) as u64,
@@ -38,5 +38,5 @@ impl Order for AddIntegerOrder {
         registers[self.target_index] = value;
     }
 
-    fn link(&mut self, module: *mut Module, function: *mut Function) {/**/}
+    fn link(&mut self, _: *mut Module, _: *mut Function) {/**/}
 }

@@ -1,3 +1,6 @@
+use inkwell::builder::Builder;
+use inkwell::context::Context;
+use crate::llvm::compiler::{CompileError, LLVMValues};
 use crate::vm::module::function::Function;
 use crate::vm::module::order::orders::Order;
 use crate::vm::module::vm_module::Module;
@@ -25,4 +28,8 @@ impl Order for ReturnOrder {
     }
 
     fn link(&mut self, _: *mut Module, _: *mut Function) {/*None*/}
+
+    fn compile<'a>(self, module: &mut Module, function: &mut Function, context: &'a mut Context, builder: &'a mut Builder<'a>, llvm_module: &'a mut inkwell::module::Module<'a>, llvm_values: &'a mut LLVMValues<'a>) -> Result<(), CompileError> {
+        return Ok(());
+    }
 }

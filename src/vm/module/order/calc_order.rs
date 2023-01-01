@@ -43,24 +43,18 @@ impl Order for AddIntegerOrder {
 
     fn link(&mut self, _: *mut Module, _: *mut Function) {/**/}
 
-    fn compile<'a>(self, module: &mut Module, function: &mut Function, context: &'a mut Context, builder: &'a mut Builder<'a>, llvm_module: &'a mut inkwell::module::Module<'a>, llvm_values: &'a mut LLVMValues<'a>) -> Result<(), CompileError> {
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &'a Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
         let left = match llvm_values.get_int_value(self.argument_register_left) {
             Ok(value) => value,
-            Err(err) => { return Err(CompileError::RegisterNotFoundError(self.argument_register_left)); }
+            Err(err) => { return Err(err); }
         };
         let right = match llvm_values.get_int_value(self.argument_register_right) {
             Ok(value) => value,
-            Err(err) => { return Err(CompileError::RegisterNotFoundError(self.argument_register_right)); }
+            Err(err) => { return Err(err); }
         };
 
-        match &self.integer_type {
-            Type::I8 => {
-                let int_type = context.i8_type();
-                let value = builder.build_int_add(left, right, format!("reg{}", self.target_index).as_str());
-                llvm_values.insert_int_value(self.target_index, value);
-            },
-            _ => { return Err(CompileError::RegisterNotFoundError(0)); }
-        }
+        let value = builder.build_int_add(left, right, format!("reg{}", self.target_index).as_str());
+        llvm_values.insert_int_value(self.target_index, value);
 
         return Ok(());
     }

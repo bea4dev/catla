@@ -30,7 +30,7 @@ impl Order for GetArgumentOrder {
         //None
     }
 
-    fn compile<'a>(self, module: &mut Module, function: &mut Function, context: &'a mut Context, builder: &'a mut Builder<'a>, llvm_module: &'a mut inkwell::module::Module<'a>, llvm_values: &'a mut LLVMValues<'a>) -> Result<(), CompileError> {
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &'a Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
         return Ok(());
     }
 }
@@ -60,7 +60,21 @@ impl Order for GetConstValueOrder {
 
     fn link(&mut self, _: *mut Module, _: *mut Function) {/*None*/}
 
-    fn compile<'a>(self, module: &mut Module, function: &mut Function, context: &'a mut Context, builder: &'a mut Builder<'a>, llvm_module: &'a mut inkwell::module::Module<'a>, llvm_values: &'a mut LLVMValues<'a>) -> Result<(), CompileError> {
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &'a Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
+        let value = match &self.value_type {
+            Type::I8 => context.i8_type().const_int(self.const_value_bits, true),
+            Type::I16 => context.i16_type().const_int(self.const_value_bits, true),
+            Type::I32 => context.i32_type().const_int(self.const_value_bits, true),
+            Type::I64 => context.i64_type().const_int(self.const_value_bits, true),
+            Type::U8 => context.i8_type().const_int(self.const_value_bits, false),
+            Type::U16 => context.i16_type().const_int(self.const_value_bits, false),
+            Type::U32 => context.i32_type().const_int(self.const_value_bits, false),
+            Type::U64 => context.i64_type().const_int(self.const_value_bits, false),
+            _ => { return Err(CompileError::TypeMismatchError("integer".to_string(), "other".to_string())); }
+        };
+
+        llvm_values.insert_int_value(self.target_index, value);
+
         return Ok(());
     }
 }

@@ -11,8 +11,8 @@ pub trait Order {
 
     fn link(&mut self, module: *mut Module, function: *mut Function);
 
-    fn compile<'a>(self, module: &mut Module, function: &mut Function, context: &'a mut Context,
-               builder: &'a mut Builder<'a>, llvm_module: &'a mut inkwell::module::Module<'a>,
-               llvm_values: &'a mut LLVMValues<'a>) -> Result<(), CompileError>;
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context,
+               builder: &'a Builder<'a>, llvm_module: &inkwell::module::Module<'a>,
+               llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError>;
 
 }

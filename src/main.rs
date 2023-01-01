@@ -1,10 +1,12 @@
 use std::ptr::null_mut;
 use std::{mem};
+use std::mem::transmute_copy;
 use inkwell::context::Context;
 use inkwell::OptimizationLevel;
 use crate::heap::allocator::{HeapAllocator, HeapObject, object_lock, object_unlock};
 use crate::heap::gc::{CycleCollector, decrement_reference_count, increment_reference_count};
 use vm::module::object_type::ObjectType;
+use crate::llvm::compiler::compile_function;
 use crate::util::concurrent::SpinLock;
 use crate::vm::module::parser::parse_module;
 use crate::vm::tortie::{TortieVM, VMThread};
@@ -136,6 +138,21 @@ $end";
             Ok(result) => println!("Result = {}", result),
             Err(err) => println!("Error:\n{}", err)
         }
+
+        println!("Run JIT compile!");
+
+        let module = (*virtual_machine).get_module(&"test".to_string()).unwrap();
+        let function = (*module).get_function_ptr(&"nyan".to_string()).unwrap();
+        let function_address = match compile_function(module, function, OptimizationLevel::None) {
+            Ok(address) => address,
+            Err(err) => panic!("{}", err)
+        };
+
+        println!("OK!");
+
+        /*
+        let jit_function = transmute_copy::<usize, unsafe extern "C" fn() -> i64>(&function_address);
+        jit_function();*/
 
     }
 

@@ -660,6 +660,14 @@ pub fn parse_control_order(code: &str, current_line: usize) -> Result<Box<dyn Or
     let order_name = code_arguments[0];
 
     let order: Box<dyn Order> = match code_arguments.len() {
+        1 => {
+            match order_name {
+                "ret" => {
+                    Box::new(ReturnOrder::new(0, true))
+                },
+                _ => { return Err(ByteCodeParseError::InvalidOrderNameError(current_line, order_name.to_string())); }
+            }
+        }
         2 => {
             match order_name {
                 "ret" => {
@@ -667,7 +675,7 @@ pub fn parse_control_order(code: &str, current_line: usize) -> Result<Box<dyn Or
                         Ok(index) => index,
                         Err(err) => { return Err(err); }
                     };
-                    Box::new(ReturnOrder::new(get_register_index))
+                    Box::new(ReturnOrder::new(get_register_index, false))
                 },
                 _ => { return Err(ByteCodeParseError::InvalidOrderNameError(current_line, order_name.to_string())); }
             }

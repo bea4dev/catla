@@ -118,9 +118,9 @@ impl TortieVM {
     #[inline(always)]
     pub fn get_cycle_collector(&self) -> *mut CycleCollector { return self.cycle_collector; }
 
-    pub fn get_module(&self, name: String) -> Option<*mut Module> {
+    pub fn get_module(&self, name: &String) -> Option<*mut Module> {
         let module_map = self.module_map.read().unwrap();
-        return match module_map.get(&name) {
+        return match module_map.get(name) {
             Some(module) => Some(*module),
             _ => None
         }
@@ -272,7 +272,7 @@ impl TortieVM {
     pub fn run_function(&mut self, module_name: &String, function_name: &String, arguments: &Vec<u64>) -> Result<u64, RuntimeError> {
         unsafe {
             let vm_thread = self.create_thread(1024);
-            let module = self.get_module(module_name.clone()).unwrap();
+            let module = self.get_module(&module_name).unwrap();
             let function = (*module).get_function_ptr(function_name).unwrap();
 
             let result = run_function_for_set_jump_branch(vm_thread, module, function, arguments, function, arguments);

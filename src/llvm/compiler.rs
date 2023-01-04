@@ -4,7 +4,8 @@ use std::mem;
 use std::mem::transmute_copy;
 use inkwell::context::Context;
 use inkwell::{AddressSpace, OptimizationLevel};
-use inkwell::execution_engine::FunctionLookupError;
+use inkwell::builder::Builder;
+use inkwell::execution_engine::{ExecutionEngine, FunctionLookupError};
 use inkwell::support::LLVMString;
 use inkwell::types::{BasicMetadataTypeEnum, FloatType, IntMathType, IntType, PointerType, VoidType};
 use inkwell::values::{AnyValue, FloatMathValue, FloatValue, IntMathValue, IntValue, PointerMathValue, PointerValue};
@@ -12,66 +13,62 @@ use crate::vm::module::function::Function;
 use crate::vm::module::object_type::Type;
 use crate::vm::module::vm_module::Module;
 
-pub unsafe fn compile_function(module: *mut Module, function: *mut Function, optimization_level: OptimizationLevel) -> Result<usize, CompileError> {
-    let module = &mut *module;
 
-    let context = Context::create();
-    let builder = context.create_builder();
-    let llvm_module = context.create_module(module.name.as_str());
-    let mut llvm_values = LLVMValues::new();
-    let llvm_values_ref = &mut llvm_values;
+pub struct LLVMModuleHolder<'ctx> {
+    pub module: *mut Module,
+    pub function: *mut Function,
 
-    //Create llvm function
-    let mut argument_types: Vec<BasicMetadataTypeEnum> = Vec::new();
-    for argument_type in (*function).argument_type_list.iter() {
-        match convert_type_to_llvm(argument_type, &context) {
-            LLVMTypeTemp::Int(int_type) => argument_types.push(int_type.into()),
-            LLVMTypeTemp::Float(float_type) => argument_types.push(float_type.into()),
-            LLVMTypeTemp::Pointer(pointer_type) => argument_types.push(pointer_type.into()),
-            LLVMTypeTemp::Void(_) => {}
-        }
-    }
+    pub context: &'ctx Context,
+    pub llvm_module: inkwell::module::Module<'ctx>,
+    pub builder: Builder<'ctx>,
+    pub execution_engine: ExecutionEngine<'ctx>,
+}
 
-    let function_type = match convert_type_to_llvm(&(*function).return_type, &context) {
-        LLVMTypeTemp::Int(int_type) => int_type.fn_type(argument_types.as_slice(), false),
-        LLVMTypeTemp::Float(float_type) => float_type.fn_type(argument_types.as_slice(), false),
-        LLVMTypeTemp::Pointer(pointer_type) => pointer_type.fn_type(argument_types.as_slice(), false),
-        LLVMTypeTemp::Void(void_type) => void_type.fn_type(argument_types.as_slice(), false),
-    };
 
-    let llvm_function = llvm_module.add_function((*function).name.as_str(), function_type, Option::None);
+impl<'ctx> LLVMModuleHolder<'ctx> {
 
-    for label_block in (*function).label_block_list.iter() {
-        let llvm_block = context.append_basic_block(llvm_function, label_block.name.as_str());
-        builder.position_at_end(llvm_block);
+    pub unsafe fn compile_function(&self, llvm_values: &mut LLVMValues<'ctx>) -> Result<(), CompileError> {
+        //Create llvm function
+        let mut argument_types: Vec<BasicMetadataTypeEnum> = Vec::new();
+        argument_types.push(self.context.i8_type().ptr_type(AddressSpace::default()).into());
 
-        for order in label_block.order_list.iter() {
-            match order.compile(module, &mut *function, &context, &builder, &llvm_module, llvm_values_ref) {
-                Ok(_) => {},
-                Err(err) => { return Err(err); }
+        for argument_type in (*self.function).argument_type_list.iter() {
+            match convert_type_to_llvm(argument_type, &self.context) {
+                LLVMTypeTemp::Int(int_type) => argument_types.push(int_type.into()),
+                LLVMTypeTemp::Float(float_type) => argument_types.push(float_type.into()),
+                LLVMTypeTemp::Pointer(pointer_type) => argument_types.push(pointer_type.into()),
+                LLVMTypeTemp::Void(_) => {}
             }
         }
+
+        let function_type = match convert_type_to_llvm(&(*self.function).return_type, &self.context) {
+            LLVMTypeTemp::Int(int_type) => int_type.fn_type(argument_types.as_slice(), false),
+            LLVMTypeTemp::Float(float_type) => float_type.fn_type(argument_types.as_slice(), false),
+            LLVMTypeTemp::Pointer(pointer_type) => pointer_type.fn_type(argument_types.as_slice(), false),
+            LLVMTypeTemp::Void(void_type) => void_type.fn_type(argument_types.as_slice(), false),
+        };
+
+        let llvm_function = self.llvm_module.add_function((*self.function).name.as_str(), function_type, None);
+
+        let builder_ref = &self.builder;
+        for label_block in (*self.function).label_block_list.iter() {
+            let llvm_block = self.context.append_basic_block(llvm_function, label_block.name.as_str());
+            builder_ref.position_at_end(llvm_block);
+
+            for order in label_block.order_list.iter() {
+                match order.compile(&mut *self.module, &mut *self.function, self.context, builder_ref, &self.llvm_module, llvm_values) {
+                    Ok(_) => {},
+                    Err(err) => { return Err(err); }
+                }
+            }
+        }
+
+        return Ok(());
     }
 
-    let jit_engine = match llvm_module.create_jit_execution_engine(optimization_level) {
-        Ok(engine) => engine,
-        Err(err) => { return Err(CompileError::LLVMCreateJITCompileEngineError(err)); }
-    };
-
-    let function_address = match jit_engine.get_function_address((*function).name.as_str()) {
-        Ok(address) => address,
-        Err(err) => { return Err(CompileError::LLVMFunctionLookupError(err)); }
-    };
-
-    let jit_function = transmute_copy::<usize, unsafe extern "C" fn() -> i64>(&function_address);
-    let result = jit_function();
-
-    println!("JIT result = {}", result);
-
-    println!("{}", llvm_module.print_to_string().to_string());
-
-    return Ok(function_address);
 }
+
+
 
 pub enum LLVMTypeTemp<'a> {
     Int(IntType<'a>),

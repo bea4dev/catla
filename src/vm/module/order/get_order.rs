@@ -30,7 +30,7 @@ impl Order for GetArgumentOrder {
         //None
     }
 
-    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &'a Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
         return Ok(());
     }
 }
@@ -60,7 +60,7 @@ impl Order for GetConstValueOrder {
 
     fn link(&mut self, _: *mut Module, _: *mut Function) {/*None*/}
 
-    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &'a Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
         let value = match &self.value_type {
             Type::I8 => context.i8_type().const_int(self.const_value_bits, true),
             Type::I16 => context.i16_type().const_int(self.const_value_bits, true),

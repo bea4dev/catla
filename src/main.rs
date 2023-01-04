@@ -6,7 +6,7 @@ use inkwell::OptimizationLevel;
 use crate::heap::allocator::{HeapAllocator, HeapObject, object_lock, object_unlock};
 use crate::heap::gc::{CycleCollector, decrement_reference_count, increment_reference_count};
 use vm::module::object_type::ObjectType;
-use crate::llvm::compiler::compile_function;
+use crate::llvm::compiler::{LLVMModuleHolder, LLVMValues};
 use crate::util::concurrent::SpinLock;
 use crate::vm::module::parser::parse_module;
 use crate::vm::tortie::{TortieVM, VMThread};
@@ -143,17 +143,33 @@ $end";
 
         let module = (*virtual_machine).get_module(&"test".to_string()).unwrap();
         let function = (*module).get_function_ptr(&"nyan".to_string()).unwrap();
-        let function_address = match compile_function(module, function, OptimizationLevel::None) {
-            Ok(address) => address,
-            Err(err) => panic!("{}", err)
+        let context = Context::create();
+        let llvm_module = context.create_module((*module).name.as_str());
+        let builder = context.create_builder();
+        let execution_engine = llvm_module.create_execution_engine().unwrap();
+        let mut llvm_values = LLVMValues::new();
+
+        let holder = LLVMModuleHolder {
+            module,
+            function,
+            context: &context,
+            llvm_module,
+            builder,
+            execution_engine
         };
+
+        holder.compile_function(&mut llvm_values).expect("Failed to compile!");
 
         println!("OK!");
 
-        /*
-        let jit_function = transmute_copy::<usize, unsafe extern "C" fn() -> i64>(&function_address);
-        jit_function();*/
 
+        let jit_engine = &holder.execution_engine;
+        let function_address = jit_engine.get_function_address("nyan").unwrap();
+        let jit_function = transmute_copy::<usize, unsafe extern "C" fn(*mut VMThread) -> i64>(&function_address);
+
+        let thread = (*virtual_machine).create_thread(1024);
+        let result = jit_function(thread);
+        println!("JIT result = {}", result);
     }
 
 

@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::{env, panic};
 use std::ffi::c_void;
 use std::ops::{Index, IndexMut};
+use std::panic::PanicInfo;
 use std::ptr::{null_mut};
 use std::sync::RwLock;
 use crate::{CycleCollector, HeapAllocator, HeapObject, ObjectType, parse_module, SpinLock};
@@ -368,16 +369,16 @@ unsafe fn get_argument_type(module: *mut Module, type_info: &ArgumentTypeInfo) -
 
 #[inline(always)]
 fn add_custom_panic_hook() {
-    env::set_var("RUST_BACKTRACE", "1");
+    env::set_var("RUST_BACKTRACE", "full");
 
     let default_hook = panic::take_hook();
 
-    panic::set_hook(Box::new(move |panic_info| {
-        let header = "!!!!!!!!!! VM Panic !!!!!!!!!!\
-        A fatal error has occurred.\
+    panic::set_hook(Box::new(move |panic_info: &PanicInfo| {
+        let header = "!!!!!!!!!! VM Panic !!!!!!!!!!\n\
+        A fatal error has occurred.\n\
         ".to_string();
 
-        eprintln!("{}\n{:?}", header, panic_info);
+        eprintln!("{}\n{}", header, panic_info);
         default_hook(panic_info);
     }));
 }

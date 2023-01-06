@@ -4,6 +4,7 @@ use crate::llvm::compiler::{CompileError, LLVMValues};
 use crate::vm::module::function::Function;
 use crate::vm::module::order::orders::Order;
 use crate::vm::module::vm_module::Module;
+use crate::vm::tortie::ModuleLoadError;
 use crate::VMThread;
 
 pub struct SetVariableOrder {
@@ -25,7 +26,9 @@ impl Order for SetVariableOrder {
         variables[self.target_variable_index] = registers[self.get_register_index];
     }
 
-    fn link(&mut self, _: *mut Module, _: *mut Function) {/*None*/}
+    fn link(&mut self, _: *mut Module, _: *mut Function) -> Result<(), ModuleLoadError> {
+        return Ok(());
+    }
 
     fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
         return Ok(());

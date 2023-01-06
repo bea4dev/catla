@@ -452,7 +452,7 @@ pub fn parse_functions(code: &str, code_length: usize, current_position: &mut us
                     Err(err) => { return Err(err); }
                 };
 
-                function_map.insert(name.clone(), Function { name, register_length, variable_length, argument_type_info_list, argument_type_list: Vec::new(), return_type_info, return_type: Type::I8, label_block_list })
+                function_map.insert(name.clone(), Function { name, register_length, variable_length, argument_type_info_list, argument_type_list: Vec::new(), return_type_info, return_type: Type::I8, label_block_list, jit_function_address: 0, jit_function_bridge_address: 0 })
             },
             _ => { return Err(ByteCodeParseError::ParseFunctionInfoError(current_line, line.clone())); }
         };

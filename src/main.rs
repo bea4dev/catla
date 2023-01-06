@@ -143,29 +143,11 @@ $end";
 
         let module = (*virtual_machine).get_module(&"test".to_string()).unwrap();
         let function = (*module).get_function_ptr(&"nyan".to_string()).unwrap();
-        let context = Context::create();
-        let llvm_module = context.create_module((*module).name.as_str());
-        let builder = context.create_builder();
-        let execution_engine = llvm_module.create_execution_engine().unwrap();
-        let mut llvm_values = LLVMValues::new();
+        let jit_compiler = &mut (*virtual_machine).jit_compiler;
+        jit_compiler.schedule(module, function);
+        jit_compiler.join();
 
-        let holder = LLVMModuleHolder {
-            module,
-            function,
-            context: &context,
-            llvm_module,
-            builder,
-            execution_engine
-        };
-
-        holder.compile_function(&mut llvm_values).expect("Failed to compile!");
-
-        println!("OK!");
-
-
-        let jit_engine = &holder.execution_engine;
-        let function_address = jit_engine.get_function_address("nyan").unwrap();
-        let jit_function = transmute_copy::<usize, unsafe extern "C" fn(*mut VMThread) -> i64>(&function_address);
+        let jit_function = transmute_copy::<usize, unsafe extern "C" fn(*mut VMThread) -> i64>(&(*function).jit_function_address);
 
         let thread = (*virtual_machine).create_thread(1024);
         let result = jit_function(thread);

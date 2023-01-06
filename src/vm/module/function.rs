@@ -10,7 +10,9 @@ pub struct Function {
     pub argument_type_list: Vec<Type>,
     pub return_type_info: TypeInfo,
     pub return_type: Type,
-    pub label_block_list: Vec<FunctionLabelBlock>
+    pub label_block_list: Vec<FunctionLabelBlock>,
+    pub jit_function_address: usize,
+    pub jit_function_bridge_address: usize
 }
 
 pub struct FunctionLabelBlock {

@@ -2,12 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::{env, panic};
 use std::ffi::c_void;
+use std::mem::transmute_copy;
 use std::ops::{Index, IndexMut};
 use std::panic::PanicInfo;
 use std::ptr::{null_mut};
 use std::sync::RwLock;
 use crate::{CycleCollector, HeapAllocator, HeapObject, ObjectType, parse_module, SpinLock};
 use crate::cxx::wrapper::{create_jump_buffer_wrapped, run_function_for_set_jump_branch};
+use crate::llvm::jit::jit_compiler::JITCompiler;
 use crate::vm::module::function::{Function, FunctionLabelBlock};
 use crate::vm::module::object_type::Type;
 use crate::vm::module::parser::{ArgumentTypeInfo, ByteCodeParseError, TypeInfo};
@@ -20,7 +22,8 @@ pub struct TortieVM {
     pub threads: Vec<*mut VMThread>,
     pub thread_list_lock: SpinLock,
     cycle_collector: *mut CycleCollector,
-    module_map: RwLock<HashMap<String, *mut Module>>
+    module_map: RwLock<HashMap<String, *mut Module>>,
+    pub jit_compiler: JITCompiler
 }
 
 
@@ -98,7 +101,8 @@ impl TortieVM {
             threads: Vec::new(),
             thread_list_lock: SpinLock::new(),
             cycle_collector: null_mut(),
-            module_map: RwLock::new(HashMap::new())
+            module_map: RwLock::new(HashMap::new()),
+            jit_compiler: JITCompiler::new()
         };
         let vm_ptr = Box::into_raw(Box::new(virtual_machine));
         (*vm_ptr).cycle_collector = CycleCollector::new(vm_ptr);
@@ -287,37 +291,44 @@ impl TortieVM {
 
 #[no_mangle]
 pub unsafe extern "C" fn run_function(vm_thread: *mut VMThread, module: *mut Module, function: *mut Function, arguments: *const Vec<u64>) -> u64 {
-    let registers: &mut Vec<u64> = (*(*vm_thread).registers).push((*function).register_length + 1, 0);
-    let variables: &mut Vec<u64> = (*(*vm_thread).variables).push((*function).variable_length, 0);
+    let jit_function = (*function).jit_function_address;
+    let jit_function_bridge = (*function).jit_function_bridge_address;
+    return if jit_function != 0 && jit_function_bridge != 0 {
+        let jit_function_bridge = transmute_copy::<usize, unsafe extern "C" fn(*mut VMThread, *const u64) -> u64>(&jit_function_bridge);
+        jit_function_bridge(vm_thread, arguments.as_ptr())
+    } else {
+        let registers: &mut Vec<u64> = (*(*vm_thread).registers).push((*function).register_length + 1, 0);
+        let variables: &mut Vec<u64> = (*(*vm_thread).variables).push((*function).variable_length, 0);
 
-    (*vm_thread).current_function = function;
-    (*vm_thread).is_return_function = false;
+        (*vm_thread).current_function = function;
+        (*vm_thread).is_return_function = false;
 
-    let first_label_block = match (*function).label_block_list.get_mut(0) {
-        Some(label_block) => label_block,
-        _ => { return 0; }
-    };
-    (*vm_thread).current_label_block = first_label_block as *mut FunctionLabelBlock;
+        let first_label_block = match (*function).label_block_list.get_mut(0) {
+            Some(label_block) => label_block,
+            _ => { return 0; }
+        };
+        (*vm_thread).current_label_block = first_label_block as *mut FunctionLabelBlock;
 
 
-    let order_list = &mut (*(*vm_thread).current_label_block).order_list;
+        let order_list = &mut (*(*vm_thread).current_label_block).order_list;
 
-    loop {
-        for i in 0..order_list.len() {
-            let order = &order_list[i];
-            order.eval(vm_thread, module, registers, variables, &*arguments);
+        loop {
+            for i in 0..order_list.len() {
+                let order = &order_list[i];
+                order.eval(vm_thread, module, registers, variables, &*arguments);
 
-            if (*vm_thread).runtime_exception != null_mut() {
+                if (*vm_thread).runtime_exception != null_mut() {
+                    break;
+                }
+            }
+
+            if (*vm_thread).current_label_block == null_mut() || (*vm_thread).is_return_function {
                 break;
             }
         }
 
-        if (*vm_thread).current_label_block == null_mut() || (*vm_thread).is_return_function {
-            break;
-        }
+        registers[(*function).register_length]
     }
-
-    return registers[(*function).register_length];
 }
 
 
@@ -430,6 +441,7 @@ pub enum ModuleLoadError {
     ModuleNotFoundError(String),
     ModuleHasNotBeenLoadedError(String),
     DefinedTypeNotFoundError(String),
+    FunctionNotFoundError(String)
 }
 
 impl Display for ModuleLoadError {
@@ -438,7 +450,8 @@ impl Display for ModuleLoadError {
             ModuleLoadError::ModulePreLoadError(err) => format!("ModuleLoadError\n{}", err),
             ModuleLoadError::ModuleNotFoundError(name) => format!("ModuleNotFoundError | '{}' is not found.", name),
             ModuleLoadError::ModuleHasNotBeenLoadedError(name) => format!("ModuleHasNotBeenLoadedError | '{}' has not yet been loaded.", name),
-            ModuleLoadError::DefinedTypeNotFoundError(name) => format!("DefinedTypeNotFoundError | '{}' is not found.", name)
+            ModuleLoadError::DefinedTypeNotFoundError(name) => format!("DefinedTypeNotFoundError | '{}' is not found.", name),
+            ModuleLoadError::FunctionNotFoundError(name)=> format!("FunctionNotFoundError | '{}' is not found.", name)
         };
 
         return write!(f, "ModuleLoadError | {}", error_string);

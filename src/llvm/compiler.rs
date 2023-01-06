@@ -15,9 +15,6 @@ use crate::vm::module::vm_module::Module;
 
 
 pub struct LLVMModuleHolder<'ctx> {
-    pub module: *mut Module,
-    pub function: *mut Function,
-
     pub context: &'ctx Context,
     pub llvm_module: inkwell::module::Module<'ctx>,
     pub builder: Builder<'ctx>,
@@ -27,12 +24,12 @@ pub struct LLVMModuleHolder<'ctx> {
 
 impl<'ctx> LLVMModuleHolder<'ctx> {
 
-    pub unsafe fn compile_function(&self, llvm_values: &mut LLVMValues<'ctx>) -> Result<(), CompileError> {
+    pub unsafe fn compile_function(&self, llvm_values: &mut LLVMValues<'ctx>, module: *mut Module, function: *mut Function) -> Result<(), CompileError> {
         //Create llvm function
         let mut argument_types: Vec<BasicMetadataTypeEnum> = Vec::new();
         argument_types.push(self.context.i8_type().ptr_type(AddressSpace::default()).into());
 
-        for argument_type in (*self.function).argument_type_list.iter() {
+        for argument_type in (*function).argument_type_list.iter() {
             match convert_type_to_llvm(argument_type, &self.context) {
                 LLVMTypeTemp::Int(int_type) => argument_types.push(int_type.into()),
                 LLVMTypeTemp::Float(float_type) => argument_types.push(float_type.into()),
@@ -41,22 +38,22 @@ impl<'ctx> LLVMModuleHolder<'ctx> {
             }
         }
 
-        let function_type = match convert_type_to_llvm(&(*self.function).return_type, &self.context) {
+        let function_type = match convert_type_to_llvm(&(*function).return_type, &self.context) {
             LLVMTypeTemp::Int(int_type) => int_type.fn_type(argument_types.as_slice(), false),
             LLVMTypeTemp::Float(float_type) => float_type.fn_type(argument_types.as_slice(), false),
             LLVMTypeTemp::Pointer(pointer_type) => pointer_type.fn_type(argument_types.as_slice(), false),
             LLVMTypeTemp::Void(void_type) => void_type.fn_type(argument_types.as_slice(), false),
         };
 
-        let llvm_function = self.llvm_module.add_function((*self.function).name.as_str(), function_type, None);
+        let llvm_function = self.llvm_module.add_function((*function).name.as_str(), function_type, None);
 
         let builder_ref = &self.builder;
-        for label_block in (*self.function).label_block_list.iter() {
+        for label_block in (*function).label_block_list.iter() {
             let llvm_block = self.context.append_basic_block(llvm_function, label_block.name.as_str());
             builder_ref.position_at_end(llvm_block);
 
             for order in label_block.order_list.iter() {
-                match order.compile(&mut *self.module, &mut *self.function, self.context, builder_ref, &self.llvm_module, llvm_values) {
+                match order.compile(&mut *module, &mut *function, self.context, builder_ref, &self.llvm_module, llvm_values) {
                     Ok(_) => {},
                     Err(err) => { return Err(err); }
                 }

@@ -5,6 +5,7 @@ use crate::vm::module::function::Function;
 use crate::vm::module::object_type::Type;
 use crate::vm::module::order::orders::Order;
 use crate::vm::module::vm_module::Module;
+use crate::vm::tortie::ModuleLoadError;
 use crate::VMThread;
 
 pub struct GetArgumentOrder {
@@ -26,8 +27,8 @@ impl Order for GetArgumentOrder {
         registers[self.target_index] = arguments[self.argument_index];
     }
 
-    fn link(&mut self, _: *mut Module, _: *mut Function) {
-        //None
+    fn link(&mut self, _: *mut Module, _: *mut Function) -> Result<(), ModuleLoadError> {
+        return Ok(());
     }
 
     fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
@@ -58,7 +59,9 @@ impl Order for GetConstValueOrder {
         registers[self.target_index] = self.const_value_bits;
     }
 
-    fn link(&mut self, _: *mut Module, _: *mut Function) {/*None*/}
+    fn link(&mut self, _: *mut Module, _: *mut Function) -> Result<(), ModuleLoadError> {
+        return Ok(());
+    }
 
     fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
         let value = match &self.value_type {

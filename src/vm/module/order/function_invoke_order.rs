@@ -54,7 +54,7 @@ impl Order for InvokeFunction {
     }
 
     fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
-        let vm_function_address = context.ptr_sized_int_type(, );
+        //let vm_function_address = context.ptr_sized_int_type(, );
 
         return Ok(());
     }

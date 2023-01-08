@@ -295,7 +295,7 @@ pub unsafe extern "C" fn run_function(vm_thread: *mut VMThread, module: *mut Mod
     let jit_function_bridge = (*function).jit_function_bridge_address;
     return if jit_function != 0 && jit_function_bridge != 0 {
         let jit_function_bridge = transmute_copy::<usize, unsafe extern "C" fn(*mut VMThread, *const u64) -> u64>(&jit_function_bridge);
-        jit_function_bridge(vm_thread, arguments.as_ptr())
+        jit_function_bridge(vm_thread, (*arguments).as_ptr())
     } else {
         let registers: &mut Vec<u64> = (*(*vm_thread).registers).push((*function).register_length + 1, 0);
         let variables: &mut Vec<u64> = (*(*vm_thread).variables).push((*function).variable_length, 0);

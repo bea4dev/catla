@@ -1,12 +1,13 @@
 use inkwell::builder::Builder;
 use inkwell::context::Context;
+use inkwell::execution_engine::ExecutionEngine;
 use crate::llvm::compiler::{CompileError, LLVMValues};
 use crate::vm::module::function::Function;
 use crate::vm::module::object_type::Type;
 use crate::vm::module::order::orders::Order;
 use crate::vm::module::vm_module::Module;
 use crate::vm::tortie::ModuleLoadError;
-use crate::VMThread;
+use crate::{LLVMModuleHolder, VMThread};
 
 pub struct GetArgumentOrder {
     target_index: usize,
@@ -31,7 +32,7 @@ impl Order for GetArgumentOrder {
         return Ok(());
     }
 
-    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, llvm_module_holder: &LLVMModuleHolder<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
         return Ok(());
     }
 }
@@ -63,7 +64,9 @@ impl Order for GetConstValueOrder {
         return Ok(());
     }
 
-    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, llvm_module_holder: &LLVMModuleHolder<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
+        let context = &llvm_module_holder.context;
+
         let value = match &self.value_type {
             Type::I8 => context.i8_type().const_int(self.const_value_bits, true),
             Type::I16 => context.i16_type().const_int(self.const_value_bits, true),

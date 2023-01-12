@@ -2,11 +2,12 @@ use std::ptr::null_mut;
 use inkwell::AddressSpace;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
+use inkwell::execution_engine::ExecutionEngine;
 use inkwell::targets::TargetData;
 use crate::vm::module::function::Function;
 use crate::vm::module::order::orders::Order;
 use crate::vm::module::vm_module::Module;
-use crate::{LLVMValues, VMThread};
+use crate::{LLVMModuleHolder, LLVMValues, VMThread};
 use crate::llvm::compiler::CompileError;
 use crate::vm::tortie::{ModuleLoadError, run_function};
 
@@ -53,8 +54,12 @@ impl Order for InvokeFunction {
         return Ok(());
     }
 
-    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
-        //let vm_function_address = context.ptr_sized_int_type(, );
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, llvm_module_holder: &LLVMModuleHolder<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
+        let context = llvm_module_holder.context;
+
+        let address_type = context.ptr_sized_int_type(llvm_module_holder.execution_engine.get_target_data(), None);
+        let vm_function_address = address_type.const_int(self.function as u64, false);
+        //builder.build_conditional_branch()
 
         return Ok(());
     }

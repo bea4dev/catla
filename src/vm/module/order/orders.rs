@@ -1,10 +1,11 @@
 use inkwell::builder::Builder;
 use inkwell::context::Context;
+use inkwell::execution_engine::ExecutionEngine;
 use crate::llvm::compiler::{CompileError, LLVMValues};
 use crate::vm::module::function::Function;
 use crate::vm::module::vm_module::Module;
 use crate::vm::tortie::ModuleLoadError;
-use crate::VMThread;
+use crate::{LLVMModuleHolder, VMThread};
 
 pub trait Order {
 
@@ -12,8 +13,7 @@ pub trait Order {
 
     fn link(&mut self, module: *mut Module, function: *mut Function) -> Result<(), ModuleLoadError>;
 
-    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context,
-               builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>,
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, llvm_module_holder: &LLVMModuleHolder<'a>,
                llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError>;
 
 }

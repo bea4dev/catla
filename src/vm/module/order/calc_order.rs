@@ -1,12 +1,13 @@
 use inkwell::builder::Builder;
 use inkwell::context::Context;
+use inkwell::execution_engine::ExecutionEngine;
 use crate::llvm::compiler::{CompileError, LLVMValues};
 use crate::vm::module::function::Function;
 use crate::vm::module::object_type::Type;
 use crate::vm::module::order::orders::Order;
 use crate::vm::module::vm_module::Module;
 use crate::vm::tortie::ModuleLoadError;
-use crate::VMThread;
+use crate::{LLVMModuleHolder, VMThread};
 
 pub struct AddIntegerOrder {
     target_index: usize,
@@ -46,7 +47,7 @@ impl Order for AddIntegerOrder {
         return Ok(());
     }
 
-    fn compile<'a>(&self, module: &mut Module, function: &mut Function, context: &'a Context, builder: &Builder<'a>, llvm_module: &inkwell::module::Module<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, llvm_module_holder: &LLVMModuleHolder<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
         let left = match llvm_values.get_int_value(self.argument_register_left) {
             Ok(value) => value,
             Err(err) => { return Err(err); }
@@ -56,7 +57,7 @@ impl Order for AddIntegerOrder {
             Err(err) => { return Err(err); }
         };
 
-        let value = builder.build_int_add(left, right, format!("reg{}", self.target_index).as_str());
+        let value = llvm_module_holder.builder.build_int_add(left, right, format!("reg{}", self.target_index).as_str());
         llvm_values.insert_int_value(self.target_index, value);
 
         return Ok(());

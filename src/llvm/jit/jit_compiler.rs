@@ -40,9 +40,9 @@ impl JITCompiler {
     }
 
     pub fn schedule(&mut self, module: *mut Module, function: *mut Function) {
-        let this_ptr = unsafe { self as *mut JITCompiler as u64 };
-        let module = module as u64;
-        let function = function as u64;
+        let this_ptr = unsafe { self as *mut JITCompiler as usize };
+        let module = module as usize;
+        let function = function as usize;
 
         self.compiler_thread.execute(move || {
             let jit_compiler = unsafe { &mut *(this_ptr as *mut JITCompiler) };

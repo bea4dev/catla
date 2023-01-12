@@ -53,7 +53,7 @@ impl<'ctx> LLVMModuleHolder<'ctx> {
             builder_ref.position_at_end(llvm_block);
 
             for order in label_block.order_list.iter() {
-                match order.compile(&mut *module, &mut *function, self.context, builder_ref, &self.llvm_module, llvm_values) {
+                match order.compile(&mut *module, &mut *function, self, llvm_values) {
                     Ok(_) => {},
                     Err(err) => { return Err(err); }
                 }

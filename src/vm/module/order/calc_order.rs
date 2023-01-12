@@ -1,7 +1,8 @@
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::execution_engine::ExecutionEngine;
-use crate::llvm::compiler::{CompileError, LLVMValues};
+use inkwell::values::{FunctionValue, IntValue};
+use crate::llvm::compiler::{CompileError, InstantNameProvider, LLVMValues};
 use crate::vm::module::function::Function;
 use crate::vm::module::object_type::Type;
 use crate::vm::module::order::orders::Order;
@@ -47,18 +48,24 @@ impl Order for AddIntegerOrder {
         return Ok(());
     }
 
-    fn compile<'a>(&self, module: &mut Module, function: &mut Function, llvm_module_holder: &LLVMModuleHolder<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
-        let left = match llvm_values.get_int_value(self.argument_register_left) {
-            Ok(value) => value,
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, llvm_module_holder: &LLVMModuleHolder<'a>, llvm_function: &FunctionValue<'a>, name_provider: &mut InstantNameProvider, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
+        let left: IntValue = match llvm_values.get_value(self.argument_register_left) {
+            Ok(value) => match value.try_into() {
+                Ok(value) => value,
+                Err(_) => { return Err(CompileError::TypeMismatchError("integer".to_string(), "other".to_string())); }
+            },
             Err(err) => { return Err(err); }
         };
-        let right = match llvm_values.get_int_value(self.argument_register_right) {
-            Ok(value) => value,
+        let right: IntValue = match llvm_values.get_value(self.argument_register_right) {
+            Ok(value) => match value.try_into() {
+                Ok(value) => value,
+                Err(_) => { return Err(CompileError::TypeMismatchError("integer".to_string(), "other".to_string())); }
+            },
             Err(err) => { return Err(err); }
         };
 
         let value = llvm_module_holder.builder.build_int_add(left, right, format!("reg{}", self.target_index).as_str());
-        llvm_values.insert_int_value(self.target_index, value);
+        llvm_values.insert_value(self.target_index, value.into());
 
         return Ok(());
     }

@@ -264,7 +264,10 @@ impl TortieVM {
                     let function = function as *mut Function;
                     for label_block in (*function).label_block_list.iter_mut() {
                         for order in label_block.order_list.iter_mut() {
-                            order.link(module, function);
+                            match order.link(module, function) {
+                                Ok(_) => {},
+                                Err(err) => { return Err(err); }
+                            };
                         }
                     }
                 }
@@ -347,7 +350,7 @@ unsafe fn get_defined_type(module: *mut Module, import_module_index: usize, type
 }
 
 #[inline(always)]
-unsafe fn get_type(module: *mut Module, type_info: &TypeInfo) -> Result<Type, ModuleLoadError> {
+pub unsafe fn get_type(module: *mut Module, type_info: &TypeInfo) -> Result<Type, ModuleLoadError> {
     return match type_info {
         TypeInfo::DefinedType {import_module_index, type_name} => {
             let object_type = match get_defined_type(module, *import_module_index, type_name) {

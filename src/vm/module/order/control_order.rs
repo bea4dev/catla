@@ -1,8 +1,8 @@
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::execution_engine::ExecutionEngine;
-use inkwell::values::BasicValue;
-use crate::llvm::compiler::{CompileError, LLVMValues};
+use inkwell::values::{BasicValue, FunctionValue};
+use crate::llvm::compiler::{CompileError, InstantNameProvider, LLVMValues};
 use crate::vm::module::function::Function;
 use crate::vm::module::order::orders::Order;
 use crate::vm::module::vm_module::Module;
@@ -36,26 +36,16 @@ impl Order for ReturnOrder {
         return Ok(());
     }
 
-    fn compile<'a>(&self, module: &mut Module, function: &mut Function, llvm_module_holder: &LLVMModuleHolder<'a>, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
+    fn compile<'a>(&self, module: &mut Module, function: &mut Function, llvm_module_holder: &LLVMModuleHolder<'a>, llvm_function: &FunctionValue<'a>, name_provider: &mut InstantNameProvider, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError> {
         let builder = &llvm_module_holder.builder;
 
         return if self.is_void {
             builder.build_return(None);
             Ok(())
         } else {
-            match llvm_values.int_values.get(&self.get_register_index) {
-                Some(value) => builder.build_return(Some(value)),
-                _ => {
-                    match llvm_values.float_values.get(&self.get_register_index) {
-                        Some(value) => builder.build_return(Some(value)),
-                        _ => {
-                            match llvm_values.pointer_values.get(&self.get_register_index) {
-                                Some(value) => builder.build_return(Some(value)),
-                                _ => { return Err(CompileError::RegisterNotFoundError(self.get_register_index)); }
-                            }
-                        }
-                    }
-                }
+            match llvm_values.get_value(self.get_register_index) {
+                Ok(value) => builder.build_return(Some(&value)),
+                Err(err) => { return Err(err); }
             };
             Ok(())
         }

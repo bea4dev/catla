@@ -1,7 +1,8 @@
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::execution_engine::ExecutionEngine;
-use crate::llvm::compiler::{CompileError, LLVMValues};
+use inkwell::values::FunctionValue;
+use crate::llvm::compiler::{CompileError, InstantNameProvider, LLVMValues};
 use crate::vm::module::function::Function;
 use crate::vm::module::vm_module::Module;
 use crate::vm::tortie::ModuleLoadError;
@@ -14,6 +15,6 @@ pub trait Order {
     fn link(&mut self, module: *mut Module, function: *mut Function) -> Result<(), ModuleLoadError>;
 
     fn compile<'a>(&self, module: &mut Module, function: &mut Function, llvm_module_holder: &LLVMModuleHolder<'a>,
-               llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError>;
+               llvm_function: &FunctionValue<'a>, name_provider: &mut InstantNameProvider, llvm_values: &mut LLVMValues<'a>) -> Result<(), CompileError>;
 
 }

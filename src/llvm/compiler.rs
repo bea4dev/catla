@@ -8,7 +8,7 @@ use inkwell::builder::Builder;
 use inkwell::execution_engine::{ExecutionEngine, FunctionLookupError};
 use inkwell::support::LLVMString;
 use inkwell::types::{BasicMetadataTypeEnum, FloatType, IntMathType, IntType, PointerType, VoidType};
-use inkwell::values::{AnyValue, FloatMathValue, FloatValue, IntMathValue, IntValue, PointerMathValue, PointerValue};
+use inkwell::values::{AnyValue, BasicValueEnum, FloatMathValue, FloatValue, IntMathValue, IntValue, PointerMathValue, PointerValue};
 use crate::vm::module::function::Function;
 use crate::vm::module::object_type::Type;
 use crate::vm::module::vm_module::Module;
@@ -46,14 +46,17 @@ impl<'ctx> LLVMModuleHolder<'ctx> {
         };
 
         let llvm_function = self.llvm_module.add_function((*function).name.as_str(), function_type, None);
+        let llvm_function_ref = &llvm_function;
 
         let builder_ref = &self.builder;
+        let mut name_provider = InstantNameProvider::new((*function).name.clone());
+        let name_provider_ref = &mut name_provider;
         for label_block in (*function).label_block_list.iter() {
             let llvm_block = self.context.append_basic_block(llvm_function, label_block.name.as_str());
             builder_ref.position_at_end(llvm_block);
 
             for order in label_block.order_list.iter() {
-                match order.compile(&mut *module, &mut *function, self, llvm_values) {
+                match order.compile(&mut *module, &mut *function, self, llvm_function_ref, name_provider_ref, llvm_values) {
                     Ok(_) => {},
                     Err(err) => { return Err(err); }
                 }
@@ -65,6 +68,19 @@ impl<'ctx> LLVMModuleHolder<'ctx> {
 
 }
 
+pub struct InstantNameProvider {
+    function_name: String,
+    original_number: usize
+}
+
+impl InstantNameProvider {
+    pub fn new(function_name: String) -> Self {
+        return Self {
+            function_name,
+            original_number: 0
+        }
+    }
+}
 
 
 pub enum LLVMTypeTemp<'a> {
@@ -94,31 +110,26 @@ pub fn convert_type_to_llvm<'a>(type_info: &Type, context: &'a Context) -> LLVMT
 
 
 pub struct LLVMValues<'a> {
-    pub int_values: HashMap<usize, IntValue<'a>>,
-    pub float_values: HashMap<usize, FloatValue<'a>>,
-    pub pointer_values: HashMap<usize, PointerValue<'a>>
+    pub values: HashMap<usize, BasicValueEnum<'a>>
 }
 
 impl<'a> LLVMValues<'a> {
 
     pub fn new() -> LLVMValues<'a> {
         return Self {
-            int_values: HashMap::new(),
-            float_values: HashMap::new(),
-            pointer_values: HashMap::new()
+            values: HashMap::new()
         };
     }
 
-    pub fn get_int_value(&mut self, index: usize) -> Result<IntValue<'a>, CompileError> {
-        return match self.int_values.get(&index) {
+    pub fn get_value(&mut self, index: usize) -> Result<BasicValueEnum<'a>, CompileError> {
+        return match self.values.get(&index) {
             Some(value) => Ok(*value),
             _ => Err(CompileError::RegisterNotFoundError(index))
         }
     }
 
-
-    pub fn insert_int_value(&mut self, index: usize, value: IntValue<'a>) {
-        self.int_values.insert(index, value);
+    pub fn insert_value(&mut self, index: usize, value: BasicValueEnum<'a>) {
+        self.values.insert(index, value);
     }
 
 }

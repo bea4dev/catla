@@ -17,3 +17,4 @@ thiserror = "1.0"
 regex = "1.7.0"
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm14-0"] }
 threadpool = "1.8.1"
+either = "1.8.0"

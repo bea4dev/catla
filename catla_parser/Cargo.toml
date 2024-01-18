@@ -1,0 +1,10 @@
+[package]
+name = "catla_parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ariadne = { version = "0.3.0", features = ["auto-color"] }
+either = "1.9.0"
+bnf_rules = "0.1.1"
+bumpalo = { version = "3.13.0", features = ["collections", "boxed"] }

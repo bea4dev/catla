@@ -1,0 +1,13 @@
+[package]
+name = "catla"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = [
+    "catla_parser"
+]
+
+[dependencies]
+catla_parser = { path = "./catla_parser", version = "0.1.0" }
+bumpalo = { version = "3.13.0", features = ["collections", "boxed"] }

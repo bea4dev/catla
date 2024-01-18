@@ -3,14 +3,16 @@ use bumpalo::collections::Vec;
 
 
 pub fn parse_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Expression<'allocator, 'input>> {
+    let allocator = cursor.allocator;
+    
     if let Some(return_expr) = parse_return_expression(cursor) {
-        return Some(Expression::new(ExpressionEnum::ReturnExpression(return_expr)));
+        return Some(allocator.alloc(ExpressionEnum::ReturnExpression(return_expr)));
     }
     if let Some(or_expr) = parse_or_expression(cursor) {
-        return Some(Expression::new(ExpressionEnum::OrExpression(or_expr)));
+        return Some(allocator.alloc(ExpressionEnum::OrExpression(or_expr)));
     }
     if let Some(closure) = parse_closure(cursor) {
-        return Some(Expression::new(ExpressionEnum::Closure(closure)));
+        return Some(allocator.alloc(ExpressionEnum::Closure(closure)));
     }
     return None;
 }

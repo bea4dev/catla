@@ -40,7 +40,7 @@ pub enum ASTParseError<'allocator, 'input> {
 
 pub type ParseResult<'allocator, 'input, T> = Result<T, ASTParseError<'allocator, 'input>>;
 
-pub type Program<'allocator, 'input> = Box<ProgramAST<'allocator, 'input>>;
+pub type Program<'allocator, 'input> = &'allocator ProgramAST<'allocator, 'input>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramAST<'allocator, 'input> {
@@ -212,7 +212,7 @@ pub struct Exchange<'allocator, 'input> {
     pub span: Range<usize>
 }
 
-pub type Expression<'allocator, 'input> = Box<ExpressionEnum<'allocator, 'input>>;
+pub type Expression<'allocator, 'input> = &'allocator ExpressionEnum<'allocator, 'input>;
 pub type ExpressionResult<'allocator, 'input> = ParseResult<'allocator, 'input, Expression<'allocator, 'input>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -594,7 +594,7 @@ fn parse_program<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input
         }
     }
 
-    return Box::new(ProgramAST { statements, not_separated_stmts, span: span.elapsed(cursor) })
+    return cursor.allocator.alloc(ProgramAST { statements, not_separated_stmts, span: span.elapsed(cursor) })
 }
 
 fn skip<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, skip_kinds: &[TokenKind]) -> usize {
@@ -670,8 +670,8 @@ fn unexpected_token_error<'allocator, 'input>(allocator: &'allocator Bump, token
 
 fn parse_with_recover<'allocator, 'input, T>(
     cursor: &mut TokenCursor<'allocator, 'input>,
-    parser: fn(&mut TokenCursor<'allocator, 'input>
-) -> Option<T>, recover_until: &[TokenKind]) -> Recovered<'allocator, 'input, T> {
+    parser: fn(&mut TokenCursor<'allocator, 'input>) -> Option<T>, recover_until: &[TokenKind]
+) -> Recovered<'allocator, 'input, T> {
 
     return match parser(cursor) {
         Some(ast) => Recovered { error_tokens: bump_vec![cursor.allocator], value: Some(ast) },

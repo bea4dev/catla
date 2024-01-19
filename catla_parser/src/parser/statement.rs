@@ -237,7 +237,7 @@ fn parse_statement_attributes<'allocator, 'input>(cursor: &mut TokenCursor<'allo
             TokenKind::Private => StatementAttributeKind::Private,
             TokenKind::Suspend => StatementAttributeKind::Suspend,
             TokenKind::Native  => StatementAttributeKind::Native,
-            TokenKind::Uncycle => StatementAttributeKind::Uncycle,
+            TokenKind::Acyclic => StatementAttributeKind::Acyclic,
             TokenKind::Open    => StatementAttributeKind::Open,
             _ => {
                 cursor.prev();
@@ -521,7 +521,7 @@ fn parse_drop_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
         return None;
     }
 
-    let uncycle_keyword_span = if cursor.current().get_kind() == TokenKind::Uncycle {
+    let uncycle_keyword_span = if cursor.current().get_kind() == TokenKind::Acyclic {
         Some(cursor.next().unwrap().span.clone())
     } else {
         None
@@ -529,7 +529,7 @@ fn parse_drop_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
     let expression = parse_expression(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
     
-    return Some(DropStatement { uncycle_keyword_span, expression, span: span.elapsed(cursor) });
+    return Some(DropStatement { acyclic_keyword_span: uncycle_keyword_span, expression, span: span.elapsed(cursor) });
 }
 
 pub fn parse_block<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Block<'allocator, 'input>> {

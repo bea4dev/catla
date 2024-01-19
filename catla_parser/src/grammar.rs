@@ -20,7 +20,7 @@ bnf_rules!(
 
     memory_manage_attr  ::= "new" | "drop" | "mutex"
 
-    statement_attribute ::= { "static" | "private" | "suspend" | "native" | "uncycle" | "open" }
+    statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" }
 
     data_struct_define  ::= ( "class" | "struct" | "interface" ) literal [ generics_info ] [ extends_info ] [ implements_info ] block
     extends_info        ::= "extends" type_info
@@ -29,7 +29,7 @@ bnf_rules!(
     import_statement    ::= "import" literal { "::" [ line_feed ] ( literal | import_elements ) }
     import_elements     ::= "{" [ line_feed ] ( [ literal ] { "," [ line_feed ] [ literal ] } | "*" ) "}"
 
-    drop_statement      ::= "drop" [ "uncycle" ] expression
+    drop_statement      ::= "drop" [ "acyclic" ] expression
 
     block               ::= "{" program "}"
 
@@ -63,7 +63,7 @@ bnf_rules!(
 
     function_call       ::= [ ":" generics_info ] "(" [ [ line_feed ] expression ] { "," [ line_feed ] [ expression ] } ")"
 
-    new_expression      ::= "new" [ "uncycle" ] literal { "::" [ line_feed ] literal } function_call
+    new_expression      ::= "new" [ "acyclic" ] literal { "::" [ line_feed ] literal } function_call
 
     return_expression   ::= "return" [ expression ]
 

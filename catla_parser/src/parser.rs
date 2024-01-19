@@ -85,7 +85,7 @@ pub enum StatementAttributeKind {
     Private,
     Suspend,
     Native,
-    Uncycle,
+    Acyclic,
     Open
 }
 
@@ -167,7 +167,7 @@ pub struct ImportElements<'allocator, 'input> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DropStatement<'allocator, 'input> {
-    pub uncycle_keyword_span: Option<Range<usize>>,
+    pub acyclic_keyword_span: Option<Range<usize>>,
     pub expression: ExpressionResult<'allocator, 'input>,
     pub span: Range<usize>
 }
@@ -410,7 +410,7 @@ pub type CallArgumentsResult<'allocator, 'input> = ParseResult<'allocator, 'inpu
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewExpression<'allocator, 'input> {
     pub new_keyword_span: Range<usize>,
-    pub uncycle_keyword_span: Option<Range<usize>>,
+    pub acyclic_keyword_span: Option<Range<usize>>,
     pub path: Vec<'allocator, Literal<'input>>,
     pub error_tokens: Vec<'allocator, Token<'input>>,
     pub function_call: FunctionCallResult<'allocator, 'input>,

@@ -7,7 +7,7 @@ pub enum TokenKind {
     Private,
     Suspend,
     Native,
-    Uncycle,
+    Acyclic,
     Open,
     New,
     Drop,
@@ -61,7 +61,7 @@ pub enum TokenKind {
     Semicolon,
     LineFeed,
     Whitespace,
-    UnexpectedCharactor,
+    UnexpectedCharacter,
     None
 }
 
@@ -111,7 +111,7 @@ fn tokenizers<'input>() -> [Tokenizer<'input>; NUMBER_OF_TOKENIZERS] {
         Tokenizer::Keyword(TokenKind::Private, "private"),
         Tokenizer::Keyword(TokenKind::Suspend, "suspend"),
         Tokenizer::Keyword(TokenKind::Native, "native"),
-        Tokenizer::Keyword(TokenKind::Uncycle, "uncycle"),
+        Tokenizer::Keyword(TokenKind::Acyclic, "acyclic"),
         Tokenizer::Keyword(TokenKind::Open, "open"),
         Tokenizer::Keyword(TokenKind::New, "new"),
         Tokenizer::Keyword(TokenKind::Drop, "drop"),
@@ -256,7 +256,7 @@ impl<'input> Iterator for Lexer<'input> {
                 self.current_byte_position += 1;
                 let end_position = start_position + 1;
                 Token {
-                    kind: TokenKind::UnexpectedCharactor,
+                    kind: TokenKind::UnexpectedCharacter,
                     text: &self.source[start_position..end_position],
                     span: start_position..end_position,
                 }
@@ -267,11 +267,11 @@ impl<'input> Iterator for Lexer<'input> {
                     continue;
                 }
 
-                let end_posiiotn = self.current_byte_position;
+                let end_position = self.current_byte_position;
                 Token {
                     kind: current_token_kind,
-                    text: &self.source[start_position..end_posiiotn],
-                    span: start_position..end_posiiotn,
+                    text: &self.source[start_position..end_position],
+                    span: start_position..end_position,
                 }
             };
             

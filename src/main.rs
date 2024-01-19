@@ -1,6 +1,8 @@
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 
+pub mod transpiler;
+
 fn main() {
     println!("Hello, world!");
 

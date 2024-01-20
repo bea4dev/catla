@@ -12,3 +12,6 @@ members = [
 catla_parser = { path = "./catla_parser", version = "0.1.0" }
 bumpalo = { version = "3.13.0", features = ["collections", "boxed", "allocator_api"] }
 hashbrown = { version = "0.14.3", features = [ "nightly" ] }
+ariadne = "0.4.0"
+resource = "0.5.0"
+toml = "0.8.8"

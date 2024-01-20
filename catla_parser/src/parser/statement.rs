@@ -35,7 +35,7 @@ fn parse_assignment<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'in
 
     let left_expr = match parse_expression(cursor) {
         Some(expr) => expr,
-        _ => return None // Not a assignment grammer (Maybe...)
+        _ => return None // Not a assignment grammar (Maybe...)
     };
 
     let next = cursor.next().get_kind();
@@ -66,7 +66,7 @@ fn parse_exchange<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'inpu
 
     let left_expr = match parse_expression(cursor) {
         Some(expr) => expr,
-        _ => return None // Not a exchange grammer (Maybe...)
+        _ => return None // Not a exchange grammar (Maybe...)
     };
 
     let next = cursor.next().get_kind();

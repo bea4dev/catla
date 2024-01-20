@@ -39,14 +39,14 @@ impl<'allocator, T: Sized> IndexMut<EntityID> for ComponentContainer<'allocator,
 }
 
 
-struct EntityIDAllocator<'allocator> {
+pub(crate) struct EntityIDMapper<'allocator> {
     map: HashMap<*const u8, EntityID, DefaultHashBuilder, &'allocator Bump>,
     current_id: usize
 }
 
-impl<'allocator> EntityIDAllocator<'allocator> {
+impl<'allocator> EntityIDMapper<'allocator> {
     
-    pub(crate) fn new(allocator: &'allocator Bump) -> EntityIDAllocator<'allocator> {
+    pub(crate) fn new(allocator: &'allocator Bump) -> EntityIDMapper<'allocator> {
         return Self {
             map: HashMap::new_in(allocator),
             current_id: 0
@@ -73,7 +73,7 @@ pub(crate) struct NameEnvironment<'allocator> {
 
 impl<'allocator> NameEnvironment<'allocator> {
     
-    fn new(parent: Option<EntityID>, allocator: &'allocator Bump) -> NameEnvironment<'allocator> {
+    pub(crate) fn new(parent: Option<EntityID>, allocator: &'allocator Bump) -> NameEnvironment<'allocator> {
         return Self {
             map: HashMap::new_in(allocator),
             parent
@@ -100,7 +100,7 @@ pub(crate) fn get_name_entity_id<'allocator, T: Sized>(
     name: &String<'allocator>,
     ast_ptr: Option<&T>,
     environments: &mut ComponentContainer<NameEnvironment<'allocator>>,
-    id_allocator: &mut EntityIDAllocator
+    id_mapper: &mut EntityIDMapper
 ) -> EntityID {
 
     let current_environment = &environments[current_environment_id];
@@ -108,7 +108,7 @@ pub(crate) fn get_name_entity_id<'allocator, T: Sized>(
         Some(name_entity_id) => name_entity_id,
         _ => {
             let current_environment = &mut environments[current_environment_id];
-            let name_entity_id = id_allocator.alloc_id(ast_ptr);
+            let name_entity_id = id_mapper.alloc_id(ast_ptr);
             current_environment.map.insert(name.clone(), name_entity_id);
             name_entity_id
         }

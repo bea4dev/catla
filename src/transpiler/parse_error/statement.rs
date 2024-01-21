@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use ariadne::{Report, ReportKind, Label, Source, Color};
-use catla_parser::{lexer::Token, parser::{Spanned, ASTParseError}};
+use catla_parser::{lexer::Token, parser::{Spanned, StatementAttribute}};
 
 use crate::transpiler::{error::{TranspileReport, ErrorMessageKey, ErrorMessageType}, context::TranspileModuleContext, TranspileError};
 
@@ -36,101 +36,32 @@ pub(crate) fn not_separated_statement_error_1(token: &Token) -> TranspileError {
 
 
 
-pub(crate) struct UnexpectedTokens {
-    tokens: Vec<Spanned<String>>,
-    expected: Expected
+pub(crate) struct StatementAttributesWithoutDefine {
+    attributes_span: Range<usize>
 }
 
-impl TranspileReport for UnexpectedTokens {
+impl TranspileReport for StatementAttributesWithoutDefine {
     fn print(&self, context: &TranspileModuleContext) {
         let text = &context.context.localized_text;
-        let module_name = &context.module_name;
-        
-        let mut span_start = self.tokens.first().unwrap().span.start;
-        let mut span_end = 0;
-        for token in self.tokens.iter() {
-            span_start = span_start.min(token.span.start);
-            span_end = span_end.max(token.span.end);
-        }
+        let key = ErrorMessageKey::new(0004);
 
-        let key = ErrorMessageKey::new(0002);
-
-        let expected = match self.expected {
-            Expected::Statement => "statement"
-        };
-        let label_massage = key.get_massage(text, ErrorMessageType::Label(0))
-            + text.get_text(format!("expected.{}", expected)).as_str();
-        
-        Report::build(ReportKind::Error, module_name, span_start)
-            .with_code(2)
+        Report::build(ReportKind::Error, context.module_name.as_str(), self.attributes_span.start)
+            .with_code(4)
             .with_message(key.get_massage(text, ErrorMessageType::Message))
             .with_label(
-                Label::new((module_name, span_start..span_end))
-                    .with_message(label_massage)
-                    .with_color(Color::Red)
-            )
-            .with_note(key.get_massage(text, ErrorMessageType::Note))
-            .finish()
-            .print((module_name, Source::from(context.source_code.code.as_str())))
-            .unwrap()
-    }
-}
-
-pub(crate) struct UnexpectedEOF {
-    expected: Expected
-}
-
-impl TranspileReport for UnexpectedEOF {
-    fn print(&self, context: &TranspileModuleContext) {
-        let text = &context.context.localized_text;
-        let module_name = &context.module_name;
-
-        let key = ErrorMessageKey::new(0003);
-
-        let code_length = context.source_code.code.len();
-
-        Report::build(ReportKind::Error, module_name, code_length)
-            .with_code(2)
-            .with_message(key.get_massage(text, ErrorMessageType::Message))
-            .with_label(
-                Label::new((module_name, (code_length - 1)..code_length))
+                Label::new((context.module_name.as_str(), self.attributes_span.clone()))
                     .with_message(key.get_massage(text, ErrorMessageType::Label(0)))
                     .with_color(Color::Red)
             )
             .with_note(key.get_massage(text, ErrorMessageType::Note))
             .finish()
-            .print((module_name, Source::from(context.source_code.code.as_str())))
+            .print((context.module_name.as_str(), Source::from(context.source_code.code.as_str())))
             .unwrap()
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum Expected {
-    Statement
-}
-
-pub(crate) fn unexpected_token_error_2_or_error_3(ast_errors: &Vec<&ASTParseError>, expected: Expected) -> Vec<TranspileError> {
-    let mut transpile_errors = Vec::new();
-    let mut unexpected_tokens = Vec::new();
-
-    let mut has_eof_error = false;
-    for error in ast_errors {
-        match error {
-            ASTParseError::UnexpectedToken(token) => unexpected_tokens.extend(token),
-            _ => {
-                has_eof_error = true;
-            }
-        }
-    }
-
-    if !unexpected_tokens.is_empty() {
-        let tokens = unexpected_tokens.iter().map(|token| { Spanned::new(token.text.to_string(), token.span.clone()) }).collect();
-        transpile_errors.push(TranspileError::new(UnexpectedTokens { tokens, expected }));
-    }
-
-    if has_eof_error {
-        transpile_errors.push(TranspileError::new(UnexpectedEOF { expected }));
-    }
-
-    return transpile_errors;
+pub(crate) fn statement_attributes_without_define(attributes: &bumpalo::collections::Vec<StatementAttribute>) -> TranspileError {
+    let span_start = attributes.first().unwrap().span.start;
+    let span_end = attributes.last().unwrap().span.end;
+    return TranspileError::new(StatementAttributesWithoutDefine { attributes_span: span_start..span_end });
 }

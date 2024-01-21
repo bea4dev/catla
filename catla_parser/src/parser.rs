@@ -26,7 +26,7 @@ impl<T> Spanned<T> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recovered<'allocator, 'input, T> {
-    pub error_tokens: Vec<'allocator, Token<'input>>,
+    pub result: ParseResult<'allocator, 'input, ()>,
     pub value: Option<T>
 }
 
@@ -160,9 +160,9 @@ pub struct Import<'allocator, 'input> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportElements<'allocator, 'input> {
-    elements: Vec<'allocator, Literal<'input>>,
-    error_tokens: Vec<'allocator, Token<'input>>,
-    brace_right: ParseResult<'allocator, 'input, ()>
+    pub elements: Vec<'allocator, Literal<'input>>,
+    pub error_tokens: Vec<'allocator, Token<'input>>,
+    pub brace_right: ParseResult<'allocator, 'input, ()>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -670,14 +670,26 @@ fn unexpected_token_error<'allocator, 'input>(allocator: &'allocator Bump, token
 
 fn parse_with_recover<'allocator, 'input, T>(
     cursor: &mut TokenCursor<'allocator, 'input>,
-    parser: fn(&mut TokenCursor<'allocator, 'input>) -> Option<T>, recover_until: &[TokenKind]
+    parser: fn(&mut TokenCursor<'allocator, 'input>) -> Option<T>,
+    recover_until: &[TokenKind]
 ) -> Recovered<'allocator, 'input, T> {
 
     return match parser(cursor) {
-        Some(ast) => Recovered { error_tokens: bump_vec![cursor.allocator], value: Some(ast) },
+        Some(ast) => Recovered { result: Ok(()), value: Some(ast) },
         _ => {
-            let error_tokens = recover_until_token_found(cursor, recover_until);
-            Recovered { error_tokens, value: parser(cursor) }
+            let mut error_tokens = recover_until_token_found(cursor, recover_until);
+            let ast = parser(cursor);
+            if ast.is_none() && error_tokens.is_empty() {
+                if let Some(token) = cursor.peek_next() {
+                    error_tokens.push(token.clone())
+                }
+            }
+            let error = if error_tokens.is_empty() {
+                ASTParseError::UnexpectedEOF
+            } else {
+                ASTParseError::UnexpectedToken(error_tokens)
+            };
+            Recovered { result: Err(error), value: ast }
         }
     }
 }

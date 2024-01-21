@@ -16,7 +16,7 @@ pub fn parse_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     }
     return None;
 }
- 
+
 fn parse_or_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<OrExpression<'allocator, 'input>> {
     let span = Span::start(cursor);
 

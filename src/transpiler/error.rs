@@ -26,6 +26,10 @@ impl ErrorMessageKey {
         return localized_text.get_text(format!("error.{:>04}.{}", self.error_code, ty.get()))
     }
 
+    pub(crate) fn get_massage_optional(&self, localized_text: &LocalizedText, ty: ErrorMessageType) -> Option<String> {
+        return localized_text.get_text_optional(format!("error.{:>04}.{}", self.error_code, ty.get()))
+    }
+
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -21,7 +21,14 @@ impl LocalizedText {
         };
     }
     
-    pub(crate) fn get_text<T: ToString>(&self, key: T) -> String {
+    pub(crate) fn get_text<T: ToString + Clone>(&self, key: T) -> String {
+        return match self.get_text_optional(key.clone()) {
+            Some(text) => text.to_string(),
+            _ => format!("[Unknown text. | lang : {} | : key : {}]", self.lang, key.to_string())
+        };
+    }
+
+    pub(crate) fn get_text_optional<T: ToString>(&self, key: T) -> Option<String> {
         let key = key.to_string();
         let mut keys = key.split(".").collect::<Vec<_>>();
         let mut last_key = keys.pop();
@@ -34,10 +41,9 @@ impl LocalizedText {
             };
         }
 
-        return match last_key.map(|key| { current_table.get(key) }).flatten().map(|value| { value.as_str() }).flatten() {
-            Some(text) => text.to_string(),
-            _ => format!("[Unknown text. | lang : {} | : key : {}]", self.lang, key)
-        };
+        return last_key.map(|key| { current_table.get(key) })
+            .flatten().map(|value| { value.as_str() })
+            .flatten().map(|value| { value.to_string() });
     }
 
 }

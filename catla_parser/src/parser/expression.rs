@@ -535,18 +535,22 @@ fn parse_closure<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input
     let arguments = parse_closure_arguments(cursor)?;
 
     let mut error_tokens = Vec::new_in(cursor.allocator);
-    if cursor.current().get_kind() == TokenKind::FatArrow {
+    let fat_arrow_span = if cursor.current().get_kind() == TokenKind::FatArrow {
         cursor.next();
+        Ok(cursor.peek_prev().unwrap().span.clone())
     } else {
         error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::FatArrow, TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]));
         if cursor.current().get_kind() == TokenKind::FatArrow {
             cursor.next();
+            Ok(cursor.peek_prev().unwrap().span.clone())
+        } else {
+            Err(())
         }
-    }
+    };
 
     let expression_or_block = parse_with_recover(cursor, parse_expression_or_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
 
-    return Some(Closure { arguments, error_tokens, expression_or_block, span: span.elapsed(cursor) });
+    return Some(Closure { arguments, error_tokens, fat_arrow_span, expression_or_block, span: span.elapsed(cursor) });
 }
 
 fn parse_expression_or_block<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Either<Expression<'allocator, 'input>, Block<'allocator, 'input>>> {

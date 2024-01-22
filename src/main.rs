@@ -7,9 +7,7 @@ fn main() {
 
     let source = 
 "
-function () -> A {
-
-}
+let b = |!|
 ";
 
     let source_code = SourceCode { code: source.to_string(), module_name: "test_module".to_string(), path: None };

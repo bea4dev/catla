@@ -435,6 +435,7 @@ pub struct ReturnExpression<'allocator, 'input> {
 pub struct Closure<'allocator, 'input> {
     pub arguments: ClosureArguments<'allocator, 'input>,
     pub error_tokens: Vec<'allocator, Token<'input>>,
+    pub fat_arrow_span: Result<Range<usize>, ()>,
     pub expression_or_block: Recovered<'allocator, 'input, Either<Expression<'allocator, 'input>, Block<'allocator, 'input>>>,
     pub span: Range<usize>
 }

@@ -214,7 +214,7 @@ fn parse_statement_with_attributes<'allocator, 'input>(cursor: &mut TokenCursor<
         return Some(Ok(StatementAST::FunctionDefine(define)));
     }
 
-    if let Some(define) = parse_data_struct_deinfe(cursor, &statement_attributes) {
+    if let Some(define) = parse_data_struct_define(cursor, &statement_attributes) {
         return Some(Ok(StatementAST::DataStructDefine(define)));
     }
 
@@ -313,6 +313,10 @@ fn parse_function_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
         TokenKind::Mutex   => Ok(Either::Right(Spanned::new(MemoryManageAttributeKind::Mutex, name_token.unwrap().span.clone()))),
         _ => Err(unexpected_token_error(allocator, name_token))
     };
+
+    if name.is_err() {
+        cursor.prev();
+    }
 
     let args = parse_function_arguments(cursor);
 
@@ -416,7 +420,7 @@ pub fn parse_function_argument<'allocator, 'input>(cursor: &mut TokenCursor<'all
     return Some(FunctionArgument { name, type_tag, span: span.elapsed(cursor) })
 }
 
-fn parse_data_struct_deinfe<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<'allocator, StatementAttribute>) -> Option<DataStructDefine<'allocator, 'input>> {
+fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<'allocator, StatementAttribute>) -> Option<DataStructDefine<'allocator, 'input>> {
     let span = Span::start(cursor);
     
     let kind_token = cursor.next();
@@ -521,7 +525,7 @@ fn parse_drop_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
         return None;
     }
 
-    let uncycle_keyword_span = if cursor.current().get_kind() == TokenKind::Acyclic {
+    let acyclic_keyword_span = if cursor.current().get_kind() == TokenKind::Acyclic {
         Some(cursor.next().unwrap().span.clone())
     } else {
         None
@@ -529,7 +533,7 @@ fn parse_drop_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
     let expression = parse_expression(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
     
-    return Some(DropStatement { acyclic_keyword_span: uncycle_keyword_span, expression, span: span.elapsed(cursor) });
+    return Some(DropStatement { acyclic_keyword_span, expression, span: span.elapsed(cursor) });
 }
 
 pub fn parse_block<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Block<'allocator, 'input>> {

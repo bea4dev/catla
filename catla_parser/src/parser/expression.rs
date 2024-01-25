@@ -437,9 +437,9 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     }
     let new_keyword_span = new_keyword_token.unwrap().span.clone();
     
-    let uncycle_keyword_token = cursor.next();
-    let uncycle_keyword_span = if uncycle_keyword_token.get_kind() == TokenKind::Acyclic {
-        uncycle_keyword_token.map(|token| { token.span.clone() })
+    let acyclic_keyword_token = cursor.next();
+    let acyclic_keyword_span = if acyclic_keyword_token.get_kind() == TokenKind::Acyclic {
+        acyclic_keyword_token.map(|token| { token.span.clone() })
     } else {
         cursor.prev();
         None
@@ -471,7 +471,7 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
     let function_call = parse_function_call(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
 
-    return Some(NewExpression { new_keyword_span, acyclic_keyword_span: uncycle_keyword_span, path, error_tokens, function_call, span: span.elapsed(cursor) });
+    return Some(NewExpression { new_keyword_span, acyclic_keyword_span, path, error_tokens, function_call, span: span.elapsed(cursor) });
 }
 
 fn parse_mapping_operator<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<MappingOperator<'allocator, 'input>> {

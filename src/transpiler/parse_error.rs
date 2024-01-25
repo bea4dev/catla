@@ -1,4 +1,4 @@
-use catla_parser::{parser::{Program, StatementAST, Expression, ParseResult, ASTParseError, Generics, TypeTag, Recovered, Block, TypeInfo, ExpressionEnum, AndExpression, expression}, lexer::Token};
+use catla_parser::{parser::{ASTParseError, AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag}, lexer::Token};
 use either::Either::{Right, Left, self};
 
 use self::{statement::{not_separated_statement_error_1, statement_attributes_without_define}, misc::{Expected, unexpected_token_error, UnexpectedTokens}};
@@ -11,10 +11,6 @@ pub mod misc;
 
 
 pub fn collect_parse_error_program(ast: Program, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
-    for token in ast.not_separated_stmts.iter() {
-        errors.push(not_separated_statement_error_1(token))
-    }
-    
     let mut statement_errors = Vec::new();
     for statement in ast.statements.iter() {
         let statement = match statement {
@@ -114,6 +110,10 @@ pub fn collect_parse_error_program(ast: Program, errors: &mut Vec<TranspileError
         }
     }
 
+    for token in ast.not_separated_stmts.iter() {
+        errors.push(not_separated_statement_error_1(token))
+    }
+
     errors.extend(unexpected_token_error(&statement_errors, Expected::Statement, 0002));
 }
 
@@ -127,7 +127,7 @@ fn collect_parse_error_expression(ast: &Expression, errors: &mut Vec<TranspileEr
         ExpressionEnum::OrExpression(or_expression) => {
             collect_parse_error_and_expression(&or_expression.left_expr, errors, warnings);
             for expression in or_expression.right_exprs.iter() {
-                collect_parse_error_with_parse_result(&expression.1, collect_parse_error_and_expression, Expected::AndExpression, 0013, errors, warnings);
+                collect_parse_error_with_parse_result(&expression.1, collect_parse_error_and_expression, Expected::Expression, 0013, errors, warnings);
             }
         },
         ExpressionEnum::ReturnExpression(return_expression) => {
@@ -176,19 +176,149 @@ fn collect_parse_error_expression_or_block(ast: &Either<Expression, Block>, erro
 }
 
 fn collect_parse_error_and_expression(ast: &AndExpression, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    collect_parse_error_eqne_expression(&ast.left_expr, errors, warnings);
+    for expression in ast.right_exprs.iter() {
+        collect_parse_error_with_parse_result(&expression.1, collect_parse_error_eqne_expression, Expected::Expression, 0013, errors, warnings);
+    }
+}
 
+fn collect_parse_error_eqne_expression(ast: &EQNEExpression, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    collect_parse_error_compare_expression(&ast.left_expr, errors, warnings);
+    for expression in ast.right_exprs.iter() {
+        collect_parse_error_with_parse_result(&expression.1, collect_parse_error_compare_expression, Expected::Expression, 0013, errors, warnings);
+    }
+}
+
+fn collect_parse_error_compare_expression(ast: &CompareExpression, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    collect_parse_error_add_or_sub_expression(&ast.left_expr, errors, warnings);
+    for expression in ast.right_exprs.iter() {
+        collect_parse_error_with_parse_result(&expression.1, collect_parse_error_add_or_sub_expression, Expected::Expression, 0013, errors, warnings);
+    }
+}
+
+fn collect_parse_error_add_or_sub_expression(ast: &AddOrSubExpression, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    collect_parse_error_mul_or_div_expression(&ast.left_expr, errors, warnings);
+    for expression in ast.right_exprs.iter() {
+        collect_parse_error_with_parse_result(&expression.1, collect_parse_error_mul_or_div_expression, Expected::Expression, 0013, errors, warnings);
+    }
+}
+
+fn collect_parse_error_mul_or_div_expression(ast: &MulOrDivExpression, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    collect_parse_error_factor(&ast.left_expr, errors, warnings);
+    for expression in ast.right_exprs.iter() {
+        collect_parse_error_with_parse_result(&expression.1, collect_parse_error_factor, Expected::Expression, 0013, errors, warnings);
+    }
+}
+
+fn collect_parse_error_factor(ast: &Factor, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    collect_parse_error_with_parse_result(&ast.primary, collect_parse_error_primary, Expected::Expression, 0013, errors, warnings);
+}
+
+fn collect_parse_error_primary(ast: &Primary, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    collect_parse_error_primary_left(&ast.left, errors, warnings);
+    for chain in ast.chain.iter() {
+        collect_parse_error_primary_right(chain, errors, warnings);
+    }
+}
+
+fn collect_parse_error_primary_left(ast: &PrimaryLeft, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    match &ast.first_expr {
+        PrimaryLeftExpr::Simple(simple_primary) => {
+            if let SimplePrimary::Expression { expression, error_tokens } = &simple_primary.0 {
+                collect_parse_error_with_parse_result(expression, collect_parse_error_expression, Expected::Expression, 0013, errors, warnings);
+                collect_error_tokens(error_tokens, Expected::Unnecessary, 0013, errors);
+            }
+            if let Some(function_call) = &simple_primary.1 {
+                collect_parse_error_function_call(function_call, errors, warnings);
+            }
+        },
+        PrimaryLeftExpr::NewExpression(new_expression) => {
+            collect_error_tokens(&new_expression.error_tokens, Expected::Unnecessary, 0016, errors);
+            collect_parse_error_with_parse_result(&new_expression.function_call, collect_parse_error_function_call, Expected::FunctionCall, 0016, errors, warnings);
+        },
+        PrimaryLeftExpr::IfExpression(if_expression) => {
+            collect_parse_error_if_statement(&if_expression.if_statement, errors, warnings);
+            for if_or_else in if_expression.chain.iter() {
+                collect_parse_error_with_recovered(
+                    &if_or_else.else_if_or_else,
+                    collect_parse_error_if_statement_or_block,
+                    Expected::IfStatementOrBlock,
+                    0017,
+                    errors,
+                    warnings
+                );
+            }
+        },
+        PrimaryLeftExpr::LoopExpression(loop_expression) => {
+            collect_parse_error_with_parse_result(&loop_expression.block, collect_parse_error_block, Expected::Block, 0018, errors, warnings)
+        }
+    }
+}
+
+fn collect_parse_error_function_call(ast: &FunctionCall, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    if let Some(generics) = &ast.generics {
+        collect_parse_error_with_parse_result(generics, collect_parse_error_generics, Expected::Generics, 0015, errors, warnings);
+    }
+    collect_error_tokens(&ast.error_tokens, Expected::Unnecessary, 0015, errors);
+    collect_parse_error_with_parse_result(&ast.arg_exprs, collect_parse_error_argument_expr, Expected::ArgumentExpression, 0015, errors, warnings);
+}
+
+fn collect_parse_error_argument_expr(ast: &bumpalo::collections::Vec<Expression>, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    for expression in ast.iter() {
+        collect_parse_error_expression(expression, errors, warnings);
+    }
+}
+
+fn collect_parse_error_if_statement(ast: &IfStatement, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    collect_parse_error_with_parse_result(&ast.condition, collect_parse_error_expression, Expected::Expression, 0017, errors, warnings);
+    collect_parse_error_with_recovered(&ast.block, collect_parse_error_block, Expected::Block, 0017, errors, warnings);
+}
+
+fn collect_parse_error_if_statement_or_block(ast: &Either<IfStatement, Block>, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    match ast {
+        Left(if_statement) => collect_parse_error_if_statement(if_statement, errors, warnings),
+        Right(block) => collect_parse_error_block(block, errors, warnings)
+    }
+}
+
+fn collect_parse_error_primary_right(ast: &PrimaryRight, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    if let Some(second_expr) = &ast.second_expr {
+        if let Some(function_call) = &second_expr.1 {
+            collect_parse_error_function_call(function_call, errors, warnings);
+        }
+    }
+    if let Some(mapping_operator) = &ast.mapping_operator {
+        let block = match &mapping_operator.value {
+            MappingOperatorKind::NullElvisBlock(block) => block,
+            MappingOperatorKind::ResultElvisBlock(block) => block,
+            _ => return
+        };
+        collect_parse_error_with_recovered(block, collect_parse_error_block, Expected::Block, 0019, errors, warnings)
+    }
 }
 
 fn collect_parse_error_type_tag(ast: &TypeTag, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
-
+    collect_parse_error_with_parse_result(&ast.type_info, collect_parse_error_type_info, Expected::TypeInfo, 0020, errors, warnings);
 }
 
 fn collect_parse_error_type_info(ast: &TypeInfo, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
-    
+    if let Some(generics) = &ast.generics {
+        collect_parse_error_generics(generics, errors, warnings);
+    }
+    for attribute in ast.type_attributes.iter() {
+        if let TypeAttributeEnum::Result(generics) = &attribute.value {
+            if let Some(generics) = generics {
+                collect_parse_error_generics(generics, errors, warnings);
+            }
+        }
+    }
 }
 
 fn collect_parse_error_generics(ast: &Generics, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
-
+    for element in ast.elements.iter() {
+        collect_parse_error_type_info(element, errors, warnings);
+    }
+    collect_error_tokens(&ast.error_tokens, Expected::Unnecessary, 0021, errors);
 }
 
 fn collect_parse_error_with_parse_result<T>(

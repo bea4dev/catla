@@ -97,11 +97,15 @@ pub(crate) enum Expected {
     DataStructName,
     ExtendsType,
     ImplementsType,
-    AndExpression,
     ClosureArgument,
     VerticalBarRight,
     FatArrow,
-    ExpressionOrBlock
+    ExpressionOrBlock,
+    Generics,
+    ArgumentExpression,
+    FunctionCall,
+    IfStatementOrBlock,
+    TypeInfo
 }
 
 impl Expected {
@@ -121,11 +125,15 @@ impl Expected {
             Expected::DataStructName => "data_struct_name",
             Expected::ExtendsType => "extends_type",
             Expected::ImplementsType => "implements_type",
-            Expected::AndExpression => "and_expression",
             Expected::ClosureArgument => "closure_argument",
             Expected::VerticalBarRight => "vertical_bar_right",
             Expected::FatArrow => "fat_arrow",
-            Expected::ExpressionOrBlock => "expression_or_block"
+            Expected::ExpressionOrBlock => "expression_or_block",
+            Expected::Generics => "generics",
+            Expected::ArgumentExpression => "argument_expression",
+            Expected::FunctionCall => "function_call",
+            Expected::IfStatementOrBlock => "if_statement_or_block",
+            Expected::TypeInfo => "type_info"
         });
     }
 }

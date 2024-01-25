@@ -18,6 +18,10 @@ closure_argument = "ここではクロージャーの引数を定義すること
 vertical_bar_right = "クロージャーの引数定義は'|'で閉じる必要があります"
 fat_arrow = "クロージャーの記述形式が正しくありません。引数定義の後には'=>'が必要です"
 expression_or_block = "式もしくはブロックが必要です"
+generics = "ここにはジェネリクスを記述することができます"
+function_call = "ここには関数呼び出しが必要です"
+if_statement_or_block = "if式もしくはブロックが必要です"
+type_info = "型情報が必要です"
 
 
 [error.0001]
@@ -65,4 +69,25 @@ message = "計算式または論理式の記述形式が正しくありません
 label_0 = "式として有効ではありません。"
 [error.0014]
 message = "クロージャーの記述形式が正しくありません"
+label_0 = ""
+[error.0015]
+message = "関数呼び出しの記述形式が正しくありません"
+label_0 = ""
+[error.0016]
+message = "new式の記述形式が正しくありません"
+label_0 = ""
+[error.0017]
+message = "if式の記述形式が正しくありません"
+label_0 = ""
+[error.0018]
+message = "loop式の記述形式が正しくありません"
+label_0 = ""
+[error.0019]
+message = "マッピング演算子の記述形式が正しくありません"
+label_0 = ""
+[error.0020]
+message = "型指定の記述形式が正しくありません"
+label_0 = ""
+[error.0021]
+message = "ジェネリクスの記述形式が正しくありません"
 label_0 = ""

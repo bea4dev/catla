@@ -48,13 +48,13 @@ pub struct SourceCode {
 
 pub fn transpile(source_code: SourceCode, context: Arc<TranspileContext>) -> TranspileResult {
 
-    return transpile_module(source_code, context);
+    return transpile_module(Arc::new(source_code), context);
 
 }
 
 
 fn transpile_module(
-    source_code: SourceCode,
+    source_code: Arc<SourceCode>,
     context: Arc<TranspileContext>,
 ) -> TranspileResult {
     let allocator = Bump::new();

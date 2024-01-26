@@ -29,7 +29,7 @@ pub struct TranspileSettings {
 
 
 pub struct TranspileModuleContext {
-    pub source_code: SourceCode,
+    pub source_code: Arc<SourceCode>,
     pub module_name: String,
     pub context: Arc<TranspileContext>
 }

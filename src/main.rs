@@ -1,3 +1,5 @@
+use std::{collections::HashMap, sync::Mutex};
+
 use crate::transpiler::{SourceCode, transpile, context::{TranspileSettings, TranspileContext}};
 
 pub mod transpiler;

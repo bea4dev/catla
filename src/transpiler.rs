@@ -1,11 +1,9 @@
-use std::{path::Path, sync::Arc};
+use std::{path::Path, sync::{Arc, Mutex}};
 
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 
-use crate::localize::localizer::LocalizedText;
-
-use self::{context::{TranspileSettings, TranspileModuleContext, TranspileContext}, error::TranspileReport, component::{ComponentContainer, EntityIDMapper, NameEnvironment}, parse_error::collect_parse_error_program};
+use self::{context::{TranspileModuleContext, TranspileContext}, error::TranspileReport, component::{EntityIDMapper, NameEnvironment}, parse_error::collect_parse_error_program};
 
 pub mod component;
 pub mod name_resolver;
@@ -16,7 +14,7 @@ pub mod parse_error;
 
 
 pub struct TranspileResult {
-    pub module_context: TranspileModuleContext,
+    pub module_context: Arc<TranspileModuleContext>,
     pub errors: Vec<TranspileError>,
     pub warnings: Vec<TranspileWarning>
 }
@@ -38,7 +36,6 @@ impl TranspileWarning {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceCode {
     pub code: String,
     pub module_name: String,
@@ -60,8 +57,12 @@ fn transpile_module(
     let allocator = Bump::new();
 
     let module_name = source_code.module_name.clone();
-    let module_context = TranspileModuleContext { source_code, module_name, context };
+    let module_context = Arc::new(
+        TranspileModuleContext { source_code, module_name: module_name.clone(), context: context.clone() }
+    );
     let source = module_context.source_code.code.as_str();
+
+    context.register_module_context(module_name, module_context.clone());
 
     let ast = parse_source(source, &allocator);
 

@@ -5,9 +5,12 @@ use catla_parser::{lexer::Token, parser::{Spanned, StatementAttribute}};
 
 use crate::transpiler::{error::{TranspileReport, ErrorMessageKey, ErrorMessageType}, context::TranspileModuleContext, TranspileError};
 
+use super::misc::AdviceReport;
+
 
 pub(crate) struct NotSeparatedStatement {
-    token: Spanned<String>
+    token: Spanned<String>,
+    advice_report: AdviceReport
 }
 
 impl TranspileReport for NotSeparatedStatement {
@@ -26,18 +29,30 @@ impl TranspileReport for NotSeparatedStatement {
             .with_note(key.get_massage(text, ErrorMessageType::Note))
             .finish()
             .print((context.module_name.as_str(), Source::from(context.source_code.code.as_str())))
-            .unwrap()
+            .unwrap();
+        
+        self.advice_report.print(context, self.token.span.start);
+    }
+
+    fn add_advice(&mut self, module_name: String, advice: super::misc::Advice) {
+        self.advice_report.add_advice(module_name, advice);
     }
 }
 
-pub(crate) fn not_separated_statement_error_1(token: &Token) -> TranspileError {
-    return TranspileError::new(NotSeparatedStatement { token: Spanned::new(token.text.to_string(), token.span.clone()) });
+pub(crate) fn not_separated_statement_error_1(token: &Token, context: &TranspileModuleContext) -> TranspileError {
+    let mut error = TranspileError::new(NotSeparatedStatement {
+        token: Spanned::new(token.text.to_string(), token.span.clone()),
+        advice_report: AdviceReport::new()
+    });
+    error.add_advice(context.module_name.clone(), super::misc::Advice::Add { add: ";".to_string(), position: token.span.start });
+    return error;
 }
 
 
 
 pub(crate) struct StatementAttributesWithoutDefine {
-    attributes_span: Range<usize>
+    attributes_span: Range<usize>,
+    advice_report: AdviceReport
 }
 
 impl TranspileReport for StatementAttributesWithoutDefine {
@@ -58,10 +73,17 @@ impl TranspileReport for StatementAttributesWithoutDefine {
             .print((context.module_name.as_str(), Source::from(context.source_code.code.as_str())))
             .unwrap()
     }
+
+    fn add_advice(&mut self, module_name: String, advice: super::misc::Advice) {
+        self.advice_report.add_advice(module_name, advice);
+    }
 }
 
 pub(crate) fn statement_attributes_without_define(attributes: &bumpalo::collections::Vec<StatementAttribute>) -> TranspileError {
     let span_start = attributes.first().unwrap().span.start;
     let span_end = attributes.last().unwrap().span.end;
-    return TranspileError::new(StatementAttributesWithoutDefine { attributes_span: span_start..span_end });
+    return TranspileError::new(StatementAttributesWithoutDefine {
+        attributes_span: span_start..span_end,
+        advice_report: AdviceReport::new()
+    });
 }

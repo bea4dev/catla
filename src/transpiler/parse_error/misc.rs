@@ -1,6 +1,6 @@
-use std::{collections::{BTreeMap, HashMap}, ops::Range};
+use std::{collections::BTreeMap, ops::Range};
 
-use ariadne::{Report, ReportKind, Label, Color, Source};
+use ariadne::{sources, Color, Label, Report, ReportKind, Source};
 use catla_parser::parser::{Spanned, ASTParseError};
 use indexmap::IndexMap;
 
@@ -11,6 +11,7 @@ pub(crate) struct UnexpectedTokens {
     pub span: Range<usize>,
     pub error_code: usize,
     pub expected: Expected,
+    pub advice_report: AdviceReport
 }
 
 impl TranspileReport for UnexpectedTokens {
@@ -40,13 +41,20 @@ impl TranspileReport for UnexpectedTokens {
         }
         builder.finish()
             .print((module_name, Source::from(context.source_code.code.as_str())))
-            .unwrap()
+            .unwrap();
+
+        self.advice_report.print(context, self.span.start);
+    }
+
+    fn add_advice(&mut self, module_name: String, advice: Advice) {
+        self.advice_report.add_advice(module_name, advice);
     }
 }
 
 pub(crate) struct UnexpectedEOF {
     error_code: usize,
-    expected: Expected
+    expected: Expected,
+    advice_report: AdviceReport
 }
 
 impl TranspileReport for UnexpectedEOF {
@@ -65,7 +73,7 @@ impl TranspileReport for UnexpectedEOF {
             .with_code(self.error_code)
             .with_message(key.get_massage(text, ErrorMessageType::Message))
             .with_label(
-                Label::new((module_name, (code_length - 1)..code_length))
+                Label::new((module_name, code_length..code_length))
                     .with_message(label_message)
                     .with_color(Color::Red)
             );
@@ -78,7 +86,13 @@ impl TranspileReport for UnexpectedEOF {
         }
         builder.finish()
             .print((module_name, Source::from(context.source_code.code.as_str())))
-            .unwrap()
+            .unwrap();
+
+        self.advice_report.print(context, code_length);
+    }
+
+    fn add_advice(&mut self, module_name: String, advice: Advice) {
+        self.advice_report.add_advice(module_name, advice);
     }
 }
 
@@ -101,6 +115,7 @@ pub(crate) enum Expected {
     ClosureArgument,
     VerticalBarRight,
     FatArrow,
+    FatArrowAndBlock,
     ExpressionOrBlock,
     Generics,
     ArgumentExpression,
@@ -129,6 +144,7 @@ impl Expected {
             Expected::ClosureArgument => "closure_argument",
             Expected::VerticalBarRight => "vertical_bar_right",
             Expected::FatArrow => "fat_arrow",
+            Expected::FatArrowAndBlock => "fat_arrow_and_block",
             Expected::ExpressionOrBlock => "expression_or_block",
             Expected::Generics => "generics",
             Expected::ArgumentExpression => "argument_expression",
@@ -139,7 +155,7 @@ impl Expected {
     }
 }
 
-pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected: Expected, error_code: usize) -> Vec<TranspileError> {
+pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected: Expected, error_code: usize, context: &TranspileModuleContext) -> Vec<TranspileError> {
     let mut transpile_errors = Vec::new();
     let mut unexpected_tokens = Vec::new();
 
@@ -153,16 +169,59 @@ pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected:
         }
     }
 
+    let advice_add = match expected {
+        Expected::Unnecessary => None,
+        Expected::Statement => None,
+        Expected::Expression => None,
+        Expected::ImportElements => None,
+        Expected::ParenthesisLeft => Some("("),
+        Expected::ParenthesisRight => Some(")"),
+        Expected::BraceRight => Some("}"),
+        Expected::VariableName => Some("name_here"),
+        Expected::FunctionName => Some("name_here"),
+        Expected::FunctionArgument => None,
+        Expected::Block => Some("{ /* do something */ }"),
+        Expected::DataStructName => Some("NameHere"),
+        Expected::ExtendsType => None,
+        Expected::ImplementsType => None,
+        Expected::ClosureArgument => None,
+        Expected::VerticalBarRight => Some("|"),
+        Expected::FatArrow => None,
+        Expected::FatArrowAndBlock => Some("=> { /* do something */ }"),
+        Expected::ExpressionOrBlock => Some("{ /* do something */ }"),
+        Expected::Generics => None,
+        Expected::ArgumentExpression => None,
+        Expected::FunctionCall => None,
+        Expected::IfStatementOrBlock => Some("{ /* do something */ }"),
+        Expected::TypeInfo => None,
+    };
+
     if !unexpected_tokens.is_empty() {
         let tokens: Vec<Spanned<String>> = unexpected_tokens.iter().map(|token| { Spanned::new(token.text.to_string(), token.span.clone()) }).collect();
         let span_start = tokens.first().unwrap().span.start;
         let span_end = tokens.last().unwrap().span.end;
 
-        transpile_errors.push(TranspileError::new(UnexpectedTokens { span: span_start..span_end, error_code, expected }));
+        let mut error = TranspileError::new(UnexpectedTokens { span: span_start..span_end, error_code, expected, advice_report: AdviceReport::new() });
+
+        if expected == Expected::Unnecessary {
+            error.add_advice(context.module_name.clone(), Advice::Remove { span: span_start..span_end })
+        } else {
+            if let Some(add) = advice_add {
+                error.add_advice(context.module_name.clone(), Advice::Add { add: add.to_string(), position: span_start })
+            }
+        };
+
+        transpile_errors.push(error);
     }
 
     if has_eof_error {
-        transpile_errors.push(TranspileError::new(UnexpectedEOF { error_code, expected }));
+        let mut error = TranspileError::new(UnexpectedEOF { error_code, expected, advice_report: AdviceReport::new() });
+
+        if let Some(add) = advice_add {
+            error.add_advice(context.module_name.clone(), Advice::Add { add: add.to_string(), position: context.source_code.code.len() });
+        }
+
+        transpile_errors.push(error);
     }
 
     return transpile_errors;
@@ -176,16 +235,28 @@ pub(crate) struct AdviceReport {
 
 impl AdviceReport {
 
+    pub(crate) fn new() -> AdviceReport {
+        return Self { elements: IndexMap::new() }
+    }
+
     pub(crate) fn add_advice(&mut self, module_name: String, advice: Advice) {
         let elements = self.elements.entry(module_name).or_insert_with(|| vec![]);
         elements.push(advice);
     }
     
     pub(crate) fn print(&self, context: &TranspileModuleContext, offset: usize) {
+        if self.elements.is_empty() {
+            return;
+        }
+
         let text = &context.context.localized_text;
 
-        let builder = Report::build(ReportKind::Advice, &context.module_name, offset)
+        let advice_color = Color::RGB(52, 226, 226);
+
+        let mut builder = Report::build(ReportKind::Custom("  > Advice", advice_color), &context.module_name, offset)
             .with_message(text.get_text("advice.message"));
+
+        let mut source_list = Vec::new();
 
         for (module_name, elements) in self.elements.iter() {
             let module_context = context.context.get_module_context(module_name).unwrap();
@@ -193,23 +264,28 @@ impl AdviceReport {
             let mut add_elements = BTreeMap::new();
 
             for advice in elements.iter() {
-                if let Advice::Add { add, position } = advice {
-                    let position = *position;
+                match advice {
+                    Advice::Add { add, position } => {
+                        let position = *position;
 
-                    let is_prev_space = match original_source.get((position - 1)..position) {
-                        Some(prev) => prev == " ",
-                        None => false
-                    };
-                    let is_current_space = match original_source.get(position..(position + 1)) {
-                        Some(current) => current == " ",
-                        None => false
-                    };
-                    let prev_space = if is_prev_space { "" } else { " " };
-                    let next_space = if is_current_space { "" } else { " " };
+                        let is_prev_space = match original_source.get((position - 1)..position) {
+                            Some(prev) => prev == " ",
+                            None => false
+                        };
+                        let is_current_space = match original_source.get(position..(position + 1)) {
+                            Some(current) => current == " ",
+                            None => false
+                        };
+                        let prev_space = if is_prev_space { "" } else { " " };
+                        let next_space = if is_current_space { "" } else { " " };
 
-                    let add = format!("{}{}{}", prev_space, add, next_space);
+                        let add = format!("{}{}{}", prev_space, add, next_space);
 
-                    add_elements.insert(position, Advice::Add { add, position });
+                        add_elements.insert(position, Advice::Add { add, position });
+                    },
+                    Advice::Remove { span } => {
+                        add_elements.insert(span.start, Advice::Remove { span: span.clone() });
+                    }
                 }
             }
 
@@ -242,18 +318,52 @@ impl AdviceReport {
 
             let span_source = &original_source[advice_span.clone()];
             
-            let mut index = 0;
+            let mut span_source_position = 0;
+            let mut advice_source_position = 0;
             let mut new_source = String::new();
             for (&position, advice) in add_elements.iter() {
-                
+                let advice_position = position - advice_span.start;
+                let prev_source = &span_source[span_source_position..advice_position];
+                new_source += prev_source;
+
+                advice_source_position += advice_position - span_source_position;
+
+                match advice {
+                    Advice::Add { add, position: _ } => {
+                        let advice_span_end = advice_source_position + add.len();
+                        builder.add_label(
+                            Label::new((module_name.clone(), advice_source_position..advice_span_end))
+                                .with_message(text.get_text("advice.add_label"))
+                                .with_color(advice_color)
+                        );
+                        advice_source_position = advice_span_end;
+                        new_source += add.as_str();
+                    },
+                    Advice::Remove { span } => {
+                        builder.add_label(
+                            Label::new((module_name.clone(), advice_source_position..(advice_source_position + (span.len()))))
+                                .with_message(text.get_text("advice.remove_label"))
+                                .with_color(Color::RGB(252, 233, 79))
+                        )
+                    },
+                }
+
+                span_source_position = advice_position;
             }
+            new_source += &span_source[span_source_position..span_source.len()];
+
+            source_list.push((module_context.module_name.clone(), new_source));
         }
+        
+        builder.set_note(text.get_text("advice.note"));
+
+        builder.finish().print(sources(source_list)).unwrap();
     }
 
 }
 
 
-pub(crate) enum Advice {
+pub enum Advice {
     Add { add: String, position: usize },
     Remove { span: Range<usize> }
 }

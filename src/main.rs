@@ -9,7 +9,7 @@ fn main() {
 
     let source = 
 "
-let = function () -> int { return 1 }
+let = function() -> int { return 1 }
 ";
 
     let source_code = SourceCode { code: source.to_string(), module_name: "test_module".to_string(), path: None };
@@ -18,10 +18,12 @@ let = function () -> int { return 1 }
 
     for error in result.errors.iter() {
         error.0.print(&result.module_context);
+        print!("\n\n");
     }
 
     for warning in result.warnings.iter() {
         warning.0.print(&result.module_context);
+        print!("\n\n");
     }
 
 }

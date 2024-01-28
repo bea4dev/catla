@@ -1,9 +1,9 @@
-use std::{path::Path, sync::{Arc, Mutex}};
+use std::{path::Path, sync::Arc};
 
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 
-use self::{context::{TranspileModuleContext, TranspileContext}, error::TranspileReport, component::{EntityIDMapper, NameEnvironment}, parse_error::collect_parse_error_program};
+use self::{context::{TranspileModuleContext, TranspileContext}, error::TranspileReport, component::{EntityIDMapper, NameEnvironment}, parse_error::{collect_parse_error_program, misc::Advice}};
 
 pub mod component;
 pub mod name_resolver;
@@ -24,15 +24,27 @@ pub struct TranspileError(pub Box<dyn TranspileReport>);
 pub struct TranspileWarning(pub Box<dyn TranspileReport>);
 
 impl TranspileError {
-    pub fn new<T: TranspileReport + 'static>(report: T) -> TranspileError {
+
+    pub(crate) fn new<T: TranspileReport + 'static>(report: T) -> TranspileError {
         return Self(Box::new(report))
     }
+
+    pub(crate) fn add_advice(&mut self, module_name: String, advice: Advice) {
+        self.0.add_advice(module_name, advice);
+    }
+
 }
 
 impl TranspileWarning {
-    pub fn new<T: TranspileReport + 'static>(report: T) -> TranspileWarning {
+
+    pub(crate) fn new<T: TranspileReport + 'static>(report: T) -> TranspileWarning {
         return Self(Box::new(report))
     }
+
+    pub(crate) fn add_advice(&mut self, module_name: String, advice: Advice) {
+        self.0.add_advice(module_name, advice);
+    }
+
 }
 
 
@@ -69,7 +81,7 @@ fn transpile_module(
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
-    collect_parse_error_program(ast, &mut errors, &mut warnings);
+    collect_parse_error_program(ast, &mut errors, &mut warnings, &module_context);
 
     let mut id_mapper = EntityIDMapper::new(&allocator);
     

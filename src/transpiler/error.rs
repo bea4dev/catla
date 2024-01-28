@@ -1,13 +1,13 @@
-use ariadne::Report;
-
 use crate::localize::localizer::LocalizedText;
 
-use super::context::TranspileModuleContext;
+use super::{context::TranspileModuleContext, parse_error::misc::Advice};
 
 
 pub trait TranspileReport {
 
     fn print(&self, context: &TranspileModuleContext);
+
+    fn add_advice(&mut self, module_name: String, advice: Advice);
 
 }
 

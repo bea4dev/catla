@@ -681,7 +681,7 @@ fn parse_with_recover<'allocator, 'input, T>(
             let mut error_tokens = recover_until_token_found(cursor, recover_until);
             let ast = parser(cursor);
             if ast.is_none() && error_tokens.is_empty() {
-                if let Some(token) = cursor.peek_next() {
+                if let Some(token) = cursor.current() {
                     error_tokens.push(token.clone())
                 }
             }

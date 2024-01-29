@@ -1,6 +1,6 @@
 use crate::localize::localizer::LocalizedText;
 
-use super::{context::TranspileModuleContext, parse_error::misc::Advice};
+use super::{advice::Advice, context::TranspileModuleContext};
 
 
 pub trait TranspileReport {

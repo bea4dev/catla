@@ -3,13 +3,14 @@ use std::{path::Path, sync::Arc};
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 
-use self::{context::{TranspileModuleContext, TranspileContext}, error::TranspileReport, component::{EntityIDMapper, NameEnvironment}, parse_error::{collect_parse_error_program, misc::Advice}};
+use self::{advice::Advice, component::{EntityIDMapper, NameEnvironment}, context::{TranspileModuleContext, TranspileContext}, error::TranspileReport, parse_error::collect_parse_error_program};
 
 pub mod component;
 pub mod name_resolver;
 pub mod error;
 pub mod context;
 pub mod parse_error;
+pub mod advice;
 
 
 

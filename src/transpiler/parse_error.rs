@@ -1,9 +1,9 @@
 use catla_parser::{parser::{ASTParseError, AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag}, lexer::Token};
 use either::Either::{Right, Left, self};
 
-use self::{statement::{not_separated_statement_error_1, statement_attributes_without_define}, misc::{unexpected_token_error, AdviceReport, Expected, UnexpectedTokens}};
+use self::{statement::{not_separated_statement_error_1, statement_attributes_without_define}, misc::{unexpected_token_error, Expected, UnexpectedTokens}};
 
-use super::{context::TranspileModuleContext, error::TranspileReport, TranspileError, TranspileWarning};
+use super::{advice::{Advice, AdviceReport}, context::TranspileModuleContext, error::TranspileReport, TranspileError, TranspileWarning};
 
 pub mod statement;
 pub mod misc;
@@ -167,7 +167,7 @@ fn collect_parse_error_expression(ast: &Expression, errors: &mut Vec<TranspileEr
                             expected: Expected::FatArrow,
                             advice_report: AdviceReport::new()
                         };
-                        error.add_advice(context.module_name.clone(), misc::Advice::Add { add: "=>".to_string(), position: span_start });
+                        error.add_advice(context.module_name.clone(), Advice::Add { add: "=>".to_string(), position: span_start });
                         errors.push(TranspileError::new(error));
                     }
                 }

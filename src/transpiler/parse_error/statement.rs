@@ -3,9 +3,7 @@ use std::ops::Range;
 use ariadne::{Report, ReportKind, Label, Source, Color};
 use catla_parser::{lexer::Token, parser::{Spanned, StatementAttribute}};
 
-use crate::transpiler::{error::{TranspileReport, ErrorMessageKey, ErrorMessageType}, context::TranspileModuleContext, TranspileError};
-
-use super::misc::AdviceReport;
+use crate::transpiler::{advice::{Advice, AdviceReport}, context::TranspileModuleContext, error::{TranspileReport, ErrorMessageKey, ErrorMessageType}, TranspileError};
 
 
 pub(crate) struct NotSeparatedStatement {
@@ -34,7 +32,7 @@ impl TranspileReport for NotSeparatedStatement {
         self.advice_report.print(context, self.token.span.start);
     }
 
-    fn add_advice(&mut self, module_name: String, advice: super::misc::Advice) {
+    fn add_advice(&mut self, module_name: String, advice: Advice) {
         self.advice_report.add_advice(module_name, advice);
     }
 }
@@ -44,7 +42,7 @@ pub(crate) fn not_separated_statement_error_1(token: &Token, context: &Transpile
         token: Spanned::new(token.text.to_string(), token.span.clone()),
         advice_report: AdviceReport::new()
     });
-    error.add_advice(context.module_name.clone(), super::misc::Advice::Add { add: ";".to_string(), position: token.span.start });
+    error.add_advice(context.module_name.clone(), Advice::Add { add: ";".to_string(), position: token.span.start });
     return error;
 }
 
@@ -74,7 +72,7 @@ impl TranspileReport for StatementAttributesWithoutDefine {
             .unwrap()
     }
 
-    fn add_advice(&mut self, module_name: String, advice: super::misc::Advice) {
+    fn add_advice(&mut self, module_name: String, advice: Advice) {
         self.advice_report.add_advice(module_name, advice);
     }
 }

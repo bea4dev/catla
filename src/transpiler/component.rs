@@ -80,7 +80,7 @@ impl<'allocator> NameEnvironment<'allocator> {
         };
     }
 
-    fn get_id<T: Sized>(&self, name: &String<'allocator>, ast_ptr: Option<&T>, environments: &ComponentContainer<NameEnvironment<'allocator>>) -> Option<EntityID> {
+    fn get_id<T: Sized>(&self, name: &str, ast_ptr: Option<&T>, environments: &ComponentContainer<NameEnvironment<'allocator>>) -> Option<EntityID> {
         return match self.map.get(name) {
             Some(entity_id) => Some(*entity_id),
             _ => {
@@ -97,10 +97,11 @@ impl<'allocator> NameEnvironment<'allocator> {
 
 pub(crate) fn get_name_entity_id<'allocator, T: Sized>(
     current_environment_id: EntityID,
-    name: &String<'allocator>,
+    name: &str,
     ast_ptr: Option<&T>,
     environments: &mut ComponentContainer<NameEnvironment<'allocator>>,
-    id_mapper: &mut EntityIDMapper
+    id_mapper: &mut EntityIDMapper,
+    allocator: &'allocator Bump
 ) -> EntityID {
 
     let current_environment = &environments[current_environment_id];
@@ -109,7 +110,7 @@ pub(crate) fn get_name_entity_id<'allocator, T: Sized>(
         _ => {
             let current_environment = &mut environments[current_environment_id];
             let name_entity_id = id_mapper.alloc_id(ast_ptr);
-            current_environment.map.insert(name.clone(), name_entity_id);
+            current_environment.map.insert(String::from_str_in(name, allocator), name_entity_id);
             name_entity_id
         }
     };

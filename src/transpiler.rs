@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 
-use self::{advice::Advice, component::{EntityIDMapper, NameEnvironment}, context::{TranspileModuleContext, TranspileContext}, error::TranspileReport, parse_error::collect_parse_error_program};
+use self::{advice::Advice, component::NameEnvironment, context::{TranspileModuleContext, TranspileContext}, error::TranspileReport, parse_error::collect_parse_error_program};
 
 pub mod component;
 pub mod name_resolver;
@@ -83,8 +83,6 @@ fn transpile_module(
     let mut warnings = Vec::new();
 
     collect_parse_error_program(ast, &mut errors, &mut warnings, &module_context);
-
-    let mut id_mapper = EntityIDMapper::new(&allocator);
     
     let mut name_environment = NameEnvironment::new(None, &allocator);
 

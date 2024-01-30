@@ -1,11 +1,20 @@
-use std::{mem::transmute, cell::{RefCell, Ref, RefMut}, ops::{Index, IndexMut}};
+use std::{cell::RefCell, mem::transmute, ops::{Index, IndexMut}};
 
 use bumpalo::{collections::String, Bump};
+use catla_parser::parser::AST;
 use hashbrown::{HashMap, hash_map::DefaultHashBuilder};
+
+use super::name_resolver::DefineWithName;
 
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct EntityID(usize);
+
+impl<T: Sized + AST> From<&T> for EntityID {
+    fn from(value: &T) -> Self {
+        return EntityID(unsafe { transmute(value) });
+    }
+}
 
 
 pub(crate) struct ComponentContainer<'allocator, T: Sized> {
@@ -39,35 +48,9 @@ impl<'allocator, T: Sized> IndexMut<EntityID> for ComponentContainer<'allocator,
 }
 
 
-pub(crate) struct EntityIDMapper<'allocator> {
-    map: HashMap<*const u8, EntityID, DefaultHashBuilder, &'allocator Bump>,
-    current_id: usize
-}
-
-impl<'allocator> EntityIDMapper<'allocator> {
-    
-    pub(crate) fn new(allocator: &'allocator Bump) -> EntityIDMapper<'allocator> {
-        return Self {
-            map: HashMap::new_in(allocator),
-            current_id: 0
-        };
-    }
-
-    pub(crate) fn alloc_id<T: Sized>(&mut self, ast_ptr: Option<&T>) -> EntityID {
-        return match ast_ptr {
-            Some(ast_ptr) => {
-                *self.map.entry(unsafe { transmute(ast_ptr) }).or_insert_with(|| { self.current_id += 1; EntityID(self.current_id) })
-            },
-            _ => { self.current_id += 1; EntityID(self.current_id) }
-        };
-    }
-
-}
-
-
 
 pub(crate) struct NameEnvironment<'allocator> {
-    map: HashMap<String<'allocator>, EntityID, DefaultHashBuilder, &'allocator Bump>,
+    map: RefCell<HashMap<String<'allocator>, DefineWithName, DefaultHashBuilder, &'allocator Bump>>,
     parent: Option<EntityID>
 }
 
@@ -75,43 +58,26 @@ impl<'allocator> NameEnvironment<'allocator> {
     
     pub(crate) fn new(parent: Option<EntityID>, allocator: &'allocator Bump) -> NameEnvironment<'allocator> {
         return Self {
-            map: HashMap::new_in(allocator),
+            map: RefCell::new(HashMap::new_in(allocator)),
             parent
         };
     }
 
-    fn get_id<T: Sized>(&self, name: &str, ast_ptr: Option<&T>, environments: &ComponentContainer<NameEnvironment<'allocator>>) -> Option<EntityID> {
-        return match self.map.get(name) {
-            Some(entity_id) => Some(*entity_id),
+    pub(crate) fn get_name_owner(&self, name: &str, environments: &ComponentContainer<NameEnvironment<'allocator>>) -> Option<DefineWithName> {
+        return match self.map.borrow().get(name) {
+            Some(entity_id) => Some(entity_id.clone()),
             _ => {
                 let parent = match self.parent {
                     Some(parent) => &environments[parent],
                     _ => return None
                 };
-                parent.get_id(name, ast_ptr, environments)
+                parent.get_name_owner(name, environments)
             }
         };
     }
 
-}
+    pub(crate) fn set_name_owner(&self, name: String<'allocator>, owner: DefineWithName) {
+        self.map.borrow_mut().insert(name, owner);
+    }
 
-pub(crate) fn get_name_entity_id<'allocator, T: Sized>(
-    current_environment_id: EntityID,
-    name: &str,
-    ast_ptr: Option<&T>,
-    environments: &mut ComponentContainer<NameEnvironment<'allocator>>,
-    id_mapper: &mut EntityIDMapper,
-    allocator: &'allocator Bump
-) -> EntityID {
-
-    let current_environment = &environments[current_environment_id];
-    return match current_environment.get_id(name, ast_ptr.clone(), environments) {
-        Some(name_entity_id) => name_entity_id,
-        _ => {
-            let current_environment = &mut environments[current_environment_id];
-            let name_entity_id = id_mapper.alloc_id(ast_ptr);
-            current_environment.map.insert(String::from_str_in(name, allocator), name_entity_id);
-            name_entity_id
-        }
-    };
 }

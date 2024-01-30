@@ -4,7 +4,7 @@ pub mod types;
 
 use std::ops::Range;
 use either::Either;
-use crate::{lexer::{Token, Lexer, TokenKind}, util::parser_utils::bump_vec};
+use crate::{lexer::{Token, Lexer, TokenKind}, util::parser_utils::{bump_vec, impl_ast}};
 
 use bumpalo::{collections::Vec, Bump};
 
@@ -39,6 +39,54 @@ pub enum ASTParseError<'allocator, 'input> {
 }
 
 pub type ParseResult<'allocator, 'input, T> = Result<T, ASTParseError<'allocator, 'input>>;
+
+
+pub trait AST {}
+impl_ast!{
+    ProgramAST<'_, '_>,
+    StatementAST<'_, '_>,
+    FunctionDefine<'_, '_>,
+    FunctionArgument<'_, '_>,
+    FunctionArguments<'_, '_>,
+    DataStructDefine<'_, '_>,
+    Extends<'_, '_>,
+    Implements<'_, '_>,
+    Import<'_, '_>,
+    ImportElements<'_, '_>,
+    DropStatement<'_, '_>,
+    Block<'_, '_>,
+    VariableDefine<'_, '_>,
+    Assignment<'_, '_>,
+    Exchange<'_, '_>,
+    ExpressionEnum<'_, '_>,
+    OrExpression<'_, '_>,
+    AndExpression<'_, '_>,
+    EQNEExpression<'_, '_>,
+    CompareExpression<'_, '_>,
+    AddOrSubExpression<'_, '_>,
+    MulOrDivExpression<'_, '_>,
+    Factor<'_, '_>,
+    Primary<'_, '_>,
+    PrimaryLeft<'_, '_>,
+    PrimaryLeftExpr<'_, '_>,
+    LoopExpression<'_, '_>,
+    IfExpression<'_, '_>,
+    IfStatement<'_, '_>,
+    PrimaryRight<'_, '_>,
+    SimplePrimary<'_, '_>,
+    MappingOperatorKind<'_, '_>,
+    FunctionCall<'_, '_>,
+    NewExpression<'_, '_>,
+    ElseIfOrElse<'_, '_>,
+    ReturnExpression<'_, '_>,
+    Closure<'_, '_>,
+    ClosureArguments<'_, '_>,
+    TypeTag<'_, '_>,
+    TypeInfo<'_, '_>,
+    TypeAttributeEnum<'_, '_>,
+    Generics<'_, '_>,
+    Literal<'_>
+}
 
 pub type Program<'allocator, 'input> = &'allocator ProgramAST<'allocator, 'input>;
 

@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 
-use self::{advice::Advice, component::NameEnvironment, context::{TranspileModuleContext, TranspileContext}, error::TranspileReport, parse_error::collect_parse_error_program};
+use self::{advice::Advice, component::{ComponentContainer, EntityID}, context::{TranspileModuleContext, TranspileContext}, error::TranspileReport, name_resolver::{name_resolve_program, EnvironmentSeparatorKind, NameEnvironment}, parse_error::collect_parse_error_program};
 
 pub mod component;
 pub mod name_resolver;
@@ -84,7 +84,14 @@ fn transpile_module(
 
     collect_parse_error_program(ast, &mut errors, &mut warnings, &module_context);
     
-    let mut name_environment = NameEnvironment::new(None, &allocator);
+    let name_environment = NameEnvironment::new(None, EnvironmentSeparatorKind::Function, &allocator);
+    let mut name_environments = ComponentContainer::new(&allocator);
+    let entity_id = EntityID::from(ast);
+    name_environments.insert(entity_id, name_environment);
+
+    name_resolve_program(ast, None, &mut name_environments, &mut errors, &mut warnings, &allocator);
+
+    drop(name_environments);
 
     return TranspileResult { module_context, errors, warnings }
 }

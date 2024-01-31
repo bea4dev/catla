@@ -1,16 +1,17 @@
-use std::ops::Range;
+use std::{cell::RefCell, ops::Range};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
-use catla_parser::parser::{expression, Expression, ExpressionEnum, PrimaryLeftExpr, Program, SimplePrimary, Spanned, StatementAST};
+use catla_parser::parser::{expression, Expression, ExpressionEnum, Generics, PrimaryLeftExpr, Program, SimplePrimary, Spanned, StatementAST, TypeInfo, TypeTag};
 use either::Either::Left;
+use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
-use super::{advice::AdviceReport, component::{ComponentContainer, EntityID, NameEnvironment}, error::{ErrorMessageKey, ErrorMessageType, TranspileReport}, TranspileError, TranspileWarning};
+use super::{advice::AdviceReport, component::{ComponentContainer, EntityID}, error::{ErrorMessageKey, ErrorMessageType, TranspileReport}, TranspileError, TranspileWarning};
 
 
 #[derive(Debug, Clone)]
-pub(crate) struct DefineWithName {
-    entity_id: EntityID,
+pub(crate) struct DefineWithName<'allocator> {
+    entity_id: EntityID<'allocator>,
     span: Range<usize>,
     define_kind: DefineKind
 }
@@ -23,18 +24,60 @@ pub(crate) enum DefineKind {
     DataStruct,
 }
 
+pub(crate) enum EnvironmentSeparatorKind {
+    None,
+    Function,
+    DataStruct,
+    Closure
+}
+
+pub(crate) struct NameEnvironment<'allocator> {
+    map: RefCell<HashMap<String<'allocator>, DefineWithName<'allocator>, DefaultHashBuilder, &'allocator Bump>>,
+    parent: Option<EntityID<'allocator>>,
+    separator: EnvironmentSeparatorKind
+}
+
+impl<'allocator> NameEnvironment<'allocator> {
+    
+    pub(crate) fn new(parent: Option<EntityID<'allocator>>, separator: EnvironmentSeparatorKind, allocator: &'allocator Bump) -> NameEnvironment<'allocator> {
+        return Self {
+            map: RefCell::new(HashMap::new_in(allocator)),
+            parent,
+            separator
+        };
+    }
+
+    pub(crate) fn get_name_define_info(&self, name: &str, environments: &ComponentContainer<NameEnvironment<'allocator>>) -> Option<DefineWithName<'allocator>> {
+        return match self.map.borrow().get(name) {
+            Some(entity_id) => Some(entity_id.clone()),
+            _ => {
+                let parent = match self.parent {
+                    Some(parent) => &environments[parent],
+                    _ => return None
+                };
+                parent.get_name_define_info(name, environments)
+            }
+        };
+    }
+
+    pub(crate) fn set_name_define_info(&self, name: String<'allocator>, define_info: DefineWithName<'allocator>) {
+        self.map.borrow_mut().insert(name, define_info);
+    }
+
+}
+
 
 
 pub(crate) fn name_resolve_program<'allocator>(
     ast: Program<'allocator, '_>,
-    parent_env_id: Option<EntityID>,
+    parent_env_id: Option<EntityID<'allocator>>,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
     let current_environment_id = EntityID::from(ast);
-    name_environments[current_environment_id] = NameEnvironment::new(parent_env_id, allocator);
+    name_environments.insert(current_environment_id, NameEnvironment::new(parent_env_id, EnvironmentSeparatorKind::None, allocator));
     let name_environment = &name_environments[current_environment_id];
 
     for statement in ast.statements.iter() {
@@ -44,18 +87,30 @@ pub(crate) fn name_resolve_program<'allocator>(
         };
 
         match statement {
-            StatementAST::Import(_) => todo!(),
+            StatementAST::Import(import) => {
+                let name_environment = &name_environments[current_environment_id];
+                let entity_id = EntityID::from(import);
+                for element in import.elements.elements.iter() {
+                    let define_info = DefineWithName { entity_id, span: element.span.clone(), define_kind: DefineKind::Import };
+                    if let Some(already_exists) = name_environment.get_name_define_info(element.value, &name_environments) {
+                        errors.push(NameAlreadyExists::new(define_info.span.clone(), already_exists.span.clone()));
+                    } else {
+                        let name = String::from_str_in(element.value, allocator);
+                        name_environment.set_name_define_info(name, define_info);
+                    }
+                }
+            },
             StatementAST::FunctionDefine(function_define) => {
                 if let Ok(function_name) = &function_define.name {
                     if let Left(name) = function_name {
                         let entity_id = EntityID::from(function_define);
                         let define_info = DefineWithName { entity_id, span: name.span.clone(), define_kind: DefineKind::Function };
 
-                        if let Some(owner) = name_environment.get_name_owner(name.value, name_environments) {
-                            errors.push(NameAlreadyExists::new(define_info, owner));
+                        if let Some(already_exists) = name_environment.get_name_define_info(name.value, name_environments) {
+                            errors.push(NameAlreadyExists::new(define_info.span.clone(), already_exists.span.clone()));
                         } else {
                             let name = String::from_str_in(name.value, allocator);
-                            name_environment.set_name_owner(name, define_info);
+                            name_environment.set_name_define_info(name, define_info);
                         }
                     }
                 }
@@ -65,11 +120,11 @@ pub(crate) fn name_resolve_program<'allocator>(
                     let entity_id = EntityID::from(data_struct_define);
                     let define_info = DefineWithName { entity_id, span: data_struct_name.span.clone(), define_kind: DefineKind::DataStruct };
 
-                    if let Some(owner) = name_environment.get_name_owner(data_struct_name.value, name_environments) {
-                        errors.push(NameAlreadyExists::new(define_info, owner));
+                    if let Some(already_exists) = name_environment.get_name_define_info(data_struct_name.value, name_environments) {
+                        errors.push(NameAlreadyExists::new(define_info.span.clone(), already_exists.span.clone()));
                     } else {
                         let name = String::from_str_in(data_struct_name.value, allocator);
-                        name_environment.set_name_owner(name, define_info);
+                        name_environment.set_name_define_info(name, define_info);
                     }
                 }
             },
@@ -107,15 +162,36 @@ pub(crate) fn name_resolve_program<'allocator>(
                     name_resolve_expression(right_expr, current_environment_id, name_environments, errors, warnings, allocator);
                 }
             },
-            StatementAST::Import(_) => todo!(),
-            StatementAST::StatementAttributes(_) => todo!(),
-            StatementAST::VariableDefine(_) => todo!(),
-            StatementAST::FunctionDefine(_) => todo!(),
-            StatementAST::DataStructDefine(_) => todo!(),
-            StatementAST::DropStatement(_) => todo!(),
+            StatementAST::VariableDefine(variable_define) => {
+                if let Some(expression) = &variable_define.expression {
+                    if let Ok(expression) = expression {
+                        name_resolve_expression(&expression, current_environment_id, name_environments, errors, warnings, allocator);
+                    }
+                }
+            },
+            //StatementAST::FunctionDefine(function_define) => {
+                
+            //},
+            //StatementAST::DataStructDefine(_) => todo!(),
+            //StatementAST::DropStatement(_) => todo!(),
             StatementAST::Expression(expression) => {
                 name_resolve_expression(&expression, current_environment_id, name_environments, errors, warnings, allocator);
             },
+            _ => {}
+        }
+
+
+        let name_environment = &name_environments[current_environment_id];
+        match statement {
+            StatementAST::VariableDefine(variable_define) => {
+                if let Ok(variable_name) = &variable_define.name {
+                    let entity_id = EntityID::from(variable_define);
+                    let define_info = DefineWithName { entity_id, span: variable_name.span.clone(), define_kind: DefineKind::Variable };
+                    let name = String::from_str_in(variable_name.value, allocator);
+                    name_environment.set_name_define_info(name, define_info);
+                }
+            },
+            _ => continue
         }
     }
 }
@@ -160,20 +236,52 @@ fn name_resolve_expression<'allocator>(
 
 }
 
+fn name_resolve_generics<'allocator>(
+    ast: &Generics<'allocator, '_>,
+    environment_id: EntityID,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    allocator: &'allocator Bump
+) {
+
+}
+
+fn name_resolve_type_tag<'allocator>(
+    ast: &TypeTag<'allocator, '_>,
+    environment_id: EntityID,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    allocator: &'allocator Bump
+) {
+
+}
+
+fn name_resolve_type_info<'allocator>(
+    ast: &TypeInfo<'allocator, '_>,
+    environment_id: EntityID,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    allocator: &'allocator Bump
+) {
+
+}
 
 
 
 pub(crate) struct NameAlreadyExists {
-    define: DefineWithName,
-    already_exists: DefineWithName,
+    define_span: Range<usize>,
+    already_exists_span: Range<usize>,
     advice_report: AdviceReport
 }
 
 impl NameAlreadyExists {
-    pub(crate) fn new(define: DefineWithName, already_exists: DefineWithName) -> TranspileError {
+    pub(crate) fn new(define_span: Range<usize>, already_exists_span: Range<usize>) -> TranspileError {
         return TranspileError::new(Self {
-            define,
-            already_exists,
+            define_span,
+            already_exists_span,
             advice_report: AdviceReport::new()
         });
     }
@@ -187,16 +295,16 @@ impl TranspileReport for NameAlreadyExists {
         let error_code = 0022;
         let key = ErrorMessageKey::new(error_code);
         
-        Report::build(ReportKind::Error, module_name, self.define.span.start)
+        Report::build(ReportKind::Error, module_name, self.define_span.start)
             .with_code(error_code)
             .with_message(key.get_massage(text, ErrorMessageType::Message))
             .with_label(
-                Label::new((module_name, self.define.span.clone()))
+                Label::new((module_name, self.define_span.clone()))
                     .with_color(Color::Red)
                     .with_message(key.get_massage(text, ErrorMessageType::Label(0)))
             )
             .with_label(
-                Label::new((module_name, self.already_exists.span.clone()))
+                Label::new((module_name, self.already_exists_span.clone()))
                     .with_color(Color::Yellow)
                     .with_message(key.get_massage(text, ErrorMessageType::Label(1)))
             )
@@ -205,7 +313,7 @@ impl TranspileReport for NameAlreadyExists {
             .print((module_name, Source::from(context.source_code.code.as_str())))
             .unwrap();
 
-        self.advice_report.print(context, self.define.span.start);
+        self.advice_report.print(context, self.define_span.start);
     }
 
     fn add_advice(&mut self, module_name: std::prelude::v1::String, advice: super::advice::Advice) {

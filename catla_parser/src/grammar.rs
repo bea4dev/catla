@@ -14,7 +14,7 @@ bnf_rules!(
 
     define_with_attr    ::= statement_attribute ( function_define | data_struct_define | variable_define )
 
-    function_define     ::= "function" [ generics_info ] ( literal | memory_manage_attr ) function_arguments [ type_tag ] [ line_feed ] block
+    function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments [ type_tag ] [ line_feed ] block
     function_arguments  ::= "(" [ line_feed ] [ function_argument ] { "," [ line_feed ] [ function_argument ] } ")"
     function_argument   ::= literal type_tag
 
@@ -22,9 +22,12 @@ bnf_rules!(
 
     statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" }
 
-    data_struct_define  ::= ( "class" | "struct" | "interface" ) literal [ generics_info ] [ extends_info ] [ implements_info ] block
+    data_struct_define  ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] [ extends_info ] [ implements_info ] block
     extends_info        ::= "extends" type_info
     implements_info     ::= "implements" type_info { "," [ type_info ] }
+    
+    generics_define     ::= "<" [ line_feed ] generics_element { "," [ line_feed ] [ generics_element ] } ">"
+    generics_element    ::= literal [ ":" [ line_feed ] type_info { "+" [ line_feed ] [ type_info ] } ]
 
     import_statement    ::= "import" literal { "::" [ line_feed ] ( literal | import_elements ) }
     import_elements     ::= "{" [ line_feed ] ( [ literal ] { "," [ line_feed ] [ literal ] } | "*" ) "}"

@@ -21,6 +21,7 @@ pub(crate) enum DefineKind {
     Import,
     Function,
     Variable,
+    FunctionArgument,
     DataStruct,
 }
 
@@ -168,30 +169,39 @@ pub(crate) fn name_resolve_program<'allocator>(
                         name_resolve_expression(&expression, current_environment_id, name_environments, errors, warnings, allocator);
                     }
                 }
+
+                if let Ok(variable_name) = &variable_define.name {
+                    let entity_id = EntityID::from(variable_define);
+                    let define_info = DefineWithName { entity_id, span: variable_name.span.clone(), define_kind: DefineKind::Variable };
+                    let name = String::from_str_in(variable_name.value, allocator);
+                    name_environments[current_environment_id].set_name_define_info(name, define_info);
+                }
             },
-            //StatementAST::FunctionDefine(function_define) => {
-                
-            //},
+            StatementAST::FunctionDefine(function_define) => {
+                let name_environment = NameEnvironment::new(Some(current_environment_id), EnvironmentSeparatorKind::Function, allocator);
+
+                // TODO - generics
+
+                for argument in function_define.args.arguments.iter() {
+                    let entity_id = EntityID::from(argument);
+                    let define_info = DefineWithName { entity_id, span: argument.span.clone(), define_kind: DefineKind::FunctionArgument };
+                    let name = String::from_str_in(argument.name.value, allocator);
+                    name_environment.set_name_define_info(name, define_info);
+                }
+
+                let entity_id = EntityID::from(function_define);
+                name_environments.insert(entity_id, name_environment);
+
+                if let Some(block) = &function_define.block.value {
+                    name_resolve_program(block.program, Some(entity_id), name_environments, errors, warnings, allocator);
+                }
+            },
             //StatementAST::DataStructDefine(_) => todo!(),
             //StatementAST::DropStatement(_) => todo!(),
             StatementAST::Expression(expression) => {
                 name_resolve_expression(&expression, current_environment_id, name_environments, errors, warnings, allocator);
             },
             _ => {}
-        }
-
-
-        let name_environment = &name_environments[current_environment_id];
-        match statement {
-            StatementAST::VariableDefine(variable_define) => {
-                if let Ok(variable_name) = &variable_define.name {
-                    let entity_id = EntityID::from(variable_define);
-                    let define_info = DefineWithName { entity_id, span: variable_name.span.clone(), define_kind: DefineKind::Variable };
-                    let name = String::from_str_in(variable_name.value, allocator);
-                    name_environment.set_name_define_info(name, define_info);
-                }
-            },
-            _ => continue
         }
     }
 }
@@ -233,7 +243,7 @@ fn name_resolve_expression<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-
+    
 }
 
 fn name_resolve_generics<'allocator>(

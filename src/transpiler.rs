@@ -84,10 +84,7 @@ fn transpile_module(
 
     collect_parse_error_program(ast, &mut errors, &mut warnings, &module_context);
     
-    let name_environment = NameEnvironment::new(None, EnvironmentSeparatorKind::Function, &allocator);
     let mut name_environments = ComponentContainer::new(&allocator);
-    let entity_id = EntityID::from(ast);
-    name_environments.insert(entity_id, name_environment);
 
     name_resolve_program(ast, None, &mut name_environments, &mut errors, &mut warnings, &allocator);
 

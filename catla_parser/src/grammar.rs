@@ -1,6 +1,7 @@
 use bnf_rules::bnf_rules_macro::bnf_rules;
 use bnf_rules::bnf_rules_parser::lexer::{*};
 use bnf_rules::bnf_rules_parser::parser::{*};
+use proc_macro_regex::regex;
 
 // This is an LR(1) parser generator, used for maintain quality.
 // If the specified grammar is ambiguous, compilation is aborted with conflict.
@@ -79,6 +80,9 @@ bnf_rules!(
     end_of_statement    ::= line_feed | ";"
     line_feed           ::= fn (line_feed_tokenizer) // r"\n+"
 );
+
+regex!(pub number_literal_regex r"\d+(\.\d+)?");
+
 
 fn literal_tokenizer(source: &Vec<char>, mut current_position: usize) -> usize {
     let mut iteration_count = 0;

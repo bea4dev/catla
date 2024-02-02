@@ -11,6 +11,11 @@ fn main() {
 "
 let = function() -> int { return 1 }
 || => { 1 * 1 } = 200
+
+let a = b + 20.5
+
+function test() {}
+function test() {}
 ";
 
     let source_code = SourceCode { code: source.to_string(), module_name: "test_module".to_string(), path: None };

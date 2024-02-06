@@ -15,7 +15,7 @@ bnf_rules!(
 
     define_with_attr    ::= statement_attribute ( function_define | data_struct_define | variable_define )
 
-    function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments [ type_tag ] [ line_feed ] block
+    function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments [ function_type_tag ] [ line_feed ] block
     function_arguments  ::= "(" [ line_feed ] [ function_argument ] { "," [ line_feed ] [ function_argument ] } ")"
     function_argument   ::= literal type_tag
 
@@ -71,7 +71,8 @@ bnf_rules!(
 
     return_expression   ::= "return" [ expression ]
 
-    type_tag            ::= ( ":" | "->" ) type_info
+    type_tag            ::= ":" type_info
+    function_type_tag   ::= "->" type_info
     type_info           ::= literal { "::" literal } [ generics_info ] { type_attribute }
     type_attribute      ::= "?" | ( "!" [ generics_info ] )
     generics_info       ::= "<" [ line_feed ] [ type_info ] { "," [ line_feed ] [ type_info ] } ">"

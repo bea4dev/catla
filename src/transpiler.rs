@@ -11,6 +11,7 @@ pub mod error;
 pub mod context;
 pub mod parse_error;
 pub mod advice;
+pub mod syntax_validation;
 
 
 

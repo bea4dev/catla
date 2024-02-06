@@ -1,6 +1,10 @@
+use std::ops::Range;
+
+use ariadne::{Color, Label, Report, ReportKind, Source};
+
 use crate::localize::localizer::LocalizedText;
 
-use super::{advice::Advice, context::TranspileModuleContext};
+use super::{advice::{Advice, AdviceReport}, context::TranspileModuleContext, TranspileError};
 
 
 pub trait TranspileReport {
@@ -51,4 +55,56 @@ impl ErrorMessageType {
         }
     }
     
+}
+
+
+pub(crate) struct SimpleError {
+    error_code: usize,
+    message_span: Range<usize>,
+    labels: Vec<(Range<usize>, Color)>,
+    advice_report: AdviceReport
+}
+
+impl SimpleError {
+    pub(crate) fn new(error_code: usize, message_span: Range<usize>, labels: Vec<(Range<usize>, Color)>) -> TranspileError {
+        return TranspileError::new(SimpleError { error_code, message_span, labels, advice_report: AdviceReport::new() });
+    }
+}
+
+impl TranspileReport for SimpleError {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let key = ErrorMessageKey::new(self.error_code);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.message_span.start)
+            .with_code(self.error_code)
+            .with_message(key.get_massage(text, ErrorMessageType::Message));
+
+        let mut index = 0;
+        for label in self.labels.iter() {
+            builder.add_label(
+                Label::new((module_name, label.0.clone()))
+                    .with_color(label.1.clone())
+                    .with_message(key.get_massage(text, ErrorMessageType::Label(index)))
+            );
+            index += 1;
+        }
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            builder.set_note(note);
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+        builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+
+        self.advice_report.print(context, self.message_span.start);
+    }
+
+    fn add_advice(&mut self, module_name: String, advice: Advice) {
+        self.advice_report.add_advice(module_name, advice);
+    }
 }

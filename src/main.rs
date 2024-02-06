@@ -14,6 +14,12 @@ let = function() -> int { return 1 }
 
 let a = b + 20.5
 
+class TestClass {
+    var field0: int
+
+    test()
+}
+
 function test() {}
 function test() {}
 ";

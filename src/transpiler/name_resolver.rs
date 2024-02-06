@@ -43,7 +43,12 @@ pub(crate) struct NameEnvironment<'allocator> {
 
 impl<'allocator> NameEnvironment<'allocator> {
     
-    pub(crate) fn new(parent: Option<EntityID<'allocator>>, separator: Option<EnvironmentSeparatorKind>, span: Range<usize>, allocator: &'allocator Bump) -> NameEnvironment<'allocator> {
+    pub(crate) fn new(
+        parent: Option<EntityID<'allocator>>,
+        separator: Option<EnvironmentSeparatorKind>,
+        span: Range<usize>,
+        allocator: &'allocator Bump
+    ) -> NameEnvironment<'allocator> {
         return Self {
             name_define_info_map: RefCell::new(HashMap::new_in(allocator)),
             parent,
@@ -711,7 +716,7 @@ impl TranspileReport for UndefinedIdentifier {
     fn print(&self, context: &super::context::TranspileModuleContext) {
         let module_name = &context.module_name;
         let text = &context.context.localized_text;
-        let error_code = 0024;
+        let error_code = 0023;
         let key = ErrorMessageKey::new(error_code);
 
         Report::build(ReportKind::Error, module_name, self.literal_span.start)

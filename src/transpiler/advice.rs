@@ -76,13 +76,15 @@ impl AdviceReport {
             }
 
             const CLEARANCE: usize = 50;
+            /*
             advice_span.start = advice_span.start.checked_sub(CLEARANCE).unwrap_or(0);
             loop {
                 if original_source.is_char_boundary(advice_span.start) {
                     break;
                 }
                 advice_span.start -= 1;
-            }
+            }*/
+            advice_span.start = 0;
 
             advice_span.end = original_source.len().min(advice_span.end + CLEARANCE);
             loop {

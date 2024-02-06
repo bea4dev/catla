@@ -1,14 +1,14 @@
 use std::ops::Range;
 
-use ariadne::{Color, Label, Report, ReportKind, Source};
-use catla_parser::parser::{statement, AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST};
+use ariadne::Color;
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST};
 use either::Either::{Left, Right};
 
 use crate::transpiler::{error::SimpleError, TranspileError, TranspileWarning};
 
 
-const ERROR__INVALID_ASSIGNMENT_FORMAT: usize = 0024;
-const ERROR__STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT: usize = 0025;
+const ERROR_INVALID_ASSIGNMENT_FORMAT: usize = 0024;
+const ERROR_STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT: usize = 0025;
 
 
 pub(crate) fn validate_syntax_program(
@@ -42,7 +42,7 @@ pub(crate) fn validate_syntax_program(
 
             if !is_valid_and_span.0 {
                 let span = is_valid_and_span.1;
-                errors.push(SimpleError::new(ERROR__STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT, span.clone(), vec![(span, Color::Red)]));
+                errors.push(SimpleError::new(ERROR_STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT, span.clone(), vec![(span, Color::Red)]));
                 continue;
             }
         }
@@ -51,7 +51,7 @@ pub(crate) fn validate_syntax_program(
             StatementAST::Assignment(assignment) => {
                 if !is_valid_format_for_assignment(assignment.left_expr) {
                     let span = get_expression_span(assignment.left_expr);
-                    errors.push(SimpleError::new(ERROR__INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![(span, Color::Red)]));
+                    errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![(span, Color::Red)]));
                 }
                 validate_syntax_expression(assignment.left_expr, errors, warnings);
                 if let Ok(right_expr) = assignment.right_expr {
@@ -61,13 +61,13 @@ pub(crate) fn validate_syntax_program(
             StatementAST::Exchange(exchange) => {
                 if !is_valid_format_for_assignment(exchange.left_expr) {
                     let span = get_expression_span(exchange.left_expr);
-                    errors.push(SimpleError::new(ERROR__INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![(span, Color::Red)]));
+                    errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![(span, Color::Red)]));
                 }
                 validate_syntax_expression(exchange.left_expr, errors, warnings);
                 if let Ok(right_expr) = exchange.right_expr {
                     if !is_valid_format_for_assignment(right_expr) {
                         let span = get_expression_span(right_expr);
-                        errors.push(SimpleError::new(ERROR__INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![(span, Color::Red)]));
+                        errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![(span, Color::Red)]));
                     }
                     validate_syntax_expression(right_expr, errors, warnings);
                 }

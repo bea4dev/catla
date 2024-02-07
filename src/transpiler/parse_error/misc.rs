@@ -206,7 +206,8 @@ pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected:
             error.add_advice(context.module_name.clone(), Advice::Remove { span: span_start..span_end })
         } else {
             if let Some(add) = advice_add {
-                error.add_advice(context.module_name.clone(), Advice::Add { add: add.to_string(), position: span_start })
+                let advice = Advice::Add { add: add.to_string(), position: span_start, message_override: None };
+                error.add_advice(context.module_name.clone(), advice)
             }
         };
 
@@ -217,7 +218,8 @@ pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected:
         let mut error = TranspileError::new(UnexpectedEOF { error_code, expected, advice_report: AdviceReport::new() });
 
         if let Some(add) = advice_add {
-            error.add_advice(context.module_name.clone(), Advice::Add { add: add.to_string(), position: context.source_code.code.len() });
+            let advice = Advice::Add { add: add.to_string(), position: context.source_code.code.len(), message_override: None };
+            error.add_advice(context.module_name.clone(), advice);
         }
 
         transpile_errors.push(error);

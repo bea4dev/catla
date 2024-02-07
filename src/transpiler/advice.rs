@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, ops::Range};
 
-use ariadne::{sources, Color, Label, Report, ReportKind};
+use ariadne::{sources, Color, Label, Report, ReportKind, Source};
 use indexmap::IndexMap;
 
 use super::context::TranspileModuleContext;
@@ -41,7 +41,7 @@ impl AdviceReport {
 
             for advice in elements.iter() {
                 match advice {
-                    Advice::Add { add, position } => {
+                    Advice::Add { add, position, message_override } => {
                         let position = *position;
 
                         let is_prev_space = match original_source.get((position - 1)..position) {
@@ -57,7 +57,7 @@ impl AdviceReport {
 
                         let add = format!("{}{}{}", prev_space, add, next_space);
 
-                        add_elements.insert(position, Advice::Add { add, position });
+                        add_elements.insert(position, Advice::Add { add, position, message_override: message_override.clone() });
                     },
                     Advice::Remove { span } => {
                         add_elements.insert(span.start, Advice::Remove { span: span.clone() });
@@ -68,7 +68,7 @@ impl AdviceReport {
             let mut advice_span = usize::MAX..0;
             for element in elements.iter() {
                 let span = match element {
-                    Advice::Add { add: _, position } => *position..*position,
+                    Advice::Add { add: _, position, message_override: _ } => *position..*position,
                     Advice::Remove { span } => span.clone()
                 };
                 advice_span.start = advice_span.start.min(span.start);
@@ -105,11 +105,12 @@ impl AdviceReport {
                 advice_source_position += advice_position - span_source_position;
 
                 match advice {
-                    Advice::Add { add, position: _ } => {
+                    Advice::Add { add, position: _, message_override } => {
                         let advice_span_end = advice_source_position + add.len();
+                        let message_key = message_override.unwrap_or("advice.add_label");
                         builder.add_label(
                             Label::new((module_name.clone(), advice_source_position..advice_span_end))
-                                .with_message(text.get_text("advice.add_label"))
+                                .with_message(text.get_text(message_key))
                                 .with_color(advice_color)
                         );
                         advice_source_position = advice_span_end;
@@ -140,6 +141,25 @@ impl AdviceReport {
 
 
 pub enum Advice {
-    Add { add: String, position: usize },
+    Add { add: String, position: usize, message_override: Option<&'static str> },
     Remove { span: Range<usize> }
+}
+
+
+pub(crate) fn get_column(source: &str, index: usize) -> usize {
+    let source = Source::from(source);
+    let line_info = source.get_offset_line(index);
+    return if let Some(column) = line_info {
+        column.2
+    } else {
+        0
+    };
+}
+
+pub(crate) fn create_space_indent(amount: usize) -> String {
+    let mut str = String::new();
+    for i in 0..amount {
+        str += " ";
+    }
+    return str;
 }

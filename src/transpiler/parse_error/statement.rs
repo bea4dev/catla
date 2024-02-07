@@ -42,7 +42,8 @@ pub(crate) fn not_separated_statement_error_1(token: &Token, context: &Transpile
         token: Spanned::new(token.text.to_string(), token.span.clone()),
         advice_report: AdviceReport::new()
     });
-    error.add_advice(context.module_name.clone(), Advice::Add { add: ";".to_string(), position: token.span.start });
+    let advice = Advice::Add { add: ";".to_string(), position: token.span.start, message_override: None };
+    error.add_advice(context.module_name.clone(), advice);
     return error;
 }
 

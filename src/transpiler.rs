@@ -89,7 +89,7 @@ fn transpile_module(
 
     name_resolve_program(ast, None, &mut name_environments, &mut errors, &mut warnings, &allocator);
 
-    validate_syntax_program(ast, false, &mut errors, &mut warnings);
+    validate_syntax_program(ast, &module_context, None, &mut errors, &mut warnings);
 
     drop(name_environments);
 

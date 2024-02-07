@@ -167,7 +167,8 @@ fn collect_parse_error_expression(ast: &Expression, errors: &mut Vec<TranspileEr
                             expected: Expected::FatArrow,
                             advice_report: AdviceReport::new()
                         };
-                        error.add_advice(context.module_name.clone(), Advice::Add { add: "=>".to_string(), position: span_start });
+                        let advice = Advice::Add { add: "=>".to_string(), position: span_start, message_override: None };
+                        error.add_advice(context.module_name.clone(), advice);
                         errors.push(TranspileError::new(error));
                     }
                 }

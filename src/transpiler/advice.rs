@@ -110,11 +110,16 @@ impl AdviceReport {
                     Advice::Add { add, position: _, message_override } => {
                         let advice_span_end = advice_source_position + add.len();
                         let message_key = message_override.unwrap_or("advice.add_label");
+
+                        let advice_label_span_start = advice_source_position + floor_whitespace(add, 0);
+                        let advice_label_span_end = advice_span_end - (add.len() - ceil_whitespace(add, add.len()));
+
                         builder.add_label(
-                            Label::new((module_name.clone(), advice_source_position..advice_span_end))
+                            Label::new((module_name.clone(), advice_label_span_start..advice_label_span_end))
                                 .with_message(text.get_text(message_key))
                                 .with_color(advice_color)
                         );
+                        
                         advice_source_position = advice_span_end;
                         new_source += add.as_str();
                     },
@@ -164,4 +169,27 @@ pub(crate) fn create_space_indent(amount: usize) -> String {
         str += " ";
     }
     return str;
+}
+
+pub(crate) fn floor_whitespace(source: &str, mut position: usize) -> usize {
+    let chars = source[position..].chars();
+    for char in chars {
+        if !char.is_whitespace() {
+            break;
+        }
+        position += char.len_utf8();
+    }
+    return position;
+}
+
+pub(crate) fn ceil_whitespace(source: &str, mut position: usize) -> usize {
+    let mut chars = source[..position].chars().collect::<Vec<_>>();
+    chars.reverse();
+    for char in chars {
+        if !char.is_whitespace() {
+            break;
+        }
+        position -= char.len_utf8();
+    }
+    return position;
 }

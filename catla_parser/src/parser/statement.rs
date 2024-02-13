@@ -433,7 +433,54 @@ pub fn parse_generics_define<'allocator, 'input>(cursor: &mut TokenCursor<'alloc
     let mut error_tokens = Vec::new_in(cursor.allocator);
 
     let greater_than = loop {
+        skip(cursor, &[TokenKind::LineFeed]);
 
+        let element = match parse_generics_define_element(cursor) {
+            Some(element) => element,
+            _ => {
+                skip(cursor, &[TokenKind::LineFeed]);
+
+                error_tokens.extend(read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::ParenthesisRight, TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]));
+                
+                match cursor.peek_prev().get_kind() {
+                    TokenKind::Comma => {
+                        skip(cursor, &[TokenKind::LineFeed]);
+                        continue;
+                    },
+                    TokenKind::ParenthesisRight => break Ok(()),
+                    TokenKind::BraceLeft => {
+                        cursor.prev();
+                        break Err(unexpected_token_error(cursor.allocator, cursor.current()));
+                    },
+                    _ => break Err(unexpected_token_error(cursor.allocator, cursor.peek_prev()))
+                }
+            }
+        };
+
+        arguments.push(argument);
+
+        let comma_or_paren_right = cursor.next().get_kind();
+        match comma_or_paren_right {
+            TokenKind::ParenthesisRight => break Ok(()),
+            TokenKind::Comma => {
+                skip(cursor, &[TokenKind::LineFeed]);
+                continue
+            },
+            TokenKind::BraceRight => {
+                cursor.prev();
+                break Err(unexpected_token_error(cursor.allocator, cursor.current()));
+            }
+            _ => {
+                let prev = cursor.peek_prev();
+                if let Some(prev) = prev {
+                    if prev.kind == TokenKind::LineFeed || prev.kind == TokenKind::Semicolon {
+                        break Err(unexpected_token_error(cursor.allocator, Some(prev)));
+                    }
+                    error_tokens.push(prev.clone());
+                }
+                continue;
+            }
+        }
     };
 
     return Some(GenericsDefine { elements, error_tokens, greater_than, span: span.elapsed(cursor) });
@@ -452,26 +499,23 @@ pub fn parse_generics_define_element<'allocator, 'input>(cursor: &mut TokenCurso
 
             let bound = match parse_type_info(cursor) {
                 Some(bound_type_info) => bound_type_info,
-                _ => {
-                    skip(cursor, &[TokenKind::LineFeed]);
-
-                    error_tokens.extend(read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::LessThan, TokenKind::Plus, TokenKind::LineFeed, TokenKind::Semicolon]));
-                    
-                    match cursor.peek_prev().get_kind() {
-                        TokenKind::Comma | TokenKind::LessThan => {
-                            cursor.prev();
-                            break;
-                        },
-                        _ => continue
-                    }
-                }
+                _ => break
             };
+
+            skip(cursor, &[TokenKind::LineFeed]);
+
+            bounds.push(bound);
+
+            if cursor.next().get_kind() != TokenKind::Plus {
+                cursor.prev();
+                break;
+            }
         }
     } else {
         cursor.prev();
     }
 
-    return Some(GenericsElement { name, bounds, error_tokens, span: span.elapsed(cursor) });
+    return Some(GenericsElement { name, bounds, span: span.elapsed(cursor) });
 }
 
 fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<'allocator, StatementAttribute>) -> Option<DataStructDefine<'allocator, 'input>> {

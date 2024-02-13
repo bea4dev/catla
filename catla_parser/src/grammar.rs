@@ -16,22 +16,21 @@ bnf_rules!(
     define_with_attr    ::= statement_attribute ( function_define | data_struct_define | variable_define )
 
     function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments [ function_type_tag ] [ line_feed ] block
-    function_arguments  ::= "(" [ line_feed ] [ function_argument ] { "," [ line_feed ] [ function_argument ] } ")"
+    function_arguments  ::= "(" [ line_feed ] [ function_argument [ line_feed ] ] { "," [ line_feed ] [ function_argument ] } ")"
     function_argument   ::= literal type_tag
 
     memory_manage_attr  ::= "new" | "drop" | "mutex"
 
     statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" }
 
-    data_struct_define  ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] [ extends_info ] [ implements_info ] block
-    extends_info        ::= "extends" type_info
-    implements_info     ::= "implements" type_info { "," [ type_info ] }
+    data_struct_define  ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] [ super_type_info ] block
+    super_type_info     ::= ":" [ line_feed ] type_info [ line_feed ] { "," [ type_info [ line_feed ] ] }
     
-    generics_define     ::= "<" [ line_feed ] generics_element { "," [ line_feed ] [ generics_element ] } ">"
-    generics_element    ::= literal [ ":" [ line_feed ] type_info { "+" [ line_feed ] type_info } ]
+    generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
+    generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]
 
     import_statement    ::= "import" literal { "::" [ line_feed ] ( literal | import_elements ) }
-    import_elements     ::= "{" [ line_feed ] ( [ literal ] { "," [ line_feed ] [ literal ] } | "*" ) "}"
+    import_elements     ::= "{" [ line_feed ] ( [ literal [ line_feed ] ] { "," [ line_feed ] [ literal [ line_feed ] ] } | "*" ) "}"
 
     drop_statement      ::= "drop" [ "acyclic" ] expression
 
@@ -63,9 +62,9 @@ bnf_rules!(
     loop_expression     ::= "loop" block
 
     closure             ::= ( closure_args | literal ) "=>" ( expression | block )
-    closure_args        ::= "|" [ [ line_feed ] function_argument ] { "," [ line_feed ] [ function_argument ] } "|"
+    closure_args        ::= "|" [ [ line_feed ] function_argument [ line_feed ] ] { "," [ line_feed ] [ function_argument [ line_feed ] ] } "|"
 
-    function_call       ::= [ ":" generics_info ] "(" [ [ line_feed ] expression ] { "," [ line_feed ] [ expression ] } ")"
+    function_call       ::= [ ":" generics_info ] "(" [ [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
 
     new_expression      ::= "new" [ "acyclic" ] literal { "::" [ line_feed ] literal } function_call
 
@@ -75,7 +74,7 @@ bnf_rules!(
     function_type_tag   ::= "->" type_info
     type_info           ::= literal { "::" literal } [ generics_info ] { type_attribute }
     type_attribute      ::= "?" | ( "!" [ generics_info ] )
-    generics_info       ::= "<" [ line_feed ] [ type_info ] { "," [ line_feed ] [ type_info ] } ">"
+    generics_info       ::= "<" [ line_feed ] [ type_info [ line_feed ] ] { "," [ line_feed ] [ type_info [ line_feed ] ] } ">"
 
     literal             ::= fn (literal_tokenizer) // r"\w+"
     end_of_statement    ::= line_feed | ";"

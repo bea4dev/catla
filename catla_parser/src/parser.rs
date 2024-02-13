@@ -115,7 +115,7 @@ pub enum StatementAST<'allocator, 'input> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionDefine<'allocator, 'input> {
     pub attributes: Vec<'allocator, StatementAttribute>,
-    pub generics: Option<Generics<'allocator, 'input>>,
+    pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
     pub name: FunctionName<'allocator, 'input>,
     pub args: FunctionArguments<'allocator, 'input>,
     pub type_tag: Option<TypeTag<'allocator, 'input>>,
@@ -165,11 +165,26 @@ pub struct FunctionArguments<'allocator, 'input> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenericsDefine<'allocator, 'input> {
+    pub elements: Vec<'allocator, GenericsElement<'allocator, 'input>>,
+    pub error_tokens: Vec<'allocator, Token<'input>>,
+    pub greater_than: ParseResult<'allocator, 'input, ()>,
+    pub span: Range<usize>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenericsElement<'allocator, 'input> {
+    pub name: Literal<'input>,
+    pub bounds: Vec<'allocator, TypeInfo<'allocator, 'input>>,
+    pub span: Range<usize>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataStructDefine<'allocator, 'input> {
     pub attributes: Vec<'allocator, StatementAttribute>,
     pub kind: DataStructKind,
     pub name: LiteralResult<'allocator, 'input>,
-    pub generics: Option<Generics<'allocator, 'input>>,
+    pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
     pub extends: Option<Extends<'allocator, 'input>>,
     pub implements: Option<Implements<'allocator, 'input>>,
     pub error_tokens: Vec<'allocator, Token<'input>>,

@@ -28,7 +28,7 @@ bnf_rules!(
     implements_info     ::= "implements" type_info { "," [ type_info ] }
     
     generics_define     ::= "<" [ line_feed ] generics_element { "," [ line_feed ] [ generics_element ] } ">"
-    generics_element    ::= literal [ ":" [ line_feed ] type_info { "+" [ line_feed ] [ type_info ] } ]
+    generics_element    ::= literal [ ":" [ line_feed ] type_info { "+" [ line_feed ] type_info } ]
 
     import_statement    ::= "import" literal { "::" [ line_feed ] ( literal | import_elements ) }
     import_elements     ::= "{" [ line_feed ] ( [ literal ] { "," [ line_feed ] [ literal ] } | "*" ) "}"

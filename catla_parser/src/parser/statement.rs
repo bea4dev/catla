@@ -357,7 +357,7 @@ fn parse_function_arguments<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
             _ => {
                 skip(cursor, &[TokenKind::LineFeed]);
 
-                error_tokens.extend(read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::ParenthesisRight, TokenKind::BraceRight, TokenKind::LineFeed, TokenKind::Semicolon]));
+                error_tokens.extend(read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::ParenthesisRight, TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]));
                 
                 match cursor.peek_prev().get_kind() {
                     TokenKind::Comma => {
@@ -365,7 +365,7 @@ fn parse_function_arguments<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
                         continue;
                     },
                     TokenKind::ParenthesisRight => break Ok(()),
-                    TokenKind::BraceRight => {
+                    TokenKind::BraceLeft => {
                         cursor.prev();
                         break Err(unexpected_token_error(cursor.allocator, cursor.current()));
                     },
@@ -418,6 +418,60 @@ pub fn parse_function_argument<'allocator, 'input>(cursor: &mut TokenCursor<'all
     };
     
     return Some(FunctionArgument { name, type_tag, span: span.elapsed(cursor) })
+}
+
+pub fn parse_generics_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<GenericsDefine<'allocator, 'input>> {
+    let span = Span::start(cursor);
+
+    let first_token = cursor.next().get_kind();
+    if first_token != TokenKind::LessThan {
+        cursor.prev();
+        return None;
+    }
+
+    let mut elements = Vec::new_in(cursor.allocator);
+    let mut error_tokens = Vec::new_in(cursor.allocator);
+
+    let greater_than = loop {
+
+    };
+
+    return Some(GenericsDefine { elements, error_tokens, greater_than, span: span.elapsed(cursor) });
+}
+
+pub fn parse_generics_define_element<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<GenericsElement<'allocator, 'input>> {
+    let span = Span::start(cursor);
+
+    let name = parse_literal(cursor)?;
+
+    let mut bounds = Vec::new_in(cursor.allocator);
+
+    if cursor.next().get_kind() == TokenKind::Colon {
+        loop {
+            skip(cursor, &[TokenKind::LineFeed]);
+
+            let bound = match parse_type_info(cursor) {
+                Some(bound_type_info) => bound_type_info,
+                _ => {
+                    skip(cursor, &[TokenKind::LineFeed]);
+
+                    error_tokens.extend(read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::LessThan, TokenKind::Plus, TokenKind::LineFeed, TokenKind::Semicolon]));
+                    
+                    match cursor.peek_prev().get_kind() {
+                        TokenKind::Comma | TokenKind::LessThan => {
+                            cursor.prev();
+                            break;
+                        },
+                        _ => continue
+                    }
+                }
+            };
+        }
+    } else {
+        cursor.prev();
+    }
+
+    return Some(GenericsElement { name, bounds, error_tokens, span: span.elapsed(cursor) });
 }
 
 fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<'allocator, StatementAttribute>) -> Option<DataStructDefine<'allocator, 'input>> {

@@ -48,6 +48,8 @@ impl_ast!{
     FunctionDefine<'_, '_>,
     FunctionArgument<'_, '_>,
     FunctionArguments<'_, '_>,
+    GenericsDefine<'_, '_>,
+    GenericsElement<'_, '_>,
     DataStructDefine<'_, '_>,
     SuperTypeInfo<'_, '_>,
     Import<'_, '_>,

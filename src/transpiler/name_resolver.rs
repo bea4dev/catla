@@ -24,6 +24,7 @@ pub(crate) enum DefineKind {
     FunctionArgument,
     ClosureArgument,
     DataStruct,
+    Generics
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -221,6 +222,10 @@ pub(crate) fn name_resolve_program<'allocator>(
                     }
                 }
 
+                if let Some(type_tag) = &variable_define.type_tag {
+                    name_resolve_type_tag(type_tag, current_environment_id, name_environments, errors, warnings, allocator);
+                }
+
                 if let Ok(variable_name) = &variable_define.name {
                     let entity_id = EntityID::from(variable_define);
                     let define_info = DefineWithName { entity_id, span: variable_name.span.clone(), define_kind: DefineKind::Variable };
@@ -233,6 +238,10 @@ pub(crate) fn name_resolve_program<'allocator>(
 
                 if let Some(generics_define) = &function_define.generics_define {
                     name_resolve_generics_define(generics_define, current_environment_id, name_environments, errors, warnings, allocator);
+                }
+
+                if let Some(type_tag) = &function_define.type_tag {
+                    name_resolve_type_tag(type_tag, current_environment_id, name_environments, errors, warnings, allocator);
                 }
 
                 for argument in function_define.args.arguments.iter() {
@@ -250,7 +259,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                 }
             },
             StatementAST::DataStructDefine(data_struct_define) => {
-                let mut name_environment = NameEnvironment::new(
+                let name_environment = NameEnvironment::new(
                     Some(current_environment_id),
                     Some(EnvironmentSeparatorKind::DataStruct),
                     data_struct_define.span.clone(),
@@ -268,9 +277,21 @@ pub(crate) fn name_resolve_program<'allocator>(
                     name_resolve_generics_define(generics_define, entity_id, name_environments, errors, warnings, allocator);
                 }
 
-                
+                if let Some(super_type_info) = &data_struct_define.super_type_info {
+                    for type_info in super_type_info.type_infos.iter() {
+                        name_resolve_type_info(type_info, entity_id, name_environments, errors, warnings, allocator);
+                    }
+                }
+
+                if let Some(block) = &data_struct_define.block.value {
+                    name_resolve_block(block, entity_id, name_environments, errors, warnings, allocator);
+                }
             },
-            //StatementAST::DropStatement(_) => todo!(),
+            StatementAST::DropStatement(drop_statement) => {
+                if let Ok(expression) = &drop_statement.expression {
+                    name_resolve_expression(&expression, current_environment_id, name_environments, errors, warnings, allocator);
+                }
+            },
             StatementAST::Expression(expression) => {
                 name_resolve_expression(&expression, current_environment_id, name_environments, errors, warnings, allocator);
             },
@@ -280,14 +301,22 @@ pub(crate) fn name_resolve_program<'allocator>(
 }
 
 fn name_resolve_generics_define<'allocator>(
-    ast: &GenericsDefine<'allocator, '_>,
+    ast: &'allocator GenericsDefine<'allocator, '_>,
     environment_id: EntityID<'allocator>,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
+    for element in ast.elements.iter() {
+        let entity_id = EntityID::from(element);
+        let define_info = DefineWithName { entity_id, span: element.span.clone(), define_kind: DefineKind::Generics };
+        name_environments[environment_id].set_name_define_info(String::from_str_in(element.name.value, allocator), define_info);
 
+        for bound_type_info in element.bounds.iter() {
+            name_resolve_type_info(bound_type_info, environment_id, name_environments, errors, warnings, allocator);
+        }
+    }
 }
 
 fn name_resolve_expression<'allocator>(
@@ -632,7 +661,9 @@ fn name_resolve_generics<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-
+    for type_info in ast.elements.iter() {
+        name_resolve_type_info(type_info, environment_id, name_environments, errors, warnings, allocator);
+    }
 }
 
 fn name_resolve_type_tag<'allocator>(
@@ -643,7 +674,9 @@ fn name_resolve_type_tag<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-
+    if let Ok(type_info) = &ast.type_info {
+        name_resolve_type_info(type_info, environment_id, name_environments, errors, warnings, allocator);
+    }
 }
 
 fn name_resolve_type_info<'allocator>(
@@ -654,7 +687,13 @@ fn name_resolve_type_info<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
+    if ast.path.len() == 1 {
+        name_resolve_literal(&ast.path[0], environment_id, name_environments, errors);
+    }
 
+    if let Some(generics) = &ast.generics {
+        name_resolve_generics(generics, environment_id, name_environments, errors, warnings, allocator);
+    }
 }
 
 fn name_resolve_literal<'allocator>(

@@ -49,8 +49,7 @@ impl_ast!{
     FunctionArgument<'_, '_>,
     FunctionArguments<'_, '_>,
     DataStructDefine<'_, '_>,
-    Extends<'_, '_>,
-    Implements<'_, '_>,
+    SuperTypeInfo<'_, '_>,
     Import<'_, '_>,
     ImportElements<'_, '_>,
     DropStatement<'_, '_>,
@@ -185,8 +184,7 @@ pub struct DataStructDefine<'allocator, 'input> {
     pub kind: DataStructKind,
     pub name: LiteralResult<'allocator, 'input>,
     pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
-    pub extends: Option<Extends<'allocator, 'input>>,
-    pub implements: Option<Implements<'allocator, 'input>>,
+    pub super_type_info: Option<SuperTypeInfo<'allocator, 'input>>,
     pub error_tokens: Vec<'allocator, Token<'input>>,
     pub block: BlockRecovered<'allocator, 'input>,
     pub span: Range<usize>
@@ -202,13 +200,7 @@ pub enum DataStructKindEnum {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Extends<'allocator, 'input> {
-    pub type_info: TypeInfoResult<'allocator, 'input>,
-    pub span: Range<usize>
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Implements<'allocator, 'input> {
+pub struct SuperTypeInfo<'allocator, 'input> {
     pub type_infos: Vec<'allocator, TypeInfo<'allocator, 'input>>,
     pub error_tokens: Vec<'allocator, Token<'input>>,
     pub span: Range<usize>

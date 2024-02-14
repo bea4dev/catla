@@ -21,8 +21,6 @@ pub enum TokenKind {
     Class,
     Struct,
     Interface,
-    Extends,
-    Implements,
     Import,
     DoubleColon,
     Comma,
@@ -101,7 +99,7 @@ impl<'input> Tokenizer<'input> {
     }
 }
 
-const NUMBER_OF_TOKENIZERS: usize = 60;
+const NUMBER_OF_TOKENIZERS: usize = 58;
 
 #[inline(always)]
 fn tokenizers<'input>() -> [Tokenizer<'input>; NUMBER_OF_TOKENIZERS] {
@@ -125,8 +123,6 @@ fn tokenizers<'input>() -> [Tokenizer<'input>; NUMBER_OF_TOKENIZERS] {
         Tokenizer::Keyword(TokenKind::Class, "class"),
         Tokenizer::Keyword(TokenKind::Struct, "struct"),
         Tokenizer::Keyword(TokenKind::Interface, "interface"),
-        Tokenizer::Keyword(TokenKind::Extends, "extends"),
-        Tokenizer::Keyword(TokenKind::Implements, "implements"),
         Tokenizer::Keyword(TokenKind::Import, "import"),
         Tokenizer::Keyword(TokenKind::DoubleColon, "::"),
         Tokenizer::Keyword(TokenKind::Comma, ","),

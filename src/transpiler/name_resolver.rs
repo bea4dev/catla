@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::Range};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
-use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, TypeInfo, TypeTag}};
+use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, TypeInfo, TypeTag}};
 use either::Either::{Left, Right};
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
@@ -231,7 +231,9 @@ pub(crate) fn name_resolve_program<'allocator>(
             StatementAST::FunctionDefine(function_define) => {
                 let name_environment = NameEnvironment::new(Some(current_environment_id), Some(EnvironmentSeparatorKind::Function), environment_span.clone(), allocator);
 
-                // TODO - generics
+                if let Some(generics_define) = &function_define.generics_define {
+                    name_resolve_generics_define(generics_define, current_environment_id, name_environments, errors, warnings, allocator);
+                }
 
                 for argument in function_define.args.arguments.iter() {
                     let entity_id = EntityID::from(argument);
@@ -247,7 +249,27 @@ pub(crate) fn name_resolve_program<'allocator>(
                     name_resolve_block(block, entity_id, name_environments, errors, warnings, allocator);
                 }
             },
-            //StatementAST::DataStructDefine(_) => todo!(),
+            StatementAST::DataStructDefine(data_struct_define) => {
+                let mut name_environment = NameEnvironment::new(
+                    Some(current_environment_id),
+                    Some(EnvironmentSeparatorKind::DataStruct),
+                    data_struct_define.span.clone(),
+                    allocator
+                );
+                let entity_id = EntityID::from(data_struct_define);
+
+                if let Ok(name) = &data_struct_define.name {
+                    let define_info = DefineWithName { entity_id, span: data_struct_define.span.clone(), define_kind: DefineKind::DataStruct };
+                    name_environment.set_name_define_info(String::from_str_in(name.value, allocator), define_info);
+                }
+                name_environments.insert(entity_id, name_environment);
+
+                if let Some(generics_define) = &data_struct_define.generics_define {
+                    name_resolve_generics_define(generics_define, entity_id, name_environments, errors, warnings, allocator);
+                }
+
+                
+            },
             //StatementAST::DropStatement(_) => todo!(),
             StatementAST::Expression(expression) => {
                 name_resolve_expression(&expression, current_environment_id, name_environments, errors, warnings, allocator);
@@ -257,6 +279,16 @@ pub(crate) fn name_resolve_program<'allocator>(
     }
 }
 
+fn name_resolve_generics_define<'allocator>(
+    ast: &GenericsDefine<'allocator, '_>,
+    environment_id: EntityID<'allocator>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    allocator: &'allocator Bump
+) {
+
+}
 
 fn name_resolve_expression<'allocator>(
     ast: Expression<'allocator, '_>,

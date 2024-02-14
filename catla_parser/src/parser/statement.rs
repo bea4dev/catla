@@ -1,4 +1,4 @@
-use super::{*, types::{parse_type_tag, parse_generics, parse_type_info, parse_type_info_result}};
+use super::{*, types::{parse_type_tag, parse_type_info}};
 use expression::{*};
 use bumpalo::collections::{Vec, CollectIn};
 
@@ -532,41 +532,23 @@ fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
 
     let generics_define = parse_generics_define(cursor);
     if generics_define.is_none() {
-        error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::Extends, TokenKind::Implements, TokenKind::BraceLeft]));
+        error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::Colon, TokenKind::BraceLeft]));
     }
 
-    let extends = parse_extends(cursor);
-    if extends.is_none() {
-        error_tokens.merged_extend(recover_until_token_found(cursor, &[TokenKind::Implements, TokenKind::BraceLeft]));
-    }
-    
-    let implements = parse_implements(cursor);
-    if implements.is_none() {
+    let super_type_info = parse_super_type_info(cursor);
+    if super_type_info.is_none() {
         error_tokens.merged_extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft]));
     }
 
     let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
     
-    return Some(DataStructDefine { attributes: statement_attributes.clone(), kind, name, generics_define, extends, implements, error_tokens, block, span: span.elapsed(cursor) });
+    return Some(DataStructDefine { attributes: statement_attributes.clone(), kind, name, generics_define, super_type_info, error_tokens, block, span: span.elapsed(cursor) });
 }
 
-fn parse_extends<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Extends<'allocator, 'input>> {
-    let span = Span::start(cursor);
-    
-    if cursor.next().get_kind() != TokenKind::Extends {
-        cursor.prev();
-        return None;
-    }
-
-    let type_info = parse_type_info_result(cursor);
-
-    return Some(Extends { type_info, span: span.elapsed(cursor) });
-}
-
-fn parse_implements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Implements<'allocator, 'input>> {
+fn parse_super_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<SuperTypeInfo<'allocator, 'input>> {
     let span = Span::start(cursor);
 
-    if cursor.next().get_kind() != TokenKind::Implements {
+    if cursor.next().get_kind() != TokenKind::Colon {
         cursor.prev();
         return None;
     }
@@ -575,15 +557,17 @@ fn parse_implements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'in
     let mut error_tokens = Vec::new_in(cursor.allocator);
 
     loop {
+        skip(cursor, &[TokenKind::LineFeed]);
+
         let type_info = match parse_type_info(cursor) {
             Some(type_info) => type_info,
             _ => {
-                let dropped_tokens = read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::BraceRight]);
+                let dropped_tokens = read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::BraceLeft]);
                 error_tokens.extend(dropped_tokens);
                 
                 match cursor.peek_prev().get_kind() {
                     TokenKind::Comma => continue,
-                    TokenKind::BraceRight => {
+                    TokenKind::BraceLeft => {
                         cursor.prev();
                         break;
                     },
@@ -596,7 +580,7 @@ fn parse_implements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'in
 
         let comma_or_brace = cursor.next().get_kind();
         match comma_or_brace {
-            TokenKind::BraceRight => {
+            TokenKind::BraceLeft => {
                 cursor.prev();
                 break;
             },
@@ -604,7 +588,7 @@ fn parse_implements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'in
         }
     }
 
-    return Some(Implements { type_infos, error_tokens, span: span.elapsed(cursor) });
+    return Some(SuperTypeInfo { type_infos, error_tokens, span: span.elapsed(cursor) });
 }
 
 fn parse_drop_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<DropStatement<'allocator, 'input>> {

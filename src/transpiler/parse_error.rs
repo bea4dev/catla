@@ -88,15 +88,11 @@ pub fn collect_parse_error_program(ast: Program, errors: &mut Vec<TranspileError
                     collect_parse_error_generics_define(generics_define, errors, warnings, context);
                 }
 
-                if let Some(extends) = &data_struct_define.extends {
-                    collect_parse_error_with_parse_result(&extends.type_info, collect_parse_error_type_info, Expected::ExtendsType, 0010, errors, warnings, context);
-                }
-
-                if let Some(implements) = &data_struct_define.implements {
-                    for type_info in implements.type_infos.iter() {
+                if let Some(super_type_info) = &data_struct_define.super_type_info {
+                    for type_info in super_type_info.type_infos.iter() {
                         collect_parse_error_type_info(type_info, errors, warnings, context);
                     }
-                    collect_error_tokens(&implements.error_tokens, Expected::ImplementsType, 0010, errors, context);
+                    collect_error_tokens(&super_type_info.error_tokens, Expected::SuperTypeInfo, 0010, errors, context);
                 }
 
                 collect_error_tokens(&data_struct_define.error_tokens, Expected::Unnecessary, 0010, errors, context);

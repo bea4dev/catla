@@ -14,7 +14,7 @@ let = function() -> int { return 1 }
 
 let a = b + 20.5
 
-class TestClass {
+class TestClass<T: Any> {
     var field0: int
 
     test()

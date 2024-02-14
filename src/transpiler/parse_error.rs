@@ -1,4 +1,4 @@
-use catla_parser::{parser::{ASTParseError, AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag}, lexer::Token};
+use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag}};
 use either::Either::{Right, Left, self};
 
 use self::{statement::{not_separated_statement_error_1, statement_attributes_without_define}, misc::{unexpected_token_error, Expected, UnexpectedTokens}};
@@ -60,8 +60,8 @@ pub fn collect_parse_error_program(ast: Program, errors: &mut Vec<TranspileError
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
-                if let Some(generics) = &function_define.generics {
-                    collect_parse_error_generics(generics, errors, warnings, context);
+                if let Some(generics_define) = &function_define.generics_define {
+                    collect_parse_error_generics_define(generics_define, errors, warnings, context);
                 }
                 collect_parse_error_only_parse_result_error(&function_define.name, Expected::FunctionName, 0009, errors, context);
                 
@@ -84,8 +84,8 @@ pub fn collect_parse_error_program(ast: Program, errors: &mut Vec<TranspileError
             StatementAST::DataStructDefine(data_struct_define) => {
                 collect_parse_error_only_parse_result_error(&data_struct_define.name, Expected::DataStructName, 0010, errors, context);
 
-                if let Some(generics) = &data_struct_define.generics {
-                    collect_parse_error_generics(generics, errors, warnings, context);
+                if let Some(generics_define) = &data_struct_define.generics_define {
+                    collect_parse_error_generics_define(generics_define, errors, warnings, context);
                 }
 
                 if let Some(extends) = &data_struct_define.extends {
@@ -117,6 +117,17 @@ pub fn collect_parse_error_program(ast: Program, errors: &mut Vec<TranspileError
     }
 
     errors.extend(unexpected_token_error(&statement_errors, Expected::Statement, 0002, context));
+}
+
+fn collect_parse_error_generics_define(ast: &GenericsDefine, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>, context: &TranspileModuleContext) {
+    collect_error_tokens(&ast.error_tokens, Expected::Unnecessary, 0022, errors, context);
+    collect_parse_error_only_parse_result_error(&ast.greater_than, Expected::GreaterThan, 0022, errors, context);
+
+    for element in ast.elements.iter() {
+        for bound_type_info in element.bounds.iter() {
+            collect_parse_error_type_info(bound_type_info, errors, warnings, context);
+        }
+    }
 }
 
 fn collect_parse_error_block(ast: &Block, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>, context: &TranspileModuleContext) {

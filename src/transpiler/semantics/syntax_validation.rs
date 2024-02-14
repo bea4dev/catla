@@ -7,8 +7,8 @@ use either::Either::{Left, Right};
 use crate::transpiler::{advice::{create_space_indent, get_column, Advice}, context::TranspileModuleContext, error::SimpleError, TranspileError, TranspileWarning};
 
 
-const ERROR_INVALID_ASSIGNMENT_FORMAT: usize = 0024;
-const ERROR_STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT: usize = 0025;
+const ERROR_INVALID_ASSIGNMENT_FORMAT: usize = 0025;
+const ERROR_STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT: usize = 0026;
 
 
 pub(crate) fn validate_syntax_program(

@@ -301,7 +301,7 @@ fn parse_function_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
         return None;
     }
 
-    let generics = parse_generics(cursor);
+    let generics_define = parse_generics_define(cursor);
 
     let name_token = cursor.next();
     let name_kind = name_token.get_kind();
@@ -326,7 +326,7 @@ fn parse_function_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
 
     let span = statement_attributes.get(0).map_or(span.start_position, |spanned| { spanned.span.start })..span.elapsed(cursor).end;
 
-    return Some(FunctionDefine { attributes: statement_attributes.clone(), generics, name, args, type_tag, block, span });
+    return Some(FunctionDefine { attributes: statement_attributes.clone(), generics_define, name, args, type_tag, block, span });
 }
 
 fn parse_function_arguments<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> FunctionArguments<'allocator, 'input> {
@@ -440,36 +440,28 @@ pub fn parse_generics_define<'allocator, 'input>(cursor: &mut TokenCursor<'alloc
             _ => {
                 skip(cursor, &[TokenKind::LineFeed]);
 
-                error_tokens.extend(read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::ParenthesisRight, TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]));
+                error_tokens.extend(read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::GreaterThan, TokenKind::LineFeed, TokenKind::Semicolon]));
                 
                 match cursor.peek_prev().get_kind() {
                     TokenKind::Comma => {
                         skip(cursor, &[TokenKind::LineFeed]);
                         continue;
                     },
-                    TokenKind::ParenthesisRight => break Ok(()),
-                    TokenKind::BraceLeft => {
-                        cursor.prev();
-                        break Err(unexpected_token_error(cursor.allocator, cursor.current()));
-                    },
+                    TokenKind::GreaterThan => break Ok(()),
                     _ => break Err(unexpected_token_error(cursor.allocator, cursor.peek_prev()))
                 }
             }
         };
 
-        arguments.push(argument);
+        elements.push(element);
 
-        let comma_or_paren_right = cursor.next().get_kind();
-        match comma_or_paren_right {
-            TokenKind::ParenthesisRight => break Ok(()),
+        let comma_or_greater_than = cursor.next().get_kind();
+        match comma_or_greater_than {
+            TokenKind::GreaterThan => break Ok(()),
             TokenKind::Comma => {
                 skip(cursor, &[TokenKind::LineFeed]);
                 continue
             },
-            TokenKind::BraceRight => {
-                cursor.prev();
-                break Err(unexpected_token_error(cursor.allocator, cursor.current()));
-            }
             _ => {
                 let prev = cursor.peek_prev();
                 if let Some(prev) = prev {
@@ -538,8 +530,8 @@ fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
 
     let mut error_tokens = Vec::new_in(cursor.allocator);
 
-    let generics = parse_generics(cursor);
-    if generics.is_none() {
+    let generics_define = parse_generics_define(cursor);
+    if generics_define.is_none() {
         error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::Extends, TokenKind::Implements, TokenKind::BraceLeft]));
     }
 
@@ -555,7 +547,7 @@ fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
 
     let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
     
-    return Some(DataStructDefine { attributes: statement_attributes.clone(), kind, name, generics, extends, implements, error_tokens, block, span: span.elapsed(cursor) });
+    return Some(DataStructDefine { attributes: statement_attributes.clone(), kind, name, generics_define, extends, implements, error_tokens, block, span: span.elapsed(cursor) });
 }
 
 fn parse_extends<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Extends<'allocator, 'input>> {

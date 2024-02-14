@@ -670,7 +670,7 @@ impl TranspileReport for NameAlreadyExists {
         let module_name = &context.module_name;
 
         let text = &context.context.localized_text;
-        let error_code = 0022;
+        let error_code = 0023;
         let key = ErrorMessageKey::new(error_code);
         
         Report::build(ReportKind::Error, module_name, self.define_span.start)
@@ -716,7 +716,7 @@ impl TranspileReport for UndefinedIdentifier {
     fn print(&self, context: &super::context::TranspileModuleContext) {
         let module_name = &context.module_name;
         let text = &context.context.localized_text;
-        let error_code = 0023;
+        let error_code = 0024;
         let key = ErrorMessageKey::new(error_code);
 
         Report::build(ReportKind::Error, module_name, self.literal_span.start)

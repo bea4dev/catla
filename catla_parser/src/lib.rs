@@ -10,7 +10,7 @@ fn test() {
 
     let source = 
 "
-let b = if 100 == 100 { null } else { 100 }?.to_string()
+function <T: Any + Map<int, String>> test() {}
 ";
 
     let allocator = Bump::new();

@@ -38,6 +38,23 @@ impl Debug for EntityID<'_> {
 }
 
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct RawEntityID {
+    ptr: usize
+}
+
+impl<T: Sized + AST> From<&T> for RawEntityID {
+    fn from(value: &T) -> Self {
+        return RawEntityID { ptr: unsafe { transmute(value) } };
+    }
+}
+
+impl From<EntityID<'_>> for RawEntityID {
+    fn from(value: EntityID<'_>) -> Self {
+        return RawEntityID { ptr: value.ptr };
+    }
+}
+
 
 pub(crate) struct ComponentContainer<'allocator, T: Sized> {
     map: HashMap<EntityID<'allocator>, T, DefaultHashBuilder, &'allocator Bump>,

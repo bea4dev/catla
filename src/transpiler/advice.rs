@@ -165,7 +165,7 @@ pub(crate) fn get_column(source: &str, index: usize) -> usize {
 
 pub(crate) fn create_space_indent(amount: usize) -> String {
     let mut str = String::new();
-    for i in 0..amount {
+    for _ in 0..amount {
         str += " ";
     }
     return str;

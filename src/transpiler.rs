@@ -57,17 +57,19 @@ pub struct SourceCode {
 }
 
 
-pub fn transpile(source_code: SourceCode, context: Arc<TranspileContext>) -> TranspileResult {
+pub fn transpile(entry_source_code: SourceCode, context: Arc<TranspileContext>) {
 
-    return transpile_module(Arc::new(source_code), context);
+    context.clone().future_runtime.block_on(async move {
+        transpile_module(Arc::new(entry_source_code), context).await;
+    });
 
 }
 
 
-fn transpile_module(
+async fn transpile_module(
     source_code: Arc<SourceCode>,
     context: Arc<TranspileContext>,
-) -> TranspileResult {
+) {
     let allocator = Bump::new();
 
     let module_name = source_code.module_name.clone();
@@ -76,7 +78,7 @@ fn transpile_module(
     );
     let source = module_context.source_code.code.as_str();
 
-    context.register_module_context(module_name, module_context.clone());
+    context.register_module_context(module_name.clone(), module_context.clone());
 
     let ast = parse_source(source, &allocator);
 
@@ -93,5 +95,5 @@ fn transpile_module(
 
     drop(name_environments);
 
-    return TranspileResult { module_context, errors, warnings }
+    context.add_error_and_warning(module_name, errors, warnings);
 }

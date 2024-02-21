@@ -25,17 +25,14 @@ function test() {}
 ";
 
     let source_code = SourceCode { code: source.to_string(), module_name: "test_module".to_string(), path: None };
-    let context = TranspileContext::new(TranspileSettings { lang: "ja_JP".to_string() });
-    let result = transpile(source_code, context.clone());
+    let settings = TranspileSettings {
+        lang: "ja_JP".to_string(),
+        num_threads: num_cpus::get()
+    };
+    let context = TranspileContext::new(settings);
+    
+    transpile(source_code, context.clone());
 
-    for error in result.errors.iter() {
-        error.0.print(&result.module_context);
-        print!("\n\n");
-    }
-
-    for warning in result.warnings.iter() {
-        warning.0.print(&result.module_context);
-        print!("\n\n");
-    }
+    context.print_report();
 
 }

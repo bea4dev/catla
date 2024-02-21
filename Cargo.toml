@@ -17,3 +17,6 @@ resource = "0.5.0"
 toml = "0.8.8"
 either = "1.9.0"
 indexmap = "2.1.0"
+num_cpus = "1.16.0"
+tokio = { version = "1.36.0", features = ["full"] }
+manual_future = "0.1.1"

@@ -1,9 +1,10 @@
-use std::{path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
+use manual_future::ManualFuture;
 
-use self::{advice::Advice, component::{ComponentContainer, EntityID}, context::{TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::{name_resolve_program, EnvironmentSeparatorKind, NameEnvironment}, parse_error::collect_parse_error_program, semantics::syntax_validation::validate_syntax_program};
+use self::{advice::Advice, component::{ComponentContainer, EntityID}, context::{TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::{name_resolve_program, EnvironmentSeparatorKind, NameEnvironment}, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
 
 pub mod component;
 pub mod name_resolver;
@@ -73,8 +74,14 @@ async fn transpile_module(
     let allocator = Bump::new();
 
     let module_name = source_code.module_name.clone();
+    let (user_type_future, user_type_completer) = ManualFuture::new();
     let module_context = Arc::new(
-        TranspileModuleContext { source_code, module_name: module_name.clone(), context: context.clone() }
+        TranspileModuleContext {
+            source_code,
+            module_name: module_name.clone(),
+            context: context.clone(),
+            user_type_future
+        }
     );
     let source = module_context.source_code.code.as_str();
 
@@ -92,6 +99,13 @@ async fn transpile_module(
     name_resolve_program(ast, None, &mut name_environments, &mut errors, &mut warnings, &allocator);
 
     validate_syntax_program(ast, &module_context, None, &mut errors, &mut warnings);
+
+    let mut user_type_map = HashMap::new();
+    collect_user_type_program(ast, &mut user_type_map, &module_context);
+
+    dbg!(&user_type_map);
+
+    user_type_completer.complete(Arc::new(user_type_map)).await;
 
     drop(name_environments);
 

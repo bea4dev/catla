@@ -39,19 +39,19 @@ impl Debug for EntityID<'_> {
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct RawEntityID {
+pub(crate) struct AnyEntityID {
     ptr: usize
 }
 
-impl<T: Sized + AST> From<&T> for RawEntityID {
+impl<T: Sized> From<&T> for AnyEntityID {
     fn from(value: &T) -> Self {
-        return RawEntityID { ptr: unsafe { transmute(value) } };
+        return AnyEntityID { ptr: unsafe { transmute(value) } };
     }
 }
 
-impl From<EntityID<'_>> for RawEntityID {
+impl From<EntityID<'_>> for AnyEntityID {
     fn from(value: EntityID<'_>) -> Self {
-        return RawEntityID { ptr: value.ptr };
+        return AnyEntityID { ptr: value.ptr };
     }
 }
 

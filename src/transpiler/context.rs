@@ -1,10 +1,11 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 
+use manual_future::ManualFuture;
 use tokio::runtime::{Builder, Runtime};
 
 use crate::localize::localizer::LocalizedText;
 
-use super::{SourceCode, TranspileError, TranspileWarning};
+use super::{semantics::types::type_info::Type, SourceCode, TranspileError, TranspileWarning};
 
 
 pub struct TranspileContext {
@@ -79,4 +80,5 @@ pub struct TranspileModuleContext {
     pub source_code: Arc<SourceCode>,
     pub module_name: String,
     pub context: Arc<TranspileContext>,
+    pub user_type_future: ManualFuture<Arc<HashMap<String, Type>>>
 }

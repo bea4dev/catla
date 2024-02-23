@@ -1,24 +1,25 @@
-use std::{collections::HashMap, sync::{Arc, Mutex}};
+use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex}};
 
-use manual_future::ManualFuture;
 use tokio::runtime::{Builder, Runtime};
 
 use crate::localize::localizer::LocalizedText;
 
-use super::{future::SharedManualFuture, semantics::types::type_info::Type, SourceCode, TranspileError, TranspileWarning};
+use super::{future::SharedManualFuture, resource::SourceCodeProvider, semantics::types::type_info::Type, SourceCode, TranspileError, TranspileWarning};
 
 
 pub struct TranspileContext {
     pub settings: TranspileSettings,
     pub(crate) localized_text: LocalizedText,
+    pub source_code_provider: Box<dyn SourceCodeProvider>,
     pub module_context_map: Mutex<HashMap<String, Arc<TranspileModuleContext>>>,
     error_and_warnings: Mutex<HashMap<String, (Vec<TranspileError>, Vec<TranspileWarning>)>>,
-    pub(crate) future_runtime: Runtime
+    pub transpiling_modules: Mutex<HashSet<String>>,
+    pub(crate) future_runtime: Runtime,
 }
 
 impl TranspileContext {
     
-    pub fn new(settings: TranspileSettings) -> Arc<TranspileContext> {
+    pub fn new(settings: TranspileSettings, source_code_provider: impl SourceCodeProvider + 'static) -> Arc<TranspileContext> {
         let localized_text = LocalizedText::new(&settings.lang);
         let future_runtime = Builder::new_multi_thread()
             .worker_threads(settings.num_threads)
@@ -28,18 +29,30 @@ impl TranspileContext {
         return Arc::new(Self {
             settings,
             localized_text,
+            source_code_provider: Box::new(source_code_provider),
             module_context_map: Mutex::new(HashMap::new()),
             error_and_warnings: Mutex::new(HashMap::new()),
+            transpiling_modules: Mutex::new(HashSet::new()),
             future_runtime
         });
     }
 
     pub(crate) fn register_module_context(&self, module_name: String, module_context: Arc<TranspileModuleContext>) {
-        self.module_context_map.lock().unwrap().insert(module_name, module_context);
+        let mut module_context_map = self.module_context_map.lock().unwrap();
+        module_context_map.insert(module_name, module_context);
     }
 
     pub fn get_module_context(&self, module_name: &String) -> Option<Arc<TranspileModuleContext>> {
         return self.module_context_map.lock().unwrap().get(module_name).cloned();
+    }
+
+    pub fn try_mark_as_transpiling(&self, module_name: &String) -> bool {
+        let mut transpiling_modules = self.transpiling_modules.lock().unwrap();
+        if transpiling_modules.contains(module_name) {
+            return false;
+        }
+        transpiling_modules.insert(module_name.clone());
+        return true;
     }
 
     pub fn add_error_and_warning(&self, module_name: String, errors: Vec<TranspileError>, warnings: Vec<TranspileWarning>) {

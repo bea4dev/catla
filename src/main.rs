@@ -1,3 +1,5 @@
+use transpiler::resource::TestSourceCodeProvider;
+
 use crate::transpiler::{SourceCode, transpile, context::{TranspileSettings, TranspileContext}};
 
 pub mod transpiler;
@@ -22,14 +24,17 @@ function test() {}
 function test() {}
 ";
 
-    let source_code = SourceCode { code: source.to_string(), module_name: "test_module".to_string(), path: None };
     let settings = TranspileSettings {
         lang: "ja_JP".to_string(),
         num_threads: num_cpus::get()
     };
-    let context = TranspileContext::new(settings);
+
+    let mut resource_provider = TestSourceCodeProvider::new();
+    resource_provider.insert("test_module".to_string(), source.to_string());
+
+    let context = TranspileContext::new(settings, resource_provider);
     
-    transpile(source_code, context.clone());
+    transpile("test_module".to_string(), context.clone());
 
     context.print_report();
 

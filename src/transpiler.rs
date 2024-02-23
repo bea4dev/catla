@@ -2,11 +2,10 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
-use manual_future::ManualFuture;
 
 use crate::transpiler::future::SharedManualFuture;
 
-use self::{advice::Advice, component::{ComponentContainer, EntityID}, context::{TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::{name_resolve_program, EnvironmentSeparatorKind, NameEnvironment}, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
+use self::{advice::Advice, component::ComponentContainer, context::{TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, resource::SourceCodeProvider, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
 
 pub mod component;
 pub mod name_resolver;
@@ -16,6 +15,7 @@ pub mod parse_error;
 pub mod advice;
 pub mod semantics;
 pub mod future;
+pub mod resource;
 
 
 
@@ -57,29 +57,32 @@ impl TranspileWarning {
 pub struct SourceCode {
     pub code: String,
     pub module_name: String,
-    pub path: Option<Box<Path>>
 }
 
 
-pub fn transpile(entry_source_code: SourceCode, context: Arc<TranspileContext>) {
+pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) {
 
     context.clone().future_runtime.block_on(async move {
-        transpile_module(Arc::new(entry_source_code), context).await;
+        transpile_module(entry_module_name, context).await;
     });
 
 }
 
 
 async fn transpile_module(
-    source_code: Arc<SourceCode>,
+    module_name: String,
     context: Arc<TranspileContext>,
 ) {
-    let allocator = Bump::new();
+    if !context.try_mark_as_transpiling(&module_name) {
+        return;
+    }
 
-    let module_name = source_code.module_name.clone();
+    let code = context.source_code_provider.get_source_code(&module_name).unwrap();
+    let source_code = SourceCode { code, module_name: module_name.clone() };
+
     let module_context = Arc::new(
         TranspileModuleContext {
-            source_code,
+            source_code: Arc::new(source_code),
             module_name: module_name.clone(),
             context: context.clone(),
             user_type_future: SharedManualFuture::new()
@@ -88,6 +91,8 @@ async fn transpile_module(
     let source = module_context.source_code.code.as_str();
 
     context.register_module_context(module_name.clone(), module_context.clone());
+
+    let allocator = Bump::new();
 
     let ast = parse_source(source, &allocator);
 

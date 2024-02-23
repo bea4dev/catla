@@ -3,7 +3,7 @@ use std::{mem, sync::{Arc, Mutex}};
 use manual_future::{ManualFuture, ManualFutureCompleter};
 
 
-pub(crate) struct SharedManualFuture<T> {
+pub struct SharedManualFuture<T> {
     value: Mutex<(Option<Arc<T>>, Vec<ManualFutureCompleter<Arc<T>>>)>
 }
 

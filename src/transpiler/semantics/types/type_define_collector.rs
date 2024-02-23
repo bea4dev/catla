@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 
 use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST};
 use either::Either;
@@ -47,7 +47,7 @@ pub fn collect_user_type_program(
                         define_span: data_struct_define.span.clone(),
                         kind: data_struct_define.kind.value.clone(),
                         generics_define: Vec::new(),
-                        element_types: HashMap::new(),
+                        element_types: Mutex::new(HashMap::new()),
                     };
 
                     if let Some(block) = &data_struct_define.block.value {

@@ -5,7 +5,7 @@ use tokio::runtime::{Builder, Runtime};
 
 use crate::localize::localizer::LocalizedText;
 
-use super::{semantics::types::type_info::Type, SourceCode, TranspileError, TranspileWarning};
+use super::{future::SharedManualFuture, semantics::types::type_info::Type, SourceCode, TranspileError, TranspileWarning};
 
 
 pub struct TranspileContext {
@@ -80,5 +80,5 @@ pub struct TranspileModuleContext {
     pub source_code: Arc<SourceCode>,
     pub module_name: String,
     pub context: Arc<TranspileContext>,
-    pub user_type_future: ManualFuture<Arc<HashMap<String, Type>>>
+    pub user_type_future: SharedManualFuture<HashMap<String, Type>>
 }

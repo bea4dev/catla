@@ -4,6 +4,8 @@ use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 use manual_future::ManualFuture;
 
+use crate::transpiler::future::SharedManualFuture;
+
 use self::{advice::Advice, component::{ComponentContainer, EntityID}, context::{TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::{name_resolve_program, EnvironmentSeparatorKind, NameEnvironment}, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
 
 pub mod component;
@@ -13,6 +15,7 @@ pub mod context;
 pub mod parse_error;
 pub mod advice;
 pub mod semantics;
+pub mod future;
 
 
 
@@ -74,13 +77,12 @@ async fn transpile_module(
     let allocator = Bump::new();
 
     let module_name = source_code.module_name.clone();
-    let (user_type_future, user_type_completer) = ManualFuture::new();
     let module_context = Arc::new(
         TranspileModuleContext {
             source_code,
             module_name: module_name.clone(),
             context: context.clone(),
-            user_type_future
+            user_type_future: SharedManualFuture::new()
         }
     );
     let source = module_context.source_code.code.as_str();
@@ -103,9 +105,9 @@ async fn transpile_module(
     let mut user_type_map = HashMap::new();
     collect_user_type_program(ast, &mut user_type_map, &module_context);
 
-    dbg!(&user_type_map);
+    module_context.user_type_future.complete(user_type_map).await;
 
-    user_type_completer.complete(Arc::new(user_type_map)).await;
+    dbg!(module_context.user_type_future.get().await);
 
     drop(name_environments);
 

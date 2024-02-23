@@ -38,9 +38,9 @@ impl Debug for EntityID<'_> {
 }
 
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct AnyEntityID {
-    ptr: usize
+    pub ptr: usize
 }
 
 impl<T: Sized> From<&T> for AnyEntityID {

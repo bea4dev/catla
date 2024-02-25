@@ -26,12 +26,12 @@ pub struct TranspileResult {
 }
 
 
-pub struct TranspileError(pub Box<dyn TranspileReport>);
-pub struct TranspileWarning(pub Box<dyn TranspileReport>);
+pub struct TranspileError(pub Box<dyn TranspileReport + Send>);
+pub struct TranspileWarning(pub Box<dyn TranspileReport + Send>);
 
 impl TranspileError {
 
-    pub(crate) fn new<T: TranspileReport + 'static>(report: T) -> TranspileError {
+    pub(crate) fn new<T: TranspileReport + Send + 'static>(report: T) -> TranspileError {
         return Self(Box::new(report))
     }
 
@@ -43,7 +43,7 @@ impl TranspileError {
 
 impl TranspileWarning {
 
-    pub(crate) fn new<T: TranspileReport + 'static>(report: T) -> TranspileWarning {
+    pub(crate) fn new<T: TranspileReport + Send + 'static>(report: T) -> TranspileWarning {
         return Self(Box::new(report))
     }
 
@@ -101,9 +101,10 @@ async fn transpile_module(
 
     collect_parse_error_program(ast, &mut errors, &mut warnings, &module_context);
     
-    let mut name_environments = ComponentContainer::new(&allocator);
-
-    name_resolve_program(ast, None, &mut name_environments, &mut errors, &mut warnings, &allocator);
+    {
+        let mut name_environments = ComponentContainer::new(&allocator);
+        name_resolve_program(ast, None, &mut name_environments, &mut errors, &mut warnings, &allocator);
+    }
 
     validate_syntax_program(ast, &module_context, None, &mut errors, &mut warnings);
 
@@ -113,8 +114,6 @@ async fn transpile_module(
     module_context.user_type_future.complete(user_type_map).await;
 
     dbg!(module_context.user_type_future.get().await);
-
-    drop(name_environments);
 
     context.add_error_and_warning(module_name, errors, warnings);
 }

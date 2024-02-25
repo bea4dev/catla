@@ -44,7 +44,7 @@ pub(crate) fn validate_syntax_program(
             if !is_valid_and_span.0 {
                 let span = is_valid_and_span.1;
                 let labels = vec![(span.clone(), Color::Red), (data_struct_span.clone(), Color::Yellow)];
-                let mut error = SimpleError::new(ERROR_STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT, span.clone(), labels);
+                let mut error = SimpleError::new(ERROR_STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT, span.clone(), vec![], labels);
                 
                 let remove_advice = Advice::Remove { span: span.clone() };
                 let data_struct_define_column = get_column(context.source_code.code.as_str(), data_struct_span.start);
@@ -67,7 +67,7 @@ pub(crate) fn validate_syntax_program(
             StatementAST::Assignment(assignment) => {
                 if !is_valid_format_for_assignment(assignment.left_expr) {
                     let span = get_expression_span(assignment.left_expr);
-                    errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![(span, Color::Red)]));
+                    errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![], vec![(span, Color::Red)]));
                 }
                 validate_syntax_expression(assignment.left_expr, context, errors, warnings);
                 if let Ok(right_expr) = assignment.right_expr {
@@ -77,13 +77,13 @@ pub(crate) fn validate_syntax_program(
             StatementAST::Exchange(exchange) => {
                 if !is_valid_format_for_assignment(exchange.left_expr) {
                     let span = get_expression_span(exchange.left_expr);
-                    errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![(span, Color::Red)]));
+                    errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![], vec![(span, Color::Red)]));
                 }
                 validate_syntax_expression(exchange.left_expr, context,errors, warnings);
                 if let Ok(right_expr) = exchange.right_expr {
                     if !is_valid_format_for_assignment(right_expr) {
                         let span = get_expression_span(right_expr);
-                        errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![(span, Color::Red)]));
+                        errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![], vec![(span, Color::Red)]));
                     }
                     validate_syntax_expression(right_expr, context,errors, warnings);
                 }
@@ -349,7 +349,7 @@ fn validate_syntax_function_call(
 
 
 fn get_expression_span(expression: Expression) -> Range<usize> {
-    return match expression {
+    match expression {
         ExpressionEnum::OrExpression(or_expression) => or_expression.span.clone(),
         ExpressionEnum::ReturnExpression(return_expression) => return_expression.span.clone(),
         ExpressionEnum::Closure(closure) => closure.span.clone(),
@@ -357,7 +357,7 @@ fn get_expression_span(expression: Expression) -> Range<usize> {
 }
 
 fn is_valid_format_for_assignment(expression: Expression) -> bool {
-    return if let ExpressionEnum::OrExpression(or_expression) = expression {
+    if let ExpressionEnum::OrExpression(or_expression) = expression {
         let and_expression = &or_expression.left_expr;
         let eqne_expression = &and_expression.left_expr;
         let compare_expression = &eqne_expression.left_expr;
@@ -373,5 +373,5 @@ fn is_valid_format_for_assignment(expression: Expression) -> bool {
             && factor.negative_keyword_span.is_none()
     } else {
         false
-    };
+    }
 }

@@ -69,6 +69,13 @@ pub fn collect_user_type_program(
             StatementAST::Expression(expression) => {
                 collect_user_type_expression(&expression, module_element_types, context);
             },
+            StatementAST::VariableDefine(variable_define) => {
+                if let Some(expression) = &variable_define.expression {
+                    if let Ok(expression) = expression {
+                        collect_user_type_expression(&expression, module_element_types, context);
+                    }
+                }
+            }
             _ => {}
         }
     }

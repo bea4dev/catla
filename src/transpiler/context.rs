@@ -10,7 +10,7 @@ use super::{future::SharedManualFuture, resource::SourceCodeProvider, semantics:
 pub struct TranspileContext {
     pub settings: TranspileSettings,
     pub(crate) localized_text: LocalizedText,
-    pub source_code_provider: Box<dyn SourceCodeProvider>,
+    pub source_code_provider: Box<dyn SourceCodeProvider + Send + Sync>,
     pub module_context_map: Mutex<HashMap<String, Arc<TranspileModuleContext>>>,
     error_and_warnings: Mutex<HashMap<String, (Vec<TranspileError>, Vec<TranspileWarning>)>>,
     pub transpiling_modules: Mutex<HashSet<String>>,
@@ -19,14 +19,19 @@ pub struct TranspileContext {
 
 impl TranspileContext {
     
-    pub fn new(settings: TranspileSettings, source_code_provider: impl SourceCodeProvider + 'static) -> Arc<TranspileContext> {
+    pub fn new(
+        settings: TranspileSettings,
+        source_code_provider: impl SourceCodeProvider + Send + Sync + 'static
+    ) -> Arc<TranspileContext> {
+
         let localized_text = LocalizedText::new(&settings.lang);
         let future_runtime = Builder::new_multi_thread()
             .worker_threads(settings.num_threads)
             .enable_all()
             .build()
             .unwrap();
-        return Arc::new(Self {
+        
+        Arc::new(Self {
             settings,
             localized_text,
             source_code_provider: Box::new(source_code_provider),
@@ -34,7 +39,7 @@ impl TranspileContext {
             error_and_warnings: Mutex::new(HashMap::new()),
             transpiling_modules: Mutex::new(HashSet::new()),
             future_runtime
-        });
+        })
     }
 
     pub(crate) fn register_module_context(&self, module_name: String, module_context: Arc<TranspileModuleContext>) {

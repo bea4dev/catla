@@ -23,15 +23,15 @@ pub(crate) struct ErrorMessageKey {
 impl ErrorMessageKey {
     
     pub(crate) fn new(error_code: usize) -> ErrorMessageKey {
-        return Self { error_code };
+        Self { error_code }
     }
 
     pub(crate) fn get_massage(&self, localized_text: &LocalizedText, ty: ErrorMessageType) -> String {
-        return localized_text.get_text(format!("error.{:>04}.{}", self.error_code, ty.get()))
+        localized_text.get_text(format!("error.{:>04}.{}", self.error_code, ty.get()))
     }
 
     pub(crate) fn get_massage_optional(&self, localized_text: &LocalizedText, ty: ErrorMessageType) -> Option<String> {
-        return localized_text.get_text_optional(format!("error.{:>04}.{}", self.error_code, ty.get()))
+        localized_text.get_text_optional(format!("error.{:>04}.{}", self.error_code, ty.get()))
     }
 
 }
@@ -47,7 +47,7 @@ pub(crate) enum ErrorMessageType {
 impl ErrorMessageType {
     
     fn get(&self) -> String {
-        return match self {
+        match self {
             ErrorMessageType::Message => "message".to_string(),
             ErrorMessageType::Label(number) => format!("label_{}", number),
             ErrorMessageType::Note => "note".to_string(),
@@ -61,13 +61,19 @@ impl ErrorMessageType {
 pub(crate) struct SimpleError {
     error_code: usize,
     message_span: Range<usize>,
+    message_replace: Vec<String>,
     labels: Vec<(Range<usize>, Color)>,
     advice_report: AdviceReport
 }
 
 impl SimpleError {
-    pub(crate) fn new(error_code: usize, message_span: Range<usize>, labels: Vec<(Range<usize>, Color)>) -> TranspileError {
-        return TranspileError::new(SimpleError { error_code, message_span, labels, advice_report: AdviceReport::new() });
+    pub(crate) fn new(
+        error_code: usize,
+        message_span: Range<usize>,
+        message_replace: Vec<String>,
+        labels: Vec<(Range<usize>, Color)>
+    ) -> TranspileError {
+        TranspileError::new(SimpleError { error_code, message_span, message_replace, labels, advice_report: AdviceReport::new() })
     }
 }
 

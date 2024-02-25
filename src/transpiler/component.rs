@@ -10,6 +10,7 @@ pub(crate) struct EntityID<'allocator> {
     ptr: usize,
     ast: &'allocator dyn AST
 }
+//unsafe impl Send for EntityID<'_> {}
 
 impl PartialEq for EntityID<'_> {
     fn eq(&self, other: &Self) -> bool {
@@ -27,7 +28,7 @@ impl Hash for EntityID<'_> {
 
 impl<'allocator, T: Sized + AST> From<&'allocator T> for EntityID<'allocator> {
     fn from(value: &'allocator T) -> Self {
-        return EntityID { ptr: unsafe { transmute(value) }, ast: value };
+        Self { ptr: unsafe { transmute(value) }, ast: value }
     }
 }
 
@@ -45,13 +46,13 @@ pub(crate) struct AnyEntityID {
 
 impl<T: Sized> From<&T> for AnyEntityID {
     fn from(value: &T) -> Self {
-        return AnyEntityID { ptr: unsafe { transmute(value) } };
+        AnyEntityID { ptr: unsafe { transmute(value) } }
     }
 }
 
 impl From<EntityID<'_>> for AnyEntityID {
     fn from(value: EntityID<'_>) -> Self {
-        return AnyEntityID { ptr: value.ptr };
+        AnyEntityID { ptr: value.ptr }
     }
 }
 
@@ -82,7 +83,7 @@ impl<'allocator, T: Sized> Index<EntityID<'allocator>> for ComponentContainer<'a
     }
 }
 
-impl<'allocator, T: Sized> IndexMut<EntityID<'allocator>> for ComponentContainer<'allocator, T> {
+impl<'allocator, T: Sized + Send> IndexMut<EntityID<'allocator>> for ComponentContainer<'allocator, T> {
 
     fn index_mut(&mut self, index: EntityID<'allocator>) -> &mut Self::Output {
         return self.map.get_mut(&index).expect(format!("Unknown entity id : {:?}", index).as_str());

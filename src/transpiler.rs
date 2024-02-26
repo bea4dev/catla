@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
+use fxhash::FxHashMap;
 
 use crate::transpiler::future::SharedManualFuture;
 
@@ -101,9 +102,18 @@ async fn transpile_module(
 
     collect_parse_error_program(ast, &mut errors, &mut warnings, &module_context);
     
+    let mut name_resolved_map = FxHashMap::default();
     {
         let mut name_environments = ComponentContainer::new(&allocator);
-        name_resolve_program(ast, None, &mut name_environments, &mut errors, &mut warnings, &allocator);
+        name_resolve_program(
+            ast,
+            None,
+            &mut name_environments,
+            &mut name_resolved_map,
+            &mut errors,
+            &mut warnings,
+            &allocator
+        );
     }
 
     validate_syntax_program(ast, &module_context, None, &mut errors, &mut warnings);

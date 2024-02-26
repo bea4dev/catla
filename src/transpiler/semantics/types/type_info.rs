@@ -2,7 +2,7 @@ use std::{collections::HashMap, ops::Range, sync::{Arc, Mutex}};
 
 use catla_parser::parser::{DataStructKindEnum, Spanned};
 
-use crate::transpiler::component::AnyEntityID;
+use crate::transpiler::component::EntityID;
 
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,13 +44,13 @@ impl Eq for DataStructInfo {}
 
 #[derive(Debug)]
 pub struct GenericType {
-    pub(crate) define_entity_id: AnyEntityID,
+    pub(crate) define_entity_id: EntityID,
     pub bounds: Mutex<Vec<Type>>
 }
 
 impl PartialEq for GenericType {
     fn eq(&self, other: &Self) -> bool {
-        self.define_entity_id.ptr == other.define_entity_id.ptr
+        self.define_entity_id == other.define_entity_id
     }
 }
 impl Eq for GenericType {}

@@ -4,14 +4,15 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
 use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, TypeInfo, TypeTag}};
 use either::Either::{Left, Right};
+use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use super::{advice::AdviceReport, component::{ComponentContainer, EntityID}, error::{ErrorMessageKey, ErrorMessageType, TranspileReport}, TranspileError, TranspileWarning};
 
 
 #[derive(Debug, Clone)]
-pub(crate) struct DefineWithName<'allocator> {
-    entity_id: EntityID<'allocator>,
+pub(crate) struct DefineWithName {
+    entity_id: EntityID,
     span: Range<usize>,
     define_kind: DefineKind
 }
@@ -35,9 +36,8 @@ pub(crate) enum EnvironmentSeparatorKind {
 }
 
 pub(crate) struct NameEnvironment<'allocator> {
-    name_define_info_map: RefCell<HashMap<String<'allocator>, DefineWithName<'allocator>, DefaultHashBuilder, &'allocator Bump>>,
-    resolved_map: RefCell<HashMap<EntityID<'allocator>, FoundDefineInfo<'allocator>, DefaultHashBuilder, &'allocator Bump>>,
-    parent: Option<EntityID<'allocator>>,
+    name_define_info_map: RefCell<HashMap<String<'allocator>, DefineWithName, DefaultHashBuilder, &'allocator Bump>>,
+    parent: Option<EntityID>,
     separator: Option<EnvironmentSeparatorKind>,
     span : Range<usize>
 }
@@ -45,27 +45,26 @@ pub(crate) struct NameEnvironment<'allocator> {
 impl<'allocator> NameEnvironment<'allocator> {
     
     pub(crate) fn new(
-        parent: Option<EntityID<'allocator>>,
+        parent: Option<EntityID>,
         separator: Option<EnvironmentSeparatorKind>,
         span: Range<usize>,
         allocator: &'allocator Bump
     ) -> NameEnvironment<'allocator> {
-        return Self {
+        Self {
             name_define_info_map: RefCell::new(HashMap::new_in(allocator)),
             parent,
-            resolved_map: RefCell::new(HashMap::new_in(allocator)),
             separator,
             span
-        };
+        }
     }
 
     pub(crate) fn get_name_define_info(
         &self,
         name: &str,
         environments: &ComponentContainer<NameEnvironment<'allocator>>
-    ) -> Option<FoundDefineInfo<'allocator>> {
+    ) -> Option<FoundDefineInfo> {
         
-        return match self.name_define_info_map.borrow().get(name) {
+        match self.name_define_info_map.borrow().get(name) {
             Some(define_info) => Some(FoundDefineInfo { define_info: define_info.clone(), separators: Vec::new() }),
             _ => {
                 match self.parent {
@@ -93,25 +92,21 @@ impl<'allocator> NameEnvironment<'allocator> {
                     _ => return None
                 }
             }
-        };
+        }
     }
 
-    pub(crate) fn set_name_define_info(&self, name: String<'allocator>, define_info: DefineWithName<'allocator>) {
+    pub(crate) fn set_name_define_info(&self, name: String<'allocator>, define_info: DefineWithName) {
         self.name_define_info_map.borrow_mut().insert(name, define_info);
     }
 
-    pub(crate) fn mark_as_resolved(&self, entity_id: EntityID<'allocator>, define_info: FoundDefineInfo<'allocator>) {
-        self.resolved_map.borrow_mut().insert(entity_id, define_info);
-    }
-
 }
 
-pub(crate) struct FoundDefineInfo<'allocator> {
-    define_info: DefineWithName<'allocator>,
+pub(crate) struct FoundDefineInfo {
+    define_info: DefineWithName,
     separators: Vec<EnvironmentSeparatorKind>
 }
 
-impl FoundDefineInfo<'_> {
+impl FoundDefineInfo {
     
     pub(crate) fn has_separator(&self, kind: &[EnvironmentSeparatorKind]) -> bool {
         for separator in self.separators.iter() {
@@ -128,8 +123,9 @@ impl FoundDefineInfo<'_> {
 
 pub(crate) fn name_resolve_program<'allocator>(
     ast: Program<'allocator, '_>,
-    parent_env_id: Option<EntityID<'allocator>>,
+    parent_env_id: Option<EntityID>,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
@@ -202,28 +198,28 @@ pub(crate) fn name_resolve_program<'allocator>(
 
         match statement {
             StatementAST::Assignment(assignment) => {
-                name_resolve_expression(assignment.left_expr, current_environment_id, name_environments, errors, warnings, allocator);
+                name_resolve_expression(assignment.left_expr, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
                 
                 if let Ok(right_expr) = assignment.right_expr {
-                    name_resolve_expression(right_expr, current_environment_id, name_environments, errors, warnings, allocator);
+                    name_resolve_expression(right_expr, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
             },
             StatementAST::Exchange(exchange) => {
-                name_resolve_expression(exchange.left_expr, current_environment_id, name_environments, errors, warnings, allocator);
+                name_resolve_expression(exchange.left_expr, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
                 
                 if let Ok(right_expr) = exchange.right_expr {
-                    name_resolve_expression(right_expr, current_environment_id, name_environments, errors, warnings, allocator);
+                    name_resolve_expression(right_expr, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
             },
             StatementAST::VariableDefine(variable_define) => {
                 if let Some(expression) = &variable_define.expression {
                     if let Ok(expression) = expression {
-                        name_resolve_expression(&expression, current_environment_id, name_environments, errors, warnings, allocator);
+                        name_resolve_expression(&expression, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
                     }
                 }
 
                 if let Some(type_tag) = &variable_define.type_tag {
-                    name_resolve_type_tag(type_tag, current_environment_id, name_environments, errors, warnings, allocator);
+                    name_resolve_type_tag(type_tag, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
 
                 if let Ok(variable_name) = &variable_define.name {
@@ -237,11 +233,11 @@ pub(crate) fn name_resolve_program<'allocator>(
                 let name_environment = NameEnvironment::new(Some(current_environment_id), Some(EnvironmentSeparatorKind::Function), environment_span.clone(), allocator);
 
                 if let Some(generics_define) = &function_define.generics_define {
-                    name_resolve_generics_define(generics_define, current_environment_id, name_environments, errors, warnings, allocator);
+                    name_resolve_generics_define(generics_define, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
 
                 if let Some(type_tag) = &function_define.type_tag {
-                    name_resolve_type_tag(type_tag, current_environment_id, name_environments, errors, warnings, allocator);
+                    name_resolve_type_tag(type_tag, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
 
                 for argument in function_define.args.arguments.iter() {
@@ -255,7 +251,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                 name_environments.insert(entity_id, name_environment);
 
                 if let Some(block) = &function_define.block.value {
-                    name_resolve_block(block, entity_id, name_environments, errors, warnings, allocator);
+                    name_resolve_block(block, entity_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
             },
             StatementAST::DataStructDefine(data_struct_define) => {
@@ -274,26 +270,26 @@ pub(crate) fn name_resolve_program<'allocator>(
                 name_environments.insert(entity_id, name_environment);
 
                 if let Some(generics_define) = &data_struct_define.generics_define {
-                    name_resolve_generics_define(generics_define, entity_id, name_environments, errors, warnings, allocator);
+                    name_resolve_generics_define(generics_define, entity_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
 
                 if let Some(super_type_info) = &data_struct_define.super_type_info {
                     for type_info in super_type_info.type_infos.iter() {
-                        name_resolve_type_info(type_info, entity_id, name_environments, errors, warnings, allocator);
+                        name_resolve_type_info(type_info, entity_id, name_environments, resolved_map, errors, warnings, allocator);
                     }
                 }
 
                 if let Some(block) = &data_struct_define.block.value {
-                    name_resolve_block(block, entity_id, name_environments, errors, warnings, allocator);
+                    name_resolve_block(block, entity_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
             },
             StatementAST::DropStatement(drop_statement) => {
                 if let Ok(expression) = &drop_statement.expression {
-                    name_resolve_expression(&expression, current_environment_id, name_environments, errors, warnings, allocator);
+                    name_resolve_expression(&expression, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
             },
             StatementAST::Expression(expression) => {
-                name_resolve_expression(&expression, current_environment_id, name_environments, errors, warnings, allocator);
+                name_resolve_expression(&expression, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
             },
             _ => {}
         }
@@ -302,8 +298,9 @@ pub(crate) fn name_resolve_program<'allocator>(
 
 fn name_resolve_generics_define<'allocator>(
     ast: &'allocator GenericsDefine<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
@@ -314,31 +311,32 @@ fn name_resolve_generics_define<'allocator>(
         name_environments[environment_id].set_name_define_info(String::from_str_in(element.name.value, allocator), define_info);
 
         for bound_type_info in element.bounds.iter() {
-            name_resolve_type_info(bound_type_info, environment_id, name_environments, errors, warnings, allocator);
+            name_resolve_type_info(bound_type_info, environment_id, name_environments, resolved_map, errors, warnings, allocator);
         }
     }
 }
 
 fn name_resolve_expression<'allocator>(
     ast: Expression<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
     match ast {
         ExpressionEnum::OrExpression(or_expression) => {
-            name_resolve_and_expression(&or_expression.left_expr, environment_id, name_environments, errors, warnings, allocator);
+            name_resolve_and_expression(&or_expression.left_expr, environment_id, name_environments, resolved_map, errors, warnings, allocator);
             for right_expr in or_expression.right_exprs.iter() {
                 if let Ok(and_expression) = &right_expr.1 {
-                    name_resolve_and_expression(and_expression, environment_id, name_environments, errors, warnings, allocator);
+                    name_resolve_and_expression(and_expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
             }
         },
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = &return_expression.expression {
-                name_resolve_expression(&expression, environment_id, name_environments, errors, warnings, allocator);
+                name_resolve_expression(&expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
             }
         },
         ExpressionEnum::Closure(closure) => {
@@ -378,10 +376,10 @@ fn name_resolve_expression<'allocator>(
             if let Some(expression_or_block) = &closure.expression_or_block.value {
                 match expression_or_block {
                     Left(expression) => {
-                        name_resolve_expression(&expression, entity_id, name_environments, errors, warnings, allocator);
+                        name_resolve_expression(&expression, entity_id, name_environments, resolved_map, errors, warnings, allocator);
                     },
                     Right(block) => {
-                        name_resolve_block(block, entity_id, name_environments, errors, warnings, allocator);
+                        name_resolve_block(block, entity_id, name_environments, resolved_map, errors, warnings, allocator);
                     }
                 }
             }
@@ -391,8 +389,9 @@ fn name_resolve_expression<'allocator>(
 
 fn name_resolve_block<'allocator>(
     ast: &'allocator Block<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
@@ -401,120 +400,128 @@ fn name_resolve_block<'allocator>(
     let entity_id = EntityID::from(ast);
     name_environments.insert(entity_id, name_environment);
 
-    name_resolve_program(ast.program, Some(entity_id), name_environments, errors, warnings, allocator);
+    name_resolve_program(ast.program, Some(entity_id), name_environments, resolved_map, errors, warnings, allocator);
 }
 
 fn name_resolve_and_expression<'allocator>(
     ast: &'allocator AndExpression<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-    name_resolve_eqne_expression(&ast.left_expr, environment_id, name_environments, errors, warnings, allocator);
+    name_resolve_eqne_expression(&ast.left_expr, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     for right_expr in ast.right_exprs.iter() {
         if let Ok(eqne_expression) = &right_expr.1 {
-            name_resolve_eqne_expression(eqne_expression, environment_id, name_environments, errors, warnings, allocator);
+            name_resolve_eqne_expression(eqne_expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
         }
     }
 }
 
 fn name_resolve_eqne_expression<'allocator>(
     ast: &'allocator EQNEExpression<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-    name_resolve_compare_expression(&ast.left_expr, environment_id, name_environments, errors, warnings, allocator);
+    name_resolve_compare_expression(&ast.left_expr, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     for right_expr in ast.right_exprs.iter() {
         if let Ok(compare_expression) = &right_expr.1 {
-            name_resolve_compare_expression(compare_expression, environment_id, name_environments, errors, warnings, allocator);
+            name_resolve_compare_expression(compare_expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
         }
     }
 }
 
 fn name_resolve_compare_expression<'allocator>(
     ast: &'allocator CompareExpression<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-    name_resolve_add_or_sub_expression(&ast.left_expr, environment_id, name_environments, errors, warnings, allocator);
+    name_resolve_add_or_sub_expression(&ast.left_expr, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     for right_expr in ast.right_exprs.iter() {
         if let Ok(add_or_sub_expression) = &right_expr.1 {
-            name_resolve_add_or_sub_expression(add_or_sub_expression, environment_id, name_environments, errors, warnings, allocator);
+            name_resolve_add_or_sub_expression(add_or_sub_expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
         }
     }
 }
 
 fn name_resolve_add_or_sub_expression<'allocator>(
     ast: &'allocator AddOrSubExpression<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-    name_resolve_mul_or_div_expression(&ast.left_expr, environment_id, name_environments, errors, warnings, allocator);
+    name_resolve_mul_or_div_expression(&ast.left_expr, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     for right_expr in ast.right_exprs.iter() {
         if let Ok(add_or_sub_expression) = &right_expr.1 {
-            name_resolve_mul_or_div_expression(add_or_sub_expression, environment_id, name_environments, errors, warnings, allocator);
+            name_resolve_mul_or_div_expression(add_or_sub_expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
         }
     }
 }
 
 fn name_resolve_mul_or_div_expression<'allocator>(
     ast: &'allocator MulOrDivExpression<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-    name_resolve_factor(&ast.left_expr, environment_id, name_environments, errors, warnings, allocator);
+    name_resolve_factor(&ast.left_expr, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     for right_expr in ast.right_exprs.iter() {
         if let Ok(add_or_sub_expression) = &right_expr.1 {
-            name_resolve_factor(add_or_sub_expression, environment_id, name_environments, errors, warnings, allocator);
+            name_resolve_factor(add_or_sub_expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
         }
     }
 }
 
 fn name_resolve_factor<'allocator>(
     ast: &'allocator Factor<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
     if let Ok(primary) = &ast.primary {
-        name_resolve_primary(primary, environment_id, name_environments, errors, warnings, allocator);
+        name_resolve_primary(primary, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     }
 }
 
 fn name_resolve_primary<'allocator>(
     ast: &'allocator Primary<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-    name_resolve_primary_left(&ast.left, environment_id, name_environments, errors, warnings, allocator);
+    name_resolve_primary_left(&ast.left, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     for primary_right in ast.chain.iter() {
-        name_resolve_primary_right(primary_right, environment_id, name_environments, errors, warnings, allocator);
+        name_resolve_primary_right(primary_right, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     }
 }
 
 fn name_resolve_primary_left<'allocator>(
     ast: &'allocator PrimaryLeft<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
@@ -524,21 +531,21 @@ fn name_resolve_primary_left<'allocator>(
             match &simple.0 {
                 SimplePrimary::Expression { expression, error_tokens: _ } => {
                     if let Ok(expression) = expression {
-                        name_resolve_expression(&expression, environment_id, name_environments, errors, warnings, allocator);
+                        name_resolve_expression(&expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
                     }
                 },
                 SimplePrimary::Identifier(literal) => {
-                    name_resolve_literal(literal, environment_id, name_environments, errors);
+                    name_resolve_literal(literal, environment_id, name_environments, resolved_map, errors);
                 },
                 _ => {}
             }
             if let Some(function_call) = &simple.1 {
-                name_resolve_function_call(function_call, environment_id, name_environments, errors, warnings, allocator);
+                name_resolve_function_call(function_call, environment_id, name_environments, resolved_map, errors, warnings, allocator);
             }
         },
         PrimaryLeftExpr::NewExpression(new_expression) => {
             if let Some(first_literal) = new_expression.path.first() {
-                name_resolve_literal(first_literal, environment_id, name_environments, errors);
+                name_resolve_literal(first_literal, environment_id, name_environments, resolved_map, errors);
             }
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {
@@ -552,10 +559,10 @@ fn name_resolve_primary_left<'allocator>(
             name_environments.insert(entity_id, name_environment);
 
             if let Ok(condition) = &if_statement.condition {
-                name_resolve_expression(&condition, entity_id, name_environments, errors, warnings, allocator);
+                name_resolve_expression(&condition, entity_id, name_environments, resolved_map, errors, warnings, allocator);
             }
             if let Some(block) = &if_statement.block.value {
-                name_resolve_block(block, entity_id, name_environments, errors, warnings, allocator);
+                name_resolve_block(block, entity_id, name_environments, resolved_map, errors, warnings, allocator);
             }
 
             for else_or_if_statement in if_expression.chain.iter() {
@@ -571,14 +578,14 @@ fn name_resolve_primary_left<'allocator>(
                             name_environments.insert(entity_id, name_environment);
 
                             if let Ok(condition) = &if_statement.condition {
-                                name_resolve_expression(&condition, entity_id, name_environments, errors, warnings, allocator);
+                                name_resolve_expression(&condition, entity_id, name_environments, resolved_map, errors, warnings, allocator);
                             }
                             if let Some(block) = &if_statement.block.value {
-                                name_resolve_block(block, entity_id, name_environments, errors, warnings, allocator);
+                                name_resolve_block(block, entity_id, name_environments, resolved_map, errors, warnings, allocator);
                             }
                         },
                         Right(block) => {
-                            name_resolve_block(block, environment_id, name_environments, errors, warnings, allocator);
+                            name_resolve_block(block, environment_id, name_environments, resolved_map, errors, warnings, allocator);
                         }
                     }
                 }
@@ -586,20 +593,21 @@ fn name_resolve_primary_left<'allocator>(
         },
         PrimaryLeftExpr::LoopExpression(loop_expression) => {
             if let Ok(block) = &loop_expression.block {
-                name_resolve_block(block, environment_id, name_environments, errors, warnings, allocator);
+                name_resolve_block(block, environment_id, name_environments, resolved_map, errors, warnings, allocator);
             }
         }
     }
 
     if let Some(mapping_operator) = &ast.mapping_operator {
-        name_resolve_mapping_operator(&mapping_operator.value, environment_id, name_environments, errors, warnings, allocator);
+        name_resolve_mapping_operator(&mapping_operator.value, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     }
 }
 
 fn name_resolve_mapping_operator<'allocator>(
     ast: &'allocator MappingOperatorKind<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
@@ -610,44 +618,46 @@ fn name_resolve_mapping_operator<'allocator>(
         _ => return
     };
     if let Some(block) = &block.value {
-        name_resolve_block(block, environment_id, name_environments, errors, warnings, allocator);
+        name_resolve_block(block, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     }
 }
 
 fn name_resolve_primary_right<'allocator>(
     ast: &'allocator PrimaryRight<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
     if let Some(second_expr) = &ast.second_expr {
         if let Some(function_call) = &second_expr.1 {
-            name_resolve_function_call(function_call, environment_id, name_environments, errors, warnings, allocator);
+            name_resolve_function_call(function_call, environment_id, name_environments, resolved_map, errors, warnings, allocator);
         }
     }
     if let Some(mapping_operator) = &ast.mapping_operator {
-        name_resolve_mapping_operator(&mapping_operator.value, environment_id, name_environments, errors, warnings, allocator);
+        name_resolve_mapping_operator(&mapping_operator.value, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     }
 }
 
 fn name_resolve_function_call<'allocator>(
     ast: &'allocator FunctionCall<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
     if let Some(generics) = &ast.generics {
         if let Ok(generics) = generics {
-            name_resolve_generics(generics, environment_id, name_environments, errors, warnings, allocator);
+            name_resolve_generics(generics, environment_id, name_environments, resolved_map, errors, warnings, allocator);
         }
     }
     if let Ok(arg_exprs) = &ast.arg_exprs {
         for expression in arg_exprs.iter() {
-            name_resolve_expression(&expression, environment_id, name_environments, errors, warnings, allocator);
+            name_resolve_expression(&expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
         }
     }
 }
@@ -655,51 +665,55 @@ fn name_resolve_function_call<'allocator>(
 
 fn name_resolve_generics<'allocator>(
     ast: &'allocator Generics<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
     for type_info in ast.elements.iter() {
-        name_resolve_type_info(type_info, environment_id, name_environments, errors, warnings, allocator);
+        name_resolve_type_info(type_info, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     }
 }
 
 fn name_resolve_type_tag<'allocator>(
     ast: &'allocator TypeTag<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
     if let Ok(type_info) = &ast.type_info {
-        name_resolve_type_info(type_info, environment_id, name_environments, errors, warnings, allocator);
+        name_resolve_type_info(type_info, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     }
 }
 
 fn name_resolve_type_info<'allocator>(
     ast: &'allocator TypeInfo<'allocator, '_>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
     if ast.path.len() == 1 {
-        name_resolve_literal(&ast.path[0], environment_id, name_environments, errors);
+        name_resolve_literal(&ast.path[0], environment_id, name_environments, resolved_map, errors);
     }
 
     if let Some(generics) = &ast.generics {
-        name_resolve_generics(generics, environment_id, name_environments, errors, warnings, allocator);
+        name_resolve_generics(generics, environment_id, name_environments, resolved_map, errors, warnings, allocator);
     }
 }
 
 fn name_resolve_literal<'allocator>(
     literal: &'allocator Literal<'allocator>,
-    environment_id: EntityID<'allocator>,
+    environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
 ) {
     if number_literal_regex(literal.value) {
@@ -710,7 +724,7 @@ fn name_resolve_literal<'allocator>(
     let name_environment = &name_environments[environment_id];
     match name_environment.get_name_define_info(literal.value, &name_environments) {
         Some(define_info) => {
-            name_environment.mark_as_resolved(EntityID::from(literal), define_info);
+            resolved_map.insert(EntityID::from(literal), define_info);
         },
         _ => {
             errors.push(UndefinedIdentifier::new(literal.span.clone()));

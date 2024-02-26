@@ -4,9 +4,9 @@ use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 use fxhash::FxHashMap;
 
-use crate::transpiler::future::SharedManualFuture;
+use crate::transpiler::{future::SharedManualFuture, semantics::types::import_module_collector::collect_import_module_program};
 
-use self::{advice::Advice, component::ComponentContainer, context::{TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, resource::SourceCodeProvider, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
+use self::{advice::Advice, component::ComponentContainer, context::{try_create_module_context, TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, resource::SourceCodeProvider, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
 
 pub mod component;
 pub mod name_resolver;
@@ -33,7 +33,7 @@ pub struct TranspileWarning(pub Box<dyn TranspileReport + Send>);
 impl TranspileError {
 
     pub(crate) fn new<T: TranspileReport + Send + 'static>(report: T) -> TranspileError {
-        return Self(Box::new(report))
+        Self(Box::new(report))
     }
 
     pub(crate) fn add_advice(&mut self, module_name: String, advice: Advice) {
@@ -45,7 +45,7 @@ impl TranspileError {
 impl TranspileWarning {
 
     pub(crate) fn new<T: TranspileReport + Send + 'static>(report: T) -> TranspileWarning {
-        return Self(Box::new(report))
+        Self(Box::new(report))
     }
 
     pub(crate) fn add_advice(&mut self, module_name: String, advice: Advice) {
@@ -62,36 +62,19 @@ pub struct SourceCode {
 
 
 pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) {
+    let module_context = try_create_module_context(&context, &entry_module_name).unwrap();
 
-    context.clone().future_runtime.block_on(async move {
-        transpile_module(entry_module_name, context).await;
+    context.future_runtime.block_on(async move {
+        transpile_module(entry_module_name, module_context).await;
     });
-
 }
 
 
 async fn transpile_module(
     module_name: String,
-    context: Arc<TranspileContext>,
+    module_context: Arc<TranspileModuleContext>,
 ) {
-    if !context.try_mark_as_transpiling(&module_name) {
-        return;
-    }
-
-    let code = context.source_code_provider.get_source_code(&module_name).unwrap();
-    let source_code = SourceCode { code, module_name: module_name.clone() };
-
-    let module_context = Arc::new(
-        TranspileModuleContext {
-            source_code: Arc::new(source_code),
-            module_name: module_name.clone(),
-            context: context.clone(),
-            user_type_future: SharedManualFuture::new()
-        }
-    );
     let source = module_context.source_code.code.as_str();
-
-    context.register_module_context(module_name.clone(), module_context.clone());
 
     let allocator = Bump::new();
 
@@ -101,6 +84,8 @@ async fn transpile_module(
     let mut warnings = Vec::new();
 
     collect_parse_error_program(ast, &mut errors, &mut warnings, &module_context);
+
+    collect_import_module_program(ast, &mut errors, &mut warnings, &module_context);
     
     let mut name_resolved_map = FxHashMap::default();
     {
@@ -125,5 +110,5 @@ async fn transpile_module(
 
     dbg!(module_context.user_type_future.get().await);
 
-    context.add_error_and_warning(module_name, errors, warnings);
+    module_context.context.add_error_and_warning(module_name, errors, warnings);
 }

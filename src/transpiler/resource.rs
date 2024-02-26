@@ -1,18 +1,20 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
+
+use super::SourceCode;
 
 
 pub static FILE_EXTENSION: &str = ".catla";
 
 pub trait SourceCodeProvider {
 
-    fn get_source_code(&self, module_name: &str) -> Option<String>;
+    fn get_source_code(&self, module_name: &str) -> Option<Arc<SourceCode>>;
 
     fn exsists_source_code(&self, module_name: &str) -> bool;
 
 }
 
 pub struct TestSourceCodeProvider {
-    test_code_map: HashMap<String, String>
+    test_code_map: HashMap<String, Arc<SourceCode>>
 }
 
 impl TestSourceCodeProvider {
@@ -24,6 +26,9 @@ impl TestSourceCodeProvider {
     }
 
     pub fn insert(&mut self, module_name: String, source_code: String) {
+        let source_code = Arc::new(
+            SourceCode { code: source_code, module_name: module_name.clone() }
+        );
         self.test_code_map.insert(module_name, source_code);
     }
 
@@ -31,7 +36,7 @@ impl TestSourceCodeProvider {
 
 impl SourceCodeProvider for TestSourceCodeProvider {
 
-    fn get_source_code(&self, module_name: &str) -> Option<String> {
+    fn get_source_code(&self, module_name: &str) -> Option<Arc<SourceCode>> {
         self.test_code_map.get(module_name).cloned()
     }
 

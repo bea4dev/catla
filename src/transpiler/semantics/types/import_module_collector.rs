@@ -1,10 +1,10 @@
-use std::{collections::HashMap, sync::{Arc, Mutex}};
+use std::{collections::HashMap, ops::Range, sync::{Arc, Mutex}};
 
-use ariadne::Color;
+use ariadne::{Color, Label, Report, ReportKind, Source};
 use catla_parser::parser::{expression, AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST};
 use either::Either;
 
-use crate::transpiler::{context::TranspileModuleContext, error::SimpleError, parse_error::collect_parse_error_program, resource::FILE_EXTENSION, transpile_module, TranspileError, TranspileWarning};
+use crate::transpiler::{advice::AdviceReport, context::{try_create_module_context, TranspileModuleContext}, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, future::SharedManualFuture, parse_error::collect_parse_error_program, resource::FILE_EXTENSION, transpile_module, TranspileError, TranspileWarning};
 
 use super::type_info::{DataStructInfo, Type};
 
@@ -76,28 +76,65 @@ fn collect_import_module_import(
     let context = &context.context;
 
     let mut module_path_name = String::new();
-    for path in ast.import_path.iter() {
-        module_path_name += path.value;
-        module_path_name += "/";
+    let size = ast.import_path.len();
+
+    if size == 0 {
+        let element = ast.elements.elements.first().unwrap();
+        let module_name = element.value.to_string() + FILE_EXTENSION;
+        if context.source_code_provider.exsists_source_code(&module_name) {
+            let module_context = match try_create_module_context(context, &module_name) {
+                Some(module_context) => module_context,
+                _ => return
+            };
+    
+            context.future_runtime.spawn(async move {
+                transpile_module(module_name, module_context).await;
+            });
+        } else {
+            let error = TranspileError::new(ModuleNotFoundError {
+                module_names: Either::Left(module_name),
+                span: element.span.clone(),
+                advice_report: AdviceReport::new()
+            });
+            errors.push(error);
+        }
+        return;
+    }
+
+    for path in 0..size {
+        module_path_name += ast.import_path[path].value;
+        if path + 1 != size {
+            module_path_name += "/";
+        }
     }
     
     for element in ast.elements.elements.iter() {
-        let module_name = module_path_name.clone() + element.value + FILE_EXTENSION;
+        let module_name1 = module_path_name.clone() + FILE_EXTENSION;
+        let module_name2 = module_path_name.clone() + "/" + element.value + FILE_EXTENSION;
 
-        if !context.source_code_provider.exsists_source_code(&module_name) {
-            let error = SimpleError::new(
-                0027,
-                element.span.clone(),
-                vec![module_name],
-                vec![(element.span.clone(), Color::Red)]
-            );
+        let module_name = if context.source_code_provider.exsists_source_code(&module_name2) {
+            module_name2
+        } else if context.source_code_provider.exsists_source_code(&module_name1) {
+            module_name1
+        } else {
+            let span = ast.import_path.first().unwrap().span.start..element.span.end;
+
+            let error = TranspileError::new(ModuleNotFoundError {
+                module_names: Either::Right([module_name1, module_name2]),
+                span,
+                advice_report: AdviceReport::new()
+            });
             errors.push(error);
             continue
-        }
+        };
 
-        let context_temp = context.clone();
+        let module_context = match try_create_module_context(context, &module_name) {
+            Some(module_context) => module_context,
+            _ => continue
+        };
+
         context.future_runtime.spawn(async move {
-            transpile_module(module_name, context_temp).await;
+            transpile_module(module_name, module_context).await;
         });
     }
 }
@@ -339,5 +376,57 @@ fn collect_import_module_function_call(
         for arg_expr in arg_exprs.iter() {
             collect_import_module_expression(&arg_expr, errors, warnings, context);
         }
+    }
+}
+
+
+pub(crate) struct ModuleNotFoundError {
+    module_names: Either<String, [String; 2]>,
+    span: Range<usize>,
+    advice_report: AdviceReport
+}
+
+impl TranspileReport for ModuleNotFoundError {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let key = ErrorMessageKey::new(0027);
+
+        let message = match &self.module_names {
+            Either::Left(single) => {
+                let raw_message = text.get_text("error.0027.message_single");
+                raw_message.replace("%0", &single)
+            },
+            Either::Right(double) => {
+                let raw_message = text.get_text("error.0027.message_double");
+                raw_message.replace("%0", &double[0]).replace("%1", &double[1])
+            },
+        };
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.span.start)
+            .with_code(0027)
+            .with_message(message);
+
+        builder.add_label(
+            Label::new((module_name, self.span.clone()))
+                .with_color(Color::Red)
+                .with_message(key.get_massage(text, ErrorMessageType::Label(0)))
+        );
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            builder.set_note(note);
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+        builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+
+        self.advice_report.print(context, self.span.start);
+    }
+
+    fn add_advice(&mut self, module_name: String, advice: crate::transpiler::advice::Advice) {
+        self.advice_report.add_advice(module_name, advice);
     }
 }

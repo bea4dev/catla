@@ -83,9 +83,15 @@ impl TranspileReport for SimpleError {
         let text = &context.context.localized_text;
         let key = ErrorMessageKey::new(self.error_code);
 
+        let mut message = key.get_massage(text, ErrorMessageType::Message);
+        for i in 0..self.message_replace.len() {
+            let target = format!("%{}", i);
+            message = message.replace(&target, &self.message_replace[i]);
+        }
+
         let mut builder = Report::build(ReportKind::Error, module_name, self.message_span.start)
             .with_code(self.error_code)
-            .with_message(key.get_massage(text, ErrorMessageType::Message));
+            .with_message(message);
 
         let mut index = 0;
         for label in self.labels.iter() {

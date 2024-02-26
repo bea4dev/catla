@@ -13,7 +13,6 @@ pub struct TranspileContext {
     pub source_code_provider: Box<dyn SourceCodeProvider + Send + Sync>,
     pub module_context_map: Mutex<HashMap<String, Arc<TranspileModuleContext>>>,
     error_and_warnings: Mutex<HashMap<String, (Vec<TranspileError>, Vec<TranspileWarning>)>>,
-    pub transpiling_modules: Mutex<HashSet<String>>,
     pub(crate) future_runtime: Runtime,
 }
 
@@ -37,27 +36,12 @@ impl TranspileContext {
             source_code_provider: Box::new(source_code_provider),
             module_context_map: Mutex::new(HashMap::new()),
             error_and_warnings: Mutex::new(HashMap::new()),
-            transpiling_modules: Mutex::new(HashSet::new()),
             future_runtime
         })
     }
 
-    pub(crate) fn register_module_context(&self, module_name: String, module_context: Arc<TranspileModuleContext>) {
-        let mut module_context_map = self.module_context_map.lock().unwrap();
-        module_context_map.insert(module_name, module_context);
-    }
-
     pub fn get_module_context(&self, module_name: &String) -> Option<Arc<TranspileModuleContext>> {
-        return self.module_context_map.lock().unwrap().get(module_name).cloned();
-    }
-
-    pub fn try_mark_as_transpiling(&self, module_name: &String) -> bool {
-        let mut transpiling_modules = self.transpiling_modules.lock().unwrap();
-        if transpiling_modules.contains(module_name) {
-            return false;
-        }
-        transpiling_modules.insert(module_name.clone());
-        return true;
+        self.module_context_map.lock().unwrap().get(module_name).cloned()
     }
 
     pub fn add_error_and_warning(&self, module_name: String, errors: Vec<TranspileError>, warnings: Vec<TranspileWarning>) {
@@ -85,6 +69,27 @@ impl TranspileContext {
         }
     }
 
+}
+
+
+pub fn try_create_module_context(context: &Arc<TranspileContext>, module_name: &String) -> Option<Arc<TranspileModuleContext>> {
+    let mut module_context_map = context.module_context_map.lock().unwrap();
+
+    if module_context_map.contains_key(module_name) {
+        return None;
+    }
+
+    let source_code = context.source_code_provider.get_source_code(&module_name).unwrap();
+
+    let module_context = Arc::new(TranspileModuleContext {
+        source_code,
+        module_name: module_name.clone(),
+        context: context.clone(),
+        user_type_future: SharedManualFuture::new()
+    });
+    module_context_map.insert(module_name.clone(), module_context.clone());
+    
+    Some(module_context)
 }
 
 

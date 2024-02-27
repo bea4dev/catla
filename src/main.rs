@@ -1,4 +1,4 @@
-use transpiler::resource::{TestSourceCodeProvider, FILE_EXTENSION};
+use transpiler::resource::TestSourceCodeProvider;
 
 use crate::transpiler::{SourceCode, transpile, context::{TranspileSettings, TranspileContext}};
 
@@ -32,11 +32,11 @@ function test() {}
     };
 
     let mut resource_provider = TestSourceCodeProvider::new();
-    resource_provider.insert("test_module".to_string() + FILE_EXTENSION, source.to_string());
+    resource_provider.insert("test_module".to_string(), source.to_string());
 
     let context = TranspileContext::new(settings, resource_provider);
     
-    transpile("test_module".to_string() + FILE_EXTENSION, context.clone());
+    transpile("test_module".to_string(), context.clone());
 
     context.print_report();
 

@@ -4,7 +4,7 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 use catla_parser::parser::{expression, AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST};
 use either::Either;
 
-use crate::transpiler::{advice::AdviceReport, context::{try_create_module_context, TranspileModuleContext}, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, future::SharedManualFuture, parse_error::collect_parse_error_program, resource::FILE_EXTENSION, transpile_module, TranspileError, TranspileWarning};
+use crate::transpiler::{advice::AdviceReport, context::{try_create_module_context, TranspileModuleContext}, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, future::SharedManualFuture, parse_error::collect_parse_error_program, transpile_module, TranspileError, TranspileWarning};
 
 use super::type_info::{DataStructInfo, Type};
 
@@ -80,7 +80,7 @@ fn collect_import_module_import(
 
     if size == 0 {
         let element = ast.elements.elements.first().unwrap();
-        let module_name = element.value.to_string() + FILE_EXTENSION;
+        let module_name = element.value.to_string();
         if context.source_code_provider.exsists_source_code(&module_name) {
             let module_context = match try_create_module_context(context, &module_name) {
                 Some(module_context) => module_context,
@@ -109,8 +109,8 @@ fn collect_import_module_import(
     }
     
     for element in ast.elements.elements.iter() {
-        let module_name1 = module_path_name.clone() + FILE_EXTENSION;
-        let module_name2 = module_path_name.clone() + "/" + element.value + FILE_EXTENSION;
+        let module_name1 = module_path_name.clone();
+        let module_name2 = module_path_name.clone() + "/" + element.value;
 
         let module_name = if context.source_code_provider.exsists_source_code(&module_name2) {
             module_name2

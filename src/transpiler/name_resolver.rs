@@ -114,7 +114,7 @@ impl FoundDefineInfo {
                 return true;
             }
         }
-        return false;
+        false
     }
 
 }

@@ -89,6 +89,8 @@ async fn transpile_module(
     
     let mut name_resolved_map = FxHashMap::default();
     {
+        // This is not implemented 'Send'
+        // So, this cannot live across 'await'
         let mut name_environments = ComponentContainer::new(&allocator);
         name_resolve_program(
             ast,

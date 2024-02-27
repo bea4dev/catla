@@ -3,8 +3,6 @@ use std::{collections::HashMap, sync::Arc};
 use super::SourceCode;
 
 
-pub static FILE_EXTENSION: &str = ".catla";
-
 pub trait SourceCodeProvider {
 
     fn get_source_code(&self, module_name: &str) -> Option<Arc<SourceCode>>;

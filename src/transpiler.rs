@@ -85,7 +85,8 @@ async fn transpile_module(
 
     collect_parse_error_program(ast, &mut errors, &mut warnings, &module_context);
 
-    collect_import_module_program(ast, &mut errors, &mut warnings, &module_context);
+    let mut import_element_map = FxHashMap::default();
+    collect_import_module_program(ast, &mut import_element_map, &mut errors, &mut warnings, &module_context);
     
     let mut name_resolved_map = FxHashMap::default();
     {

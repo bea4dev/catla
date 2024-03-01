@@ -19,7 +19,7 @@ pub enum Type {
     Float64,
     Bool,
     Unit,
-    DataStruct(Option<Arc<DataStructInfo>>),
+    DataStruct(Arc<DataStructInfo>),
     Function(Arc<FunctionType>),
     Generic(Arc<GenericType>),
     Unknown
@@ -57,11 +57,8 @@ impl Eq for GenericType {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct FunctionType {
-    pub module_name: String,
-    pub name: Spanned<String>,
-    pub define_span: Range<usize>,
-    pub extension_type: Option<Type>,
+    pub is_extention: bool,
     pub generics_define: Vec<Arc<GenericType>>,
     pub argument_types: Vec<Type>,
-    pub return_type: Vec<Type>,
+    pub return_type: Type
 }

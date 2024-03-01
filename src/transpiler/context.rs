@@ -1,5 +1,6 @@
 use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex}};
 
+use fxhash::FxHashMap;
 use tokio::runtime::{Builder, Runtime};
 
 use crate::localize::localizer::LocalizedText;
@@ -103,5 +104,5 @@ pub struct TranspileModuleContext {
     pub source_code: Arc<SourceCode>,
     pub module_name: String,
     pub context: Arc<TranspileContext>,
-    pub user_type_future: SharedManualFuture<HashMap<String, Type>>
+    pub user_type_future: SharedManualFuture<FxHashMap<String, Type>>
 }

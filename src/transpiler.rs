@@ -106,7 +106,7 @@ async fn transpile_module(
 
     validate_syntax_program(ast, &module_context, None, &mut errors, &mut warnings);
 
-    let mut user_type_map = HashMap::new();
+    let mut user_type_map = FxHashMap::default();
     collect_user_type_program(ast, &mut user_type_map, &module_context);
 
     module_context.user_type_future.complete(user_type_map).await;

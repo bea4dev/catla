@@ -1,14 +1,14 @@
 use std::ops::Range;
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag};
 use either::Either;
 use fxhash::FxHashMap;
 
 use crate::transpiler::{advice::AdviceReport, component::EntityID, context::{try_create_module_context, TranspileModuleContext}, error::{ErrorMessageKey, ErrorMessageType, TranspileReport}, transpile_module, TranspileError, TranspileWarning};
 
 
-pub fn collect_import_module_program(
+pub(crate) fn collect_import_module_program(
     ast: Program,
     import_element_map: &mut FxHashMap<EntityID, String>,
     errors: &mut Vec<TranspileError>,
@@ -38,10 +38,24 @@ pub fn collect_import_module_program(
                 if let Some(block) = &function_define.block.value {
                     collect_import_module_program(block.program, import_element_map, errors,warnings, context);
                 }
+                if let Some(generics_define) = &function_define.generics_define {
+                    collect_import_module_generics_define(generics_define, import_element_map, errors, warnings, context);
+                }
+                if let Some(type_tag) = &function_define.type_tag {
+                    collect_import_module_type_tag(type_tag, import_element_map, errors, warnings, context);
+                }
             },
             StatementAST::DataStructDefine(data_struct_define) => {
                 if let Some(block) = &data_struct_define.block.value {
                     collect_import_module_program(block.program, import_element_map, errors, warnings, context);
+                }
+                if let Some(generics_define) = &data_struct_define.generics_define {
+                    collect_import_module_generics_define(generics_define, import_element_map, errors, warnings, context);
+                }
+                if let Some(super_type_info) = &data_struct_define.super_type_info {
+                    for type_info in super_type_info.type_infos.iter() {
+                        collect_import_module_type_info(type_info, import_element_map, errors, warnings, context);
+                    }
                 }
             },
             StatementAST::DropStatement(drop_statement) => {
@@ -57,6 +71,9 @@ pub fn collect_import_module_program(
                     if let Ok(expression) = expression {
                         collect_import_module_expression(&expression, import_element_map, errors,warnings, context);
                     }
+                }
+                if let Some(type_tag) = &variable_define.type_tag {
+                    collect_import_module_type_tag(type_tag, import_element_map, errors, warnings, context);
                 }
             },
             StatementAST::Import(import) => {
@@ -142,6 +159,20 @@ fn collect_import_module_import(
         context.future_runtime.spawn(async move {
             transpile_module(module_name, module_context).await;
         });
+    }
+}
+
+fn collect_import_module_generics_define(
+    ast: &GenericsDefine,
+    import_element_map: &mut FxHashMap<EntityID, String>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    for element in ast.elements.iter() {
+        for bound in element.bounds.iter() {
+            collect_import_module_type_info(bound, import_element_map, errors, warnings, context);
+        }
     }
 }
 
@@ -276,8 +307,51 @@ fn collect_import_module_primary(
     context: &TranspileModuleContext
 ) {
     collect_import_module_primary_left(&ast.left, import_element_map, errors,warnings, context);
+    let mut has_double_colon = false;
     for primary_right in ast.chain.iter() {
+        if primary_right.separator.value == PrimarySeparatorKind::DoubleColon {
+            has_double_colon = true;
+        }
         collect_import_module_primary_right(primary_right, import_element_map, errors,warnings, context);
+    }
+
+    if ast.left.mapping_operator.is_none() && has_double_colon {
+        if let PrimaryLeftExpr::Simple(simple) = &ast.left.first_expr {
+            if simple.1.is_none() {
+                if let SimplePrimary::Identifier(literal) = &simple.0 {
+                    let mut module_name = literal.value.to_string();
+                    let mut last_name = "";
+
+                    for right_primary in ast.chain.iter() {
+                        if right_primary.separator.value != PrimarySeparatorKind::DoubleColon {
+                            break;
+                        }
+                        if let Some(expr) = &right_primary.second_expr {
+                            if expr.1.is_some() {
+                                break;
+                            }
+                            module_name += "::";
+                            module_name += expr.0.value;
+                            last_name = expr.0.value;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if context.context.source_code_provider.exsists_source_code(&module_name) {
+                        import_element_map.insert(EntityID::from(ast), module_name);
+                    } else if !last_name.is_empty() {
+                        let start = module_name.len() - (2 + last_name.len()) - 1;
+                        let end = module_name.len() - 1;
+                        module_name.replace_range(start..end, "");
+                        
+                        if context.context.source_code_provider.exsists_source_code(&module_name) {
+                            import_element_map.insert(EntityID::from(ast), module_name);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -394,6 +468,69 @@ fn collect_import_module_function_call(
         for arg_expr in arg_exprs.iter() {
             collect_import_module_expression(&arg_expr, import_element_map, errors,warnings, context);
         }
+    }
+    if let Some(generics) = &ast.generics {
+        if let Ok(generics) = generics {
+            collect_import_module_generics(generics, import_element_map, errors, warnings, context);
+        }
+    }
+}
+
+fn collect_import_module_type_tag(
+    ast: &TypeTag,
+    import_element_map: &mut FxHashMap<EntityID, String>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    if let Ok(type_info) = &ast.type_info {
+        collect_import_module_type_info(type_info, import_element_map, errors, warnings, context);
+    }
+}
+
+fn collect_import_module_type_info(
+    ast: &TypeInfo,
+    import_element_map: &mut FxHashMap<EntityID, String>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    if ast.path.len() > 1 {
+        let mut module_name = String::new();
+        for i in 0..ast.path.len() - 2 {
+            module_name += ast.path[i].value;
+            if i != ast.path.len() - 1 {
+                module_name += "::";
+            }
+        }
+
+        if context.context.source_code_provider.exsists_source_code(&module_name) {
+            import_element_map.insert(EntityID::from(ast), module_name);
+        }
+    }
+
+    if let Some(generics) = &ast.generics {
+        collect_import_module_generics(generics, import_element_map, errors, warnings, context);
+    }
+    
+    for attribute in ast.type_attributes.iter() {
+        if let TypeAttributeEnum::Result(error_type) = &attribute.value {
+            if let Some(error_type) = error_type {
+                collect_import_module_generics(error_type, import_element_map, errors, warnings, context);
+            }
+        }
+    }
+}
+
+fn collect_import_module_generics(
+    ast: &Generics,
+    import_element_map: &mut FxHashMap<EntityID, String>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    for element in ast.elements.iter() {
+        collect_import_module_type_info(element, import_element_map, errors, warnings, context);
     }
 }
 

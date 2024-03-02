@@ -9,7 +9,7 @@ use crate::transpiler::{component::EntityID, context::TranspileModuleContext};
 use super::type_info::{DataStructInfo, GenericType, Type};
 
 
-pub fn collect_user_type_program(
+pub(crate) fn collect_user_type_program(
     ast: Program,
     user_type_map: &mut FxHashMap<String, Type>,
     context: &TranspileModuleContext

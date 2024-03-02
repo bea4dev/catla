@@ -700,7 +700,7 @@ fn name_resolve_type_info<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-    if ast.path.len() == 1 {
+    if ast.path.len() >= 1 {
         name_resolve_literal(&ast.path[0], environment_id, name_environments, resolved_map, errors);
     }
 

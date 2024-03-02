@@ -4,9 +4,9 @@ use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression,
 use either::Either;
 use fxhash::FxHashMap;
 
-use crate::transpiler::context::TranspileModuleContext;
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext};
 
-use super::type_info::{DataStructInfo, Type};
+use super::type_info::{DataStructInfo, GenericType, Type};
 
 
 pub fn collect_user_type_program(
@@ -42,12 +42,24 @@ pub fn collect_user_type_program(
                 if let Ok(name) = &data_struct_define.name {
                     let name = Spanned::new(name.value.to_string(), name.span.clone());
                     let type_name = name.value.clone();
+
+                    let mut generics_define = Vec::new();
+                    if let Some(generics) = &data_struct_define.generics_define {
+                        for element in generics.elements.iter() {
+                            let generic_type = Arc::new(GenericType {
+                                define_entity_id: EntityID::from(element),
+                                bounds: Mutex::new(Vec::new())
+                            });
+                            generics_define.push(generic_type);
+                        }
+                    }
+
                     let data_struct_info = DataStructInfo {
                         module_name: context.module_name.clone(),
                         name,
                         define_span: data_struct_define.span.clone(),
                         kind: data_struct_define.kind.value.clone(),
-                        generics_define: Vec::new(),
+                        generics_define,
                         element_types: Mutex::new(HashMap::new()),
                     };
 

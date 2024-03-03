@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use ariadne::{Report, ReportKind, Label, Source, Color};
+use bumpalo::Bump;
 use catla_parser::{lexer::Token, parser::{Spanned, StatementAttribute}};
 
 use crate::transpiler::{advice::{Advice, AdviceReport}, context::TranspileModuleContext, error::{TranspileReport, ErrorMessageKey, ErrorMessageType}, TranspileError};
@@ -78,11 +79,11 @@ impl TranspileReport for StatementAttributesWithoutDefine {
     }
 }
 
-pub(crate) fn statement_attributes_without_define(attributes: &bumpalo::collections::Vec<StatementAttribute>) -> TranspileError {
+pub(crate) fn statement_attributes_without_define(attributes: &Vec<StatementAttribute, &Bump>) -> TranspileError {
     let span_start = attributes.first().unwrap().span.start;
     let span_end = attributes.last().unwrap().span.end;
-    return TranspileError::new(StatementAttributesWithoutDefine {
+    TranspileError::new(StatementAttributesWithoutDefine {
         attributes_span: span_start..span_end,
         advice_report: AdviceReport::new()
-    });
+    })
 }

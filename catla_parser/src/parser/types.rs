@@ -1,5 +1,6 @@
+use bumpalo::Bump;
+
 use crate::lexer::TokenKind;
-use bumpalo::collections::Vec;
 
 use super::{TokenCursor, TypeTag, Generics, TypeInfo, TypeInfoResult, unexpected_token_error, Span, GetTokenKind, TypeTagKindEnum, TypeTagKind, parse_literal, TypeAttribute, TypeAttributeEnum, skip, read_until_token_found};
 
@@ -56,7 +57,7 @@ pub fn parse_type_info_result<'allocator, 'input>(cursor: &mut TokenCursor<'allo
     return parse_type_info(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
 }
 
-fn parse_type_attributes<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Vec<'allocator, TypeAttribute<'allocator, 'input>> {
+fn parse_type_attributes<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Vec<TypeAttribute<'allocator, 'input>, &'allocator Bump> {
     let mut attributes = Vec::new_in(cursor.allocator);
     loop {
         let attribute = match parse_type_attribute(cursor) {

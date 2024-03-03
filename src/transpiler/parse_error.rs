@@ -1,3 +1,4 @@
+use bumpalo::Bump;
 use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag}};
 use either::Either::{Right, Left, self};
 
@@ -290,7 +291,7 @@ fn collect_parse_error_function_call(ast: &FunctionCall, errors: &mut Vec<Transp
     collect_parse_error_with_parse_result(&ast.arg_exprs, collect_parse_error_argument_expr, Expected::ArgumentExpression, 0015, errors, warnings, context);
 }
 
-fn collect_parse_error_argument_expr(ast: &bumpalo::collections::Vec<Expression>, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>, context: &TranspileModuleContext) {
+fn collect_parse_error_argument_expr(ast: &Vec<Expression, &Bump>, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>, context: &TranspileModuleContext) {
     for expression in ast.iter() {
         collect_parse_error_expression(expression, errors, warnings, context);
     }
@@ -396,7 +397,7 @@ fn collect_parse_error_only_parse_result_error<T>(
 }
 
 fn collect_error_tokens(
-    error_tokens: &bumpalo::collections::Vec<Token>,
+    error_tokens: &Vec<Token, &Bump>,
     expected: Expected,
     error_code: usize,
     errors: &mut Vec<TranspileError>,

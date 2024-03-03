@@ -30,7 +30,7 @@ impl<T: Send> SharedManualFuture<T> {
         }
     }
 
-    pub async fn complete(&self, complete_value: T) {
+    pub async fn complete(&self, complete_value: Arc<T>) {
         let (arc_complete_value, completers) = {
             let mut value = self.value.lock().unwrap();
 
@@ -38,13 +38,12 @@ impl<T: Send> SharedManualFuture<T> {
                 panic!("double complete!");
             }
 
-            let arc_complete_value = Arc::new(complete_value);
-            value.0 = Some(arc_complete_value.clone());
+            value.0 = Some(complete_value.clone());
 
             let mut completers = Vec::new();
             mem::swap(&mut completers, &mut value.1);
 
-            (arc_complete_value, completers)
+            (complete_value, completers)
         };
         
         for completer in completers {

@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::Range};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
-use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, TypeInfo, TypeTag}};
+use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, StatementAST, TypeInfo, TypeTag}};
 use either::Either::{Left, Right};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -12,9 +12,9 @@ use super::{advice::AdviceReport, component::{ComponentContainer, EntityID}, err
 
 #[derive(Debug, Clone)]
 pub(crate) struct DefineWithName {
-    entity_id: EntityID,
-    span: Range<usize>,
-    define_kind: DefineKind
+    pub entity_id: EntityID,
+    pub span: Range<usize>,
+    pub define_kind: DefineKind
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -102,8 +102,8 @@ impl<'allocator> NameEnvironment<'allocator> {
 }
 
 pub(crate) struct FoundDefineInfo {
-    define_info: DefineWithName,
-    separators: Vec<EnvironmentSeparatorKind>
+    pub define_info: DefineWithName,
+    pub separators: Vec<EnvironmentSeparatorKind>
 }
 
 impl FoundDefineInfo {
@@ -147,9 +147,10 @@ pub(crate) fn name_resolve_program<'allocator>(
         match statement {
             StatementAST::Import(import) => {
                 let name_environment = &name_environments[current_environment_id];
-                let entity_id = EntityID::from(import);
                 for element in import.elements.elements.iter() {
+                    let entity_id = EntityID::from(element);
                     let define_info = DefineWithName { entity_id, span: element.span.clone(), define_kind: DefineKind::Import };
+                    
                     if let Some(already_exists) = name_environment.get_name_define_info(element.value, &name_environments) {
                         errors.push(NameAlreadyExists::new(define_info.span.clone(), already_exists.define_info.span.clone()));
                     } else {
@@ -512,8 +513,21 @@ fn name_resolve_primary<'allocator>(
     allocator: &'allocator Bump
 ) {
     name_resolve_primary_left(&ast.left, environment_id, name_environments, resolved_map, errors, warnings, allocator);
+    
+    let mut has_double_colon = false;
     for primary_right in ast.chain.iter() {
+        if primary_right.separator.value == PrimarySeparatorKind::DoubleColon {
+            has_double_colon = true;
+        }
         name_resolve_primary_right(primary_right, environment_id, name_environments, resolved_map, errors, warnings, allocator);
+    }
+
+    if let PrimaryLeftExpr::Simple(simple) = &ast.left.first_expr {
+        let collect_error = !(ast.left.mapping_operator.is_none() && has_double_colon);
+        
+        if let SimplePrimary::Identifier(literal) = &simple.0 {
+            name_resolve_literal(literal, collect_error, environment_id, name_environments, resolved_map, errors)
+        }
     }
 }
 
@@ -534,9 +548,6 @@ fn name_resolve_primary_left<'allocator>(
                         name_resolve_expression(&expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
                     }
                 },
-                SimplePrimary::Identifier(literal) => {
-                    name_resolve_literal(literal, environment_id, name_environments, resolved_map, errors);
-                },
                 _ => {}
             }
             if let Some(function_call) = &simple.1 {
@@ -545,7 +556,8 @@ fn name_resolve_primary_left<'allocator>(
         },
         PrimaryLeftExpr::NewExpression(new_expression) => {
             if let Some(first_literal) = new_expression.path.first() {
-                name_resolve_literal(first_literal, environment_id, name_environments, resolved_map, errors);
+                let collect_error = new_expression.path.len() == 1;
+                name_resolve_literal(first_literal, collect_error, environment_id, name_environments, resolved_map, errors);
             }
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {
@@ -701,7 +713,8 @@ fn name_resolve_type_info<'allocator>(
     allocator: &'allocator Bump
 ) {
     if ast.path.len() >= 1 {
-        name_resolve_literal(&ast.path[0], environment_id, name_environments, resolved_map, errors);
+        let collect_error = ast.path.len() == 1;
+        name_resolve_literal(&ast.path[0], collect_error, environment_id, name_environments, resolved_map, errors);
     }
 
     if let Some(generics) = &ast.generics {
@@ -711,6 +724,7 @@ fn name_resolve_type_info<'allocator>(
 
 fn name_resolve_literal<'allocator>(
     literal: &'allocator Literal<'allocator>,
+    collect_error: bool,
     environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
@@ -727,7 +741,9 @@ fn name_resolve_literal<'allocator>(
             resolved_map.insert(EntityID::from(literal), define_info);
         },
         _ => {
-            errors.push(UndefinedIdentifier::new(literal.span.clone()));
+            if collect_error {
+                errors.push(UndefinedIdentifier::new(literal.span.clone()));
+            }
         }
     }
 }

@@ -1,3 +1,5 @@
+#![feature(allocator_api)]
+
 use transpiler::resource::TestSourceCodeProvider;
 
 use crate::transpiler::{SourceCode, transpile, context::{TranspileSettings, TranspileContext}};
@@ -9,7 +11,7 @@ fn main() {
 
     let source = 
 "
-import test_module
+import test::test_module2
 
 let = function() -> int { return 1 }
 || => { 1 * 1 } = 200
@@ -17,7 +19,25 @@ let = function() -> int { return 1 }
 let a = b + 20.5
 
 class TestClass<T: Any> {
-    var field0: int
+    var field0: test_module::TestClass
+
+    test()
+}
+
+function test() {}
+function test() {}
+";
+let source1 = 
+"
+import test::test_module1
+
+let = function() -> int { return 1 }
+|| => { 1 * 1 } = 200
+
+let a = b + 20.5
+
+class TestClass<T: Any> {
+    var field0: test_module::TestClass
 
     test()
 }
@@ -32,11 +52,12 @@ function test() {}
     };
 
     let mut resource_provider = TestSourceCodeProvider::new();
-    resource_provider.insert("test_module".to_string(), source.to_string());
+    resource_provider.insert("test::test_module1".to_string(), source.to_string());
+    resource_provider.insert("test::test_module2".to_string(), source1.to_string());
 
     let context = TranspileContext::new(settings, resource_provider);
     
-    transpile("test_module".to_string(), context.clone());
+    transpile("test::test_module1".to_string(), context.clone());
 
     context.print_report();
 

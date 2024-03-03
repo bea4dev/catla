@@ -1,5 +1,4 @@
 use super::{*, types::parse_generics, statement::{parse_block, parse_function_argument}};
-use bumpalo::collections::Vec;
 
 
 pub fn parse_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Expression<'allocator, 'input>> {

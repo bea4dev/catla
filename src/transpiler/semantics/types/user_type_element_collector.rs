@@ -1,10 +1,11 @@
 use std::{collections::HashMap, mem, ops::DerefMut, sync::{Arc, Mutex}};
 
+use ariadne::Color;
 use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, GenericsElement, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeInfo};
 use either::Either;
 use fxhash::FxHashMap;
 
-use crate::transpiler::{component::EntityID, context::TranspileModuleContext, name_resolver::FoundDefineInfo};
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::FoundDefineInfo, TranspileError, TranspileWarning};
 
 use super::type_info::{self, DataStructInfo, FunctionType, GenericType, Type};
 
@@ -17,6 +18,8 @@ pub(crate) fn collect_module_element_types_program(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     current_user_type_name: Option<&str>,
     context: &TranspileModuleContext
 ) {
@@ -41,6 +44,8 @@ pub(crate) fn collect_module_element_types_program(
                                         module_user_type_map,
                                         module_element_type_map,
                                         generics_map,
+                                        errors,
+                                        warnings,
                                         context
                                     )
                                 },
@@ -48,7 +53,13 @@ pub(crate) fn collect_module_element_types_program(
                             }
                         },
                         _ => {
-                            // TODO - error
+                            let error = SimpleError::new(
+                                0028,
+                                field_define.span.clone(),
+                                vec![],
+                                vec![(field_define.span.clone(), Color::Red)]
+                            );
+                            errors.push(error);
                             Type::Unknown
                         }
                     };
@@ -67,6 +78,8 @@ pub(crate) fn collect_module_element_types_program(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        errors,
+                        warnings,
                         Some(*user_type_name),
                         context
                     )
@@ -94,6 +107,8 @@ pub(crate) fn collect_module_element_types_program(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    errors,
+                    warnings,
                     context
                 );
                 if let Ok(right_expr) = &assignment.right_expr {
@@ -105,6 +120,8 @@ pub(crate) fn collect_module_element_types_program(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        errors,
+                        warnings,
                         context
                     );
                 }
@@ -118,6 +135,8 @@ pub(crate) fn collect_module_element_types_program(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    errors,
+                    warnings,
                     context
                 );
                 if let Ok(right_expr) = &exchange.right_expr {
@@ -129,6 +148,8 @@ pub(crate) fn collect_module_element_types_program(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        errors,
+                        warnings,
                         context
                     );
                 }
@@ -143,6 +164,8 @@ pub(crate) fn collect_module_element_types_program(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        errors,
+                        warnings,
                         current_user_type_name,
                         context
                     );
@@ -161,6 +184,8 @@ pub(crate) fn collect_module_element_types_program(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        errors,
+                        warnings,
                         None,
                         context
                     );
@@ -177,6 +202,8 @@ pub(crate) fn collect_module_element_types_program(
                             module_user_type_map,
                             module_element_type_map,
                             generics_map,
+                            errors,
+                            warnings,
                             current_user_type_name,
                             context
                         );
@@ -208,6 +235,8 @@ pub(crate) fn collect_module_element_types_program(
                         name_resolved_map, module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        errors,
+                        warnings,
                         Some(name.value),
                         context
                     );
@@ -223,6 +252,8 @@ pub(crate) fn collect_module_element_types_program(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        errors,
+                        warnings,
                         context
                     );
                 }
@@ -236,6 +267,8 @@ pub(crate) fn collect_module_element_types_program(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    errors,
+                    warnings,
                     context
                 );
             },
@@ -260,14 +293,28 @@ pub(crate) fn collect_module_element_types_program(
                                         name_resolved_map,
                                         module_user_type_map,
                                         module_element_type_map,
-                                        generics_map,
+                                        generics_map,errors,warnings,
                                         context
                                     )
                                 },
                                 _ => Type::Unknown
                             }
                         },
-                        _ => Type::Unknown
+                        _ => {
+                            let span = match &variable_define.name {
+                                Ok(name) => name.span.clone(),
+                                _ => variable_define.span.clone()
+                            };
+                            let error = SimpleError::new(
+                                0029,
+                                span.clone(),
+                                vec![],
+                                vec![(span, Color::Red)]
+                            );
+                            errors.push(error);
+
+                            Type::Unknown
+                        }
                     };
                     
                     if let Ok(name) = &variable_define.name {
@@ -285,6 +332,8 @@ pub(crate) fn collect_module_element_types_program(
                             module_user_type_map,
                             module_element_type_map,
                             generics_map,
+                            errors,
+                            warnings,
                             context
                         );
                     }
@@ -303,6 +352,8 @@ fn get_function_type_and_name<'allocator>(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     current_user_type_name: Option<&str>,
     context: &TranspileModuleContext
 ) -> Option<(&'allocator str, Type)> {
@@ -316,6 +367,8 @@ fn get_function_type_and_name<'allocator>(
                 module_user_type_map,
                 module_element_type_map,
                 generics_map,
+                errors,
+                warnings,
                 current_user_type_name,
                 context
             )
@@ -335,13 +388,15 @@ fn get_function_type_and_name<'allocator>(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        errors,
+                        warnings,
                         context
                     )
                 },
                 _ => Type::Unknown
             }
         },
-        _ => Type::Unknown
+        _ => Type::Unit
     };
 
     let mut argument_types = Vec::new();
@@ -361,6 +416,8 @@ fn get_function_type_and_name<'allocator>(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    errors,
+                    warnings,
                     context
                 )
             },
@@ -402,6 +459,8 @@ fn collect_module_element_types_expression(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     match ast {
@@ -414,6 +473,8 @@ fn collect_module_element_types_expression(
                 module_user_type_map,
                 module_element_type_map,
                 generics_map,
+                errors,
+                warnings,
                 context
             );
             for right_expr in or_expression.right_exprs.iter() {
@@ -426,6 +487,8 @@ fn collect_module_element_types_expression(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        errors,
+                        warnings,
                         context
                     );
                 }
@@ -441,6 +504,8 @@ fn collect_module_element_types_expression(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    errors,
+                    warnings,
                     context
                 );
             }
@@ -457,6 +522,8 @@ fn collect_module_element_types_expression(
                             module_user_type_map,
                             module_element_type_map,
                             generics_map,
+                            errors,
+                            warnings,
                             context
                         );
                     },
@@ -469,6 +536,8 @@ fn collect_module_element_types_expression(
                             module_user_type_map,
                             module_element_type_map,
                             generics_map,
+                            errors,
+                            warnings,
                             None,
                             context
                         );
@@ -487,6 +556,8 @@ fn collect_module_element_types_and_expression(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     collect_module_element_types_eqne_expression(
@@ -497,6 +568,8 @@ fn collect_module_element_types_and_expression(
         module_user_type_map,
         module_element_type_map,
         generics_map,
+        errors,
+        warnings,
         context
     );
     for right_expr in ast.right_exprs.iter() {
@@ -509,6 +582,8 @@ fn collect_module_element_types_and_expression(
                 module_user_type_map,
                 module_element_type_map,
                 generics_map,
+                errors,
+                warnings,
                 context
             );
         }
@@ -523,6 +598,8 @@ fn collect_module_element_types_eqne_expression(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     collect_module_element_types_compare_expression(
@@ -533,6 +610,8 @@ fn collect_module_element_types_eqne_expression(
         module_user_type_map,
         module_element_type_map,
         generics_map,
+        errors,
+        warnings,
         context
     );
     for right_expr in ast.right_exprs.iter() {
@@ -545,6 +624,8 @@ fn collect_module_element_types_eqne_expression(
                 module_user_type_map,
                 module_element_type_map,
                 generics_map,
+                errors,
+                warnings,
                 context
             );
         }
@@ -559,6 +640,8 @@ fn collect_module_element_types_compare_expression(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     collect_module_element_types_add_or_sub_expression(
@@ -569,6 +652,8 @@ fn collect_module_element_types_compare_expression(
         module_user_type_map,
         module_element_type_map,
         generics_map,
+        errors,
+        warnings,
         context
     );
     for right_expr in ast.right_exprs.iter() {
@@ -581,6 +666,8 @@ fn collect_module_element_types_compare_expression(
                 module_user_type_map,
                 module_element_type_map,
                 generics_map,
+                errors,
+                warnings,
                 context
             );
         }
@@ -595,6 +682,8 @@ fn collect_module_element_types_add_or_sub_expression(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     collect_module_element_types_mul_or_div_expression(
@@ -605,6 +694,8 @@ fn collect_module_element_types_add_or_sub_expression(
         module_user_type_map,
         module_element_type_map,
         generics_map,
+        errors,
+        warnings,
         context
     );
     for right_expr in ast.right_exprs.iter() {
@@ -617,6 +708,8 @@ fn collect_module_element_types_add_or_sub_expression(
                 module_user_type_map,
                 module_element_type_map,
                 generics_map,
+                errors,
+                warnings,
                 context
             );
         }
@@ -631,6 +724,8 @@ fn collect_module_element_types_mul_or_div_expression(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     collect_module_element_types_factor(
@@ -641,6 +736,8 @@ fn collect_module_element_types_mul_or_div_expression(
         module_user_type_map,
         module_element_type_map,
         generics_map,
+        errors,
+        warnings,
         context
     );
     for right_expr in ast.right_exprs.iter() {
@@ -653,6 +750,8 @@ fn collect_module_element_types_mul_or_div_expression(
                 module_user_type_map,
                 module_element_type_map,
                 generics_map,
+                errors,
+                warnings,
                 context
             );
         }
@@ -667,6 +766,8 @@ fn collect_module_element_types_factor(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     if let Ok(primary) = &ast.primary {
@@ -678,6 +779,8 @@ fn collect_module_element_types_factor(
             module_user_type_map,
             module_element_type_map,
             generics_map,
+            errors,
+            warnings,
             context
         );
     }
@@ -691,6 +794,8 @@ fn collect_module_element_types_primary(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     collect_module_element_types_primary_left(
@@ -701,6 +806,8 @@ fn collect_module_element_types_primary(
         module_user_type_map,
         module_element_type_map,
         generics_map,
+        errors,
+        warnings,
         context
     );
     for primary_right in ast.chain.iter() {
@@ -712,6 +819,8 @@ fn collect_module_element_types_primary(
             module_user_type_map,
             module_element_type_map,
             generics_map,
+            errors,
+            warnings,
             context
         );
     }
@@ -725,6 +834,8 @@ fn collect_module_element_types_primary_left(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     match &ast.first_expr {
@@ -740,6 +851,8 @@ fn collect_module_element_types_primary_left(
                             module_user_type_map,
                             module_element_type_map,
                             generics_map,
+                            errors,
+                            warnings,
                             context
                         );
                     }
@@ -756,6 +869,8 @@ fn collect_module_element_types_primary_left(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    errors,
+                    warnings,
                     context
                 );
             }
@@ -770,6 +885,8 @@ fn collect_module_element_types_primary_left(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    errors,
+                    warnings,
                     context
                 );
             }
@@ -785,6 +902,8 @@ fn collect_module_element_types_primary_left(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    errors,
+                    warnings,
                     context
                 );
             }
@@ -797,6 +916,8 @@ fn collect_module_element_types_primary_left(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    errors,
+                    warnings,
                     None,
                     context
                 );
@@ -815,6 +936,8 @@ fn collect_module_element_types_primary_left(
                                     module_user_type_map,
                                     module_element_type_map,
                                     generics_map,
+                                    errors,
+                                    warnings,
                                     context
                                 );
                             }
@@ -827,6 +950,8 @@ fn collect_module_element_types_primary_left(
                                     module_user_type_map,
                                     module_element_type_map,
                                     generics_map,
+                                    errors,
+                                    warnings,
                                     None,
                                     context
                                 );
@@ -841,6 +966,8 @@ fn collect_module_element_types_primary_left(
                                 module_user_type_map,
                                 module_element_type_map,
                                 generics_map,
+                                errors,
+                                warnings,
                                 None,
                                 context
                             );
@@ -859,6 +986,8 @@ fn collect_module_element_types_primary_left(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    errors,
+                    warnings,
                     None,
                     context
                 );
@@ -875,6 +1004,8 @@ fn collect_module_element_types_primary_left(
             module_user_type_map,
             module_element_type_map,
             generics_map,
+            errors,
+            warnings,
             context
         );
     }
@@ -888,6 +1019,8 @@ fn collect_module_element_types_primary_right(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     if let Some(second_expr) = &ast.second_expr {
@@ -900,6 +1033,8 @@ fn collect_module_element_types_primary_right(
                 module_user_type_map,
                 module_element_type_map,
                 generics_map,
+                errors,
+                warnings,
                 context
             );
         }
@@ -914,6 +1049,8 @@ fn collect_module_element_types_primary_right(
             module_user_type_map,
             module_element_type_map,
             generics_map,
+            errors,
+            warnings,
             context
         );
     }
@@ -927,6 +1064,8 @@ fn collect_module_element_types_mapping_operator(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     let block = match &ast.value {
@@ -944,6 +1083,8 @@ fn collect_module_element_types_mapping_operator(
             module_user_type_map,
             module_element_type_map,
             generics_map,
+            errors,
+            warnings,
             None,
             context
         );
@@ -958,6 +1099,8 @@ fn collect_module_element_types_function_call(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     if let Ok(arg_exprs) = &ast.arg_exprs {
@@ -970,6 +1113,8 @@ fn collect_module_element_types_function_call(
                 module_user_type_map,
                 module_element_type_map,
                 generics_map,
+                errors,
+                warnings,
                 context
             );
         }
@@ -984,9 +1129,38 @@ fn get_type(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) -> Type {
-    todo!()
+    if let Some(module_name) = import_element_map.get(&EntityID::from(ast)) {
+        let module_user_type_map = module_user_type_map.get(module_name).unwrap();
+        let type_info = match module_user_type_map.get(ast.path[0].value) {
+            Some(type_info) => type_info,
+            _ => {
+                let span = ast.path[0].span.clone();
+                let error = SimpleError::new(
+                    0030,
+                    span.clone(),
+                    vec![module_name.clone(), ast.path[0].value.to_string()],
+                    vec![(span, Color::Red)]
+                );
+                errors.push(error);
+                return Type::Unknown
+            }
+        };
+        type_info.clone()
+        // generics
+    } else {
+        Type::Unknown
+        /*
+        let resolved = ast.path.get(0).map(|literal| { name_resolved_map.get(&EntityID::from(literal)) }).flatten();
+        let type_info = match resolved {
+            Some(resolved) => {
+                
+            }
+        };*/
+    }
 }
 
 fn get_generic_type<'allocator>(
@@ -997,9 +1171,11 @@ fn get_generic_type<'allocator>(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
     current_user_type_name: Option<&str>,
     context: &TranspileModuleContext
 ) -> Vec<Arc<GenericType>> {
     // TODO - register to generics_map
-    todo!()
+    Vec::new()
 }

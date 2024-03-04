@@ -1,11 +1,11 @@
 use std::{collections::HashMap, mem, ops::DerefMut, sync::{Arc, Mutex}};
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, GenericsElement, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeInfo};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, GenericsElement, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
 use either::Either;
 use fxhash::FxHashMap;
 
-use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::FoundDefineInfo, TranspileError, TranspileWarning};
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
 use super::type_info::{self, DataStructInfo, FunctionType, GenericType, Type};
 
@@ -90,8 +90,8 @@ pub(crate) fn collect_module_element_types_program(
             if let Some(element) = element {
                 let user_type = user_type_map.get(*user_type_name).unwrap().clone();
 
-                if let Type::DataStruct(user_type) = user_type {
-                    let mut element_map = user_type.element_types.lock().unwrap();
+                if let Type::DataStruct{ data_struct_info, generics: _ } = user_type {
+                    let mut element_map = data_struct_info.element_types.lock().unwrap();
                     element_map.insert(element.0.to_string(), element.1);
                 }
             }
@@ -210,11 +210,11 @@ pub(crate) fn collect_module_element_types_program(
                         
                         // set generic bounds type
                         let user_type = user_type_map.get(name.value).unwrap().clone();
-                        if let Type::DataStruct(user_type) = user_type {
-                            let size = user_type.generics_define.len();
+                        if let Type::DataStruct{ data_struct_info, generics: _ } = user_type {
+                            let size = data_struct_info.generics_define.len();
                             if size == generic_types.len() {
                                 for i in 0..size {
-                                    let generic_type_old = &user_type.generics_define[i];
+                                    let generic_type_old = &data_struct_info.generics_define[i];
                                     let generic_type_new = &generic_types[i];
 
                                     let mut bounds_old = generic_type_old.bounds.lock().unwrap();
@@ -228,18 +228,20 @@ pub(crate) fn collect_module_element_types_program(
                         }
                     }
 
-                    collect_module_element_types_program(
-                        ast,
-                        user_type_map,
-                        import_element_map,
-                        name_resolved_map, module_user_type_map,
-                        module_element_type_map,
-                        generics_map,
-                        errors,
-                        warnings,
-                        Some(name.value),
-                        context
-                    );
+                    if let Some(block) = &data_struct_define.block.value {
+                        collect_module_element_types_program(
+                            block.program,
+                            user_type_map,
+                            import_element_map,
+                            name_resolved_map, module_user_type_map,
+                            module_element_type_map,
+                            generics_map,
+                            errors,
+                            warnings,
+                            Some(name.value),
+                            context
+                        );
+                    }
                 }
             },
             StatementAST::DropStatement(drop_statement) => {
@@ -426,7 +428,7 @@ fn get_function_type_and_name<'allocator>(
         argument_types.push(type_info);
     }
 
-    let function_type = Arc::new(FunctionType {
+    let function_info = Arc::new(FunctionType {
         is_extention: current_user_type_name.is_some(),
         generics_define,
         argument_types,
@@ -445,7 +447,7 @@ fn get_function_type_and_name<'allocator>(
                     }
                 },
             };
-            Some((name, Type::Function(function_type)))
+            Some((name, Type::Function{ function_info, generics: Arc::new(Vec::new()) }))
         },
         _ => None
     }
@@ -1133,12 +1135,16 @@ fn get_type(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) -> Type {
-    if let Some(module_name) = import_element_map.get(&EntityID::from(ast)) {
-        let module_user_type_map = module_user_type_map.get(module_name).unwrap();
-        let type_info = match module_user_type_map.get(ast.path[0].value) {
-            Some(type_info) => type_info,
+    if ast.path.is_empty() {
+        return Type::Unknown;
+    }
+
+    let mut type_info = if let Some(module_name) = import_element_map.get(&EntityID::from(ast)) {
+        let type_map = module_user_type_map.get(module_name).unwrap();
+        match type_map.get(ast.path[0].value) {
+            Some(type_info) => type_info.clone(),
             _ => {
-                let span = ast.path[0].span.clone();
+                let span = ast.path.last().unwrap().span.clone();
                 let error = SimpleError::new(
                     0030,
                     span.clone(),
@@ -1148,19 +1154,108 @@ fn get_type(
                 errors.push(error);
                 return Type::Unknown
             }
-        };
-        type_info.clone()
-        // generics
+        }
     } else {
-        Type::Unknown
-        /*
-        let resolved = ast.path.get(0).map(|literal| { name_resolved_map.get(&EntityID::from(literal)) }).flatten();
-        let type_info = match resolved {
+        match name_resolved_map.get(&EntityID::from(&ast.path[0])) {
             Some(resolved) => {
-                
+                match resolved.define_info.define_kind {
+                    DefineKind::Import => {
+                        let module_name = import_element_map.get(&resolved.define_info.entity_id).unwrap();
+                        
+                    },
+                    DefineKind::DataStruct => todo!(),
+                    DefineKind::Generics => todo!(),
+                    _ => Type::Unknown
+                }
+            },
+            _ => 
+        }
+    };
+
+    if let Some(generics_ast) = &ast.generics {
+        let mut generics_types = Vec::new();
+        for element in generics_ast.elements.iter() {
+            let ty = get_type(
+                element,
+                user_type_map,
+                import_element_map,
+                name_resolved_map,
+                module_user_type_map,
+                module_element_type_map,
+                generics_map,
+                errors,
+                warnings,
+                context
+            );
+            generics_types.push(ty);
+        }
+
+        type_info = match &type_info {
+            Type::DataStruct { data_struct_info, generics: _ } => {
+                Type::DataStruct { data_struct_info: data_struct_info.clone(), generics: Arc::new(generics_types) }
+            },
+            Type::Function { function_info, generics: _ } => {
+                Type::Function { function_info: function_info.clone(), generics: Arc::new(generics_types) }
+            },
+            _ => {
+                let span_0 = ast.path.last().unwrap().span.clone();
+                let span_1 = generics_ast.span.clone();
+
+                let error = SimpleError::new(
+                    0031,
+                    span_1.clone(),
+                    vec![],
+                    vec![(span_0, Color::Yellow), (span_1, Color::Red)]
+                );
+                errors.push(error);
+                Type::Unknown
             }
-        };*/
+        };
     }
+
+    for attribute in ast.type_attributes.iter() {
+        type_info = match &attribute.value {
+            TypeAttributeEnum::Optional => Type::Option(Arc::new(type_info)),
+            TypeAttributeEnum::Result(error_type) => {
+                let error_type = match error_type {
+                    Some(error_type) => {
+                        if error_type.elements.len() == 1 {
+                            get_type(
+                                &error_type.elements[0],
+                                user_type_map,
+                                import_element_map,
+                                name_resolved_map,
+                                module_user_type_map,
+                                module_element_type_map,
+                                generics_map,
+                                errors,
+                                warnings,
+                                context
+                            )
+                        } else {
+                            let span_0_start = ast.path.last().unwrap().span.start;
+                            let span_0_end = attribute.span.end;
+                            let span_0 = span_0_start..span_0_end;
+                            let span_1 = error_type.span.clone();
+
+                            let error = SimpleError::new(
+                                0032,
+                                span_1.clone(),
+                                vec![1.to_string(), error_type.elements.len().to_string()],
+                                vec![(span_0, Color::Yellow), (span_1, Color::Red)]
+                            );
+                            errors.push(error);
+                            Type::Unknown
+                        }
+                    },
+                    _ => Type::Unit // TODO - default error class object
+                };
+                Type::Result { value: Arc::new(type_info), error: Arc::new(error_type) }
+            }
+        };
+    }
+
+    type_info
 }
 
 fn get_generic_type<'allocator>(

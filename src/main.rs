@@ -1,5 +1,7 @@
 #![feature(allocator_api)]
 
+use std::{thread, time::Duration};
+
 use transpiler::resource::TestSourceCodeProvider;
 
 use crate::transpiler::{SourceCode, transpile, context::{TranspileSettings, TranspileContext}};
@@ -58,6 +60,8 @@ function test() {}
     let context = TranspileContext::new(settings, resource_provider);
     
     transpile("test::test_module1".to_string(), context.clone());
+
+    thread::sleep(Duration::from_secs(1));
 
     context.print_report();
 

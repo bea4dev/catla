@@ -71,7 +71,11 @@ pub(crate) fn collect_user_type_program(
                         );
                     }
 
-                    user_type_map.insert(type_name, Type::DataStruct(Arc::new(data_struct_info)));
+                    let ty = Type::DataStruct{
+                        data_struct_info: Arc::new(data_struct_info),
+                        generics: Arc::new(Vec::new())
+                    };
+                    user_type_map.insert(type_name, ty);
                 }
             },
             StatementAST::DropStatement(drop_statement) => {

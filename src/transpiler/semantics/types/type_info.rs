@@ -19,9 +19,11 @@ pub enum Type {
     Float64,
     Bool,
     Unit,
-    DataStruct(Arc<DataStructInfo>),
-    Function(Arc<FunctionType>),
+    DataStruct { data_struct_info: Arc<DataStructInfo>, generics: Arc<Vec<Type>> },
+    Function{ function_info: Arc<FunctionType>, generics: Arc<Vec<Type>> },
     Generic(Arc<GenericType>),
+    Option(Arc<Type>),
+    Result { value: Arc<Type>, error: Arc<Type> },
     Unknown
 }
 

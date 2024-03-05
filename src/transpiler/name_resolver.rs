@@ -7,7 +7,9 @@ use either::Either::{Left, Right};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
-use super::{advice::AdviceReport, component::{ComponentContainer, EntityID}, error::{ErrorMessageKey, ErrorMessageType, TranspileReport}, TranspileError, TranspileWarning};
+use crate::localize::localizer::LocalizedText;
+
+use super::{advice::AdviceReport, component::{ComponentContainer, EntityID}, error::{ErrorMessageKey, ErrorMessageType, TranspileReport}, semantics::types::type_info::PRIMITIVE_TYPE_NAMES, TranspileError, TranspileWarning};
 
 
 #[derive(Debug, Clone)]
@@ -24,8 +26,23 @@ pub(crate) enum DefineKind {
     Variable,
     FunctionArgument,
     ClosureArgument,
-    DataStruct,
+    UserType,
     Generics
+}
+
+impl DefineKind {
+    pub(crate) fn get_name(&self, text: &LocalizedText) -> std::string::String {
+        let name = match self {
+            DefineKind::Import => "import",
+            DefineKind::Function => "function",
+            DefineKind::Variable => "variable",
+            DefineKind::FunctionArgument => "function_argument",
+            DefineKind::ClosureArgument => "closure_argument",
+            DefineKind::UserType => "user_type",
+            DefineKind::Generics => "generics",
+        };
+        text.get_text(format!("name_resolved_kind.{}", name))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -35,6 +52,7 @@ pub(crate) enum EnvironmentSeparatorKind {
     Closure
 }
 
+#[derive(Debug)]
 pub(crate) struct NameEnvironment<'allocator> {
     name_define_info_map: RefCell<HashMap<String<'allocator>, DefineWithName, DefaultHashBuilder, &'allocator Bump>>,
     parent: Option<EntityID>,
@@ -146,7 +164,6 @@ pub(crate) fn name_resolve_program<'allocator>(
 
         match statement {
             StatementAST::Import(import) => {
-                let name_environment = &name_environments[current_environment_id];
                 for element in import.elements.elements.iter() {
                     let entity_id = EntityID::from(element);
                     let define_info = DefineWithName { entity_id, span: element.span.clone(), define_kind: DefineKind::Import };
@@ -177,7 +194,7 @@ pub(crate) fn name_resolve_program<'allocator>(
             StatementAST::DataStructDefine(data_struct_define) => {
                 if let Ok(data_struct_name) = &data_struct_define.name {
                     let entity_id = EntityID::from(data_struct_define);
-                    let define_info = DefineWithName { entity_id, span: data_struct_name.span.clone(), define_kind: DefineKind::DataStruct };
+                    let define_info = DefineWithName { entity_id, span: data_struct_name.span.clone(), define_kind: DefineKind::UserType };
 
                     if let Some(already_exists) = name_environment.get_name_define_info(data_struct_name.value, name_environments) {
                         errors.push(NameAlreadyExists::new(define_info.span.clone(), already_exists.define_info.span.clone()));
@@ -265,7 +282,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                 let entity_id = EntityID::from(data_struct_define);
 
                 if let Ok(name) = &data_struct_define.name {
-                    let define_info = DefineWithName { entity_id, span: data_struct_define.span.clone(), define_kind: DefineKind::DataStruct };
+                    let define_info = DefineWithName { entity_id, span: data_struct_define.span.clone(), define_kind: DefineKind::UserType };
                     name_environment.set_name_define_info(String::from_str_in(name.value, allocator), define_info);
                 }
                 name_environments.insert(entity_id, name_environment);
@@ -713,7 +730,7 @@ fn name_resolve_type_info<'allocator>(
     allocator: &'allocator Bump
 ) {
     if ast.path.len() >= 1 {
-        let collect_error = ast.path.len() == 1;
+        let collect_error = ast.path.len() == 1 && !PRIMITIVE_TYPE_NAMES.contains(&ast.path[0].value);
         name_resolve_literal(&ast.path[0], collect_error, environment_id, name_environments, resolved_map, errors);
     }
 

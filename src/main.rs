@@ -13,39 +13,23 @@ fn main() {
 
     let source = 
 "
-import test::test_module2
+import test::test_module2::TestClass2
 
-let = function() -> int { return 1 }
-|| => { 1 * 1 } = 200
+class TestClass1 {
+    var field0: TestClass2
 
-let a = b + 20.5
-
-class TestClass<T: Any> {
-    var field0: test_module::TestClass
-
-    test()
+    function test_method() -> TestClass2 {}
 }
 
-function test() {}
-function test() {}
+function test(i: int) -> TestClass2 {}
 ";
 let source1 = 
 "
 import test::test_module1
 
-let = function() -> int { return 1 }
-|| => { 1 * 1 } = 200
-
-let a = b + 20.5
-
-class TestClass<T: Any> {
-    var field0: test_module::TestClass
-
-    test()
+class TestClass2 {
+    var field0: test_module1::TestClass1
 }
-
-function test() {}
-function test() {}
 ";
 
     let settings = TranspileSettings {

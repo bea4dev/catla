@@ -36,6 +36,7 @@ impl Debug for EntityID {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct ComponentContainer<'allocator, T: Sized> {
     map: HashMap<EntityID, T, DefaultHashBuilder, &'allocator Bump>,
 }

@@ -204,7 +204,6 @@ pub(crate) fn collect_module_element_types_program(
                             generics_map,
                             errors,
                             warnings,
-                            current_user_type_name,
                             context
                         );
                         
@@ -371,7 +370,6 @@ fn get_function_type_and_name<'allocator>(
                 generics_map,
                 errors,
                 warnings,
-                current_user_type_name,
                 context
             )
         },
@@ -1141,14 +1139,14 @@ fn get_type(
 
     let mut type_info = if let Some(module_name) = import_element_map.get(&EntityID::from(ast)) {
         let type_map = module_user_type_map.get(module_name).unwrap();
-        match type_map.get(ast.path[0].value) {
+        match type_map.get(ast.path.last().unwrap().value) {
             Some(type_info) => type_info.clone(),
             _ => {
                 let span = ast.path.last().unwrap().span.clone();
                 let error = SimpleError::new(
                     0030,
                     span.clone(),
-                    vec![module_name.clone(), ast.path[0].value.to_string()],
+                    vec![module_name.clone(), ast.path.last().unwrap().value.to_string()],
                     vec![(span, Color::Red)]
                 );
                 errors.push(error);
@@ -1158,17 +1156,57 @@ fn get_type(
     } else {
         match name_resolved_map.get(&EntityID::from(&ast.path[0])) {
             Some(resolved) => {
-                match resolved.define_info.define_kind {
-                    DefineKind::Import => {
-                        let module_name = import_element_map.get(&resolved.define_info.entity_id).unwrap();
-                        
+                let ty = match resolved.define_info.define_kind {
+                    DefineKind::UserType => user_type_map.get(ast.path[0].value).unwrap().clone(),
+                    DefineKind::Generics => {
+                        Type::Generic(generics_map.get(&EntityID::from(resolved.define_info.entity_id)).unwrap().clone())
                     },
-                    DefineKind::DataStruct => todo!(),
-                    DefineKind::Generics => todo!(),
+                    DefineKind::Import => {
+                        let module_name = import_element_map.get(&EntityID::from(resolved.define_info.entity_id)).unwrap();
+                        let user_type_map = module_user_type_map.get(module_name).unwrap();
+                        match user_type_map.get(ast.path[0].value) {
+                            Some(user_type) => user_type.clone(),
+                            None => Type::Unknown
+                        }
+                    },
+                    _ => Type::Unknown
+                };
+                
+                if ty == Type::Unknown {
+                    let text = resolved.define_info.define_kind.get_name(&context.context.localized_text);
+                    let span = ast.path[0].span.clone();
+
+                    let error = SimpleError::new(
+                        0033,
+                        span.clone(),
+                        vec![text],
+                        vec![(span, Color::Red), (resolved.define_info.span.clone(), Color::Yellow)]
+                    );
+                    errors.push(error);
+                }
+
+                ty
+            },
+            _ => {
+                match ast.path[0].value {
+                    "int" => Type::Int32,
+                    "int8" => Type::Int8,
+                    "int16" => Type::Int16,
+                    "int32" => Type::Int32,
+                    "int64" => Type::Int64,
+                    "uint" => Type::Uint32,
+                    "uint8" => Type::Uint8,
+                    "uint16" => Type::Uint16,
+                    "uint32" => Type::Uint32,
+                    "uint64" => Type::Uint64,
+                    "float" => Type::Float32,
+                    "float32" => Type::Float32,
+                    "float64" => Type::Float64,
+                    "bool" => Type::Bool,
+                    "unit" => Type::Unit,
                     _ => Type::Unknown
                 }
-            },
-            _ => 
+            }
         }
     };
 
@@ -1208,7 +1246,8 @@ fn get_type(
                     vec![(span_0, Color::Yellow), (span_1, Color::Red)]
                 );
                 errors.push(error);
-                Type::Unknown
+                
+                type_info.clone()
             }
         };
     }
@@ -1268,9 +1307,40 @@ fn get_generic_type<'allocator>(
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
-    current_user_type_name: Option<&str>,
     context: &TranspileModuleContext
 ) -> Vec<Arc<GenericType>> {
-    // TODO - register to generics_map
-    Vec::new()
+    let mut generics = Vec::new();
+
+    for element in ast.elements.iter() {
+        let entity_id = EntityID::from(element);
+        let mut bounds = Vec::new();
+
+        for bound in element.bounds.iter() {
+            let ty = get_type(
+                bound,
+                user_type_map,
+                import_element_map,
+                name_resolved_map,
+                module_user_type_map,
+                module_element_type_map,
+                generics_map,
+                errors,
+                warnings,
+                context
+            );
+            // TODO - check sanity of bound types
+            bounds.push(ty);
+        }
+
+        let generic = Arc::new(GenericType {
+            define_entity_id: entity_id,
+            bounds: Mutex::new(bounds),
+        });
+
+        generics_map.insert(entity_id, generic.clone());
+
+        generics.push(generic);
+    }
+    
+    generics
 }

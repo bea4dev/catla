@@ -131,8 +131,6 @@ async fn transpile_module(
     let user_type_map = Arc::new(user_type_map);
     module_context.user_type_future.complete(user_type_map.clone()).await;
 
-    dbg!(module_context.user_type_future.get().await);
-
     let mut module_user_type_map = FxHashMap::default();
     for module_name in import_element_map.values() {
         let module_context = context.get_module_context(module_name).unwrap();
@@ -156,6 +154,8 @@ async fn transpile_module(
         None,
         &module_context
     );
+
+    dbg!(module_element_type_map);
 
     module_context.context.add_error_and_warning(module_name, errors, warnings);
 }

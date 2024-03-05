@@ -81,7 +81,7 @@ bnf_rules!(
     line_feed           ::= fn (line_feed_tokenizer) // r"\n+"
 );
 
-regex!(pub number_literal_regex r"\d+(\.\d+)?");
+regex!(pub number_literal_regex r"^\d+(\.\d+)?$");
 
 
 fn literal_tokenizer(source: &Vec<char>, mut current_position: usize) -> usize {

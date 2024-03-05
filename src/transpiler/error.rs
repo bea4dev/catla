@@ -95,10 +95,17 @@ impl TranspileReport for SimpleError {
 
         let mut index = 0;
         for label in self.labels.iter() {
+            let mut message = key.get_massage(text, ErrorMessageType::Label(index));
+
+            for i in 0..self.message_replace.len() {
+                let target = format!("%{}", i);
+                message = message.replace(&target, &self.message_replace[i]);
+            }
+
             builder.add_label(
                 Label::new((module_name, label.0.clone()))
                     .with_color(label.1.clone())
-                    .with_message(key.get_massage(text, ErrorMessageType::Label(index)))
+                    .with_message(message)
             );
             index += 1;
         }

@@ -529,12 +529,15 @@ fn collect_import_module_type_info(
     context: &TranspileModuleContext
 ) {
     if ast.path.len() > 1 {
-        let mut module_name = if let Some(resolved) = name_resolved_map.get(&EntityID::from(&ast.path[0])) {
+        let first_module_name = if let Some(resolved) = name_resolved_map.get(&EntityID::from(&ast.path[0])) {
             let import_entity_id = resolved.define_info.entity_id;
-            import_element_map.get(&import_entity_id).unwrap().clone()
+            import_element_map.get(&import_entity_id).cloned()
         } else {
-            ast.path[0].value.to_string()
+            None
         };
+
+        let mut module_name = first_module_name.unwrap_or_else(|| { ast.path[0].value.to_string() });
+
         if ast.path.len() > 2 {
             module_name += "::";
         }

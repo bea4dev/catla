@@ -1,13 +1,13 @@
-use std::{collections::HashMap, mem, ops::DerefMut, sync::{Arc, Mutex}};
+use std::{mem, ops::DerefMut, sync::{Arc, Mutex}};
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, GenericsElement, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
 use either::Either;
 use fxhash::FxHashMap;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::type_info::{self, DataStructInfo, FunctionType, GenericType, Type};
+use super::type_info::{FunctionType, GenericType, Type};
 
 
 pub(crate) fn collect_module_element_types_program(

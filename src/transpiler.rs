@@ -155,7 +155,17 @@ async fn transpile_module(
         &module_context
     );
 
-    dbg!(module_element_type_map);
+    let module_element_type_map = Arc::new(module_element_type_map);
+    dbg!(&module_element_type_map);
+    module_context.module_element_type_future.complete(module_element_type_map).await;
+
+    let mut module_element_type_maps = FxHashMap::default();
+    for module_name in import_element_map.values() {
+        let module_context = context.get_module_context(module_name).unwrap();
+        let module_element_type_map = module_context.module_element_type_future.get().await;
+
+        module_element_type_maps.insert(module_name.clone(), module_element_type_map);
+    }
 
     module_context.context.add_error_and_warning(module_name, errors, warnings);
 }

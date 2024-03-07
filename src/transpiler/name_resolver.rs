@@ -107,7 +107,7 @@ impl<'allocator> NameEnvironment<'allocator> {
                             }
                         }
                     },
-                    _ => return None
+                    _ => None
                 }
             }
         }

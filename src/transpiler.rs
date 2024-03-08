@@ -1,13 +1,13 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::sync::Arc;
 
 use async_recursion::async_recursion;
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 use fxhash::FxHashMap;
 
-use crate::transpiler::{future::SharedManualFuture, semantics::types::{import_module_collector::collect_import_module_program, user_type_element_collector::collect_module_element_types_program}};
+use crate::transpiler::semantics::types::{import_module_collector::collect_import_module_program, user_type_element_collector::collect_module_element_types_program};
 
-use self::{advice::Advice, component::ComponentContainer, context::{try_create_module_context, TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, resource::SourceCodeProvider, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
+use self::{advice::Advice, component::ComponentContainer, context::{try_create_module_context, TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
 
 pub mod component;
 pub mod name_resolver;
@@ -18,14 +18,6 @@ pub mod advice;
 pub mod semantics;
 pub mod future;
 pub mod resource;
-
-
-
-pub struct TranspileResult {
-    pub module_context: Arc<TranspileModuleContext>,
-    pub errors: Vec<TranspileError>,
-    pub warnings: Vec<TranspileWarning>
-}
 
 
 pub struct TranspileError(pub Box<dyn TranspileReport + Send>);

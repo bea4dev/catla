@@ -166,7 +166,7 @@ pub(crate) fn collect_module_element_types_program(
                         generics_map,
                         errors,
                         warnings,
-                        current_user_type_name,
+                        None,
                         context
                     );
 
@@ -294,7 +294,9 @@ pub(crate) fn collect_module_element_types_program(
                                         name_resolved_map,
                                         module_user_type_map,
                                         module_element_type_map,
-                                        generics_map,errors,warnings,
+                                        generics_map,
+                                        errors,
+                                        warnings,
                                         context
                                     )
                                 },
@@ -424,6 +426,22 @@ fn get_function_type_and_name<'allocator>(
             _ => Type::Unknown
         };
         argument_types.push(type_info);
+    }
+
+    if let Some(block) = &ast.block.value {
+        collect_module_element_types_program(
+            block.program,
+            user_type_map,
+            import_element_map,
+            name_resolved_map,
+            module_user_type_map,
+            module_element_type_map,
+            generics_map,
+            errors,
+            warnings,
+            current_user_type_name,
+            context
+        );
     }
 
     let function_info = Arc::new(FunctionType {

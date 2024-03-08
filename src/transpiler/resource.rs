@@ -7,7 +7,7 @@ pub trait SourceCodeProvider {
 
     fn get_source_code(&self, module_name: &str) -> Option<Arc<SourceCode>>;
 
-    fn exsists_source_code(&self, module_name: &str) -> bool;
+    fn exists_source_code(&self, module_name: &str) -> bool;
 
 }
 
@@ -38,7 +38,7 @@ impl SourceCodeProvider for TestSourceCodeProvider {
         self.test_code_map.get(module_name).cloned()
     }
 
-    fn exsists_source_code(&self, module_name: &str) -> bool {
+    fn exists_source_code(&self, module_name: &str) -> bool {
         self.test_code_map.contains_key(module_name)
     }
 

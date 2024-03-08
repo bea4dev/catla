@@ -108,7 +108,7 @@ fn collect_import_module_import(
         let element = ast.elements.elements.first().unwrap();
         let module_name = element.value.to_string();
 
-        if context.source_code_provider.exsists_source_code(&module_name) {
+        if context.source_code_provider.exists_source_code(&module_name) {
             import_element_map.insert(EntityID::from(element), module_name.clone());
         } else {
             let error = TranspileError::new(ModuleNotFoundError {
@@ -132,9 +132,9 @@ fn collect_import_module_import(
         let module_name1 = module_path_name.clone();
         let module_name2 = module_path_name.clone() + "::" + element.value;
 
-        let module_name = if context.source_code_provider.exsists_source_code(&module_name2) {
+        let module_name = if context.source_code_provider.exists_source_code(&module_name2) {
             module_name2
-        } else if context.source_code_provider.exsists_source_code(&module_name1) {
+        } else if context.source_code_provider.exists_source_code(&module_name1) {
             module_name1
         } else {
             let span = ast.import_path.first().unwrap().span.start..element.span.end;
@@ -344,14 +344,14 @@ fn collect_import_module_primary(
                         }
                     }
 
-                    if context.context.source_code_provider.exsists_source_code(&module_name) {
+                    if context.context.source_code_provider.exists_source_code(&module_name) {
                         import_element_map.insert(EntityID::from(ast), module_name);
                     } else if !last_name.is_empty() {
                         let start = module_name.len() - (2 + last_name.len()) - 1;
                         let end = module_name.len() - 1;
                         module_name.replace_range(start..end, "");
                         
-                        if context.context.source_code_provider.exsists_source_code(&module_name) {
+                        if context.context.source_code_provider.exists_source_code(&module_name) {
                             import_element_map.insert(EntityID::from(ast), module_name);
                         }
                     }
@@ -401,7 +401,7 @@ fn collect_import_module_primary_left(
                     }
                 }
 
-                if context.context.source_code_provider.exsists_source_code(&module_name) {
+                if context.context.source_code_provider.exists_source_code(&module_name) {
                     import_element_map.insert(EntityID::from(new_expression), module_name);
                 }
             }
@@ -549,7 +549,7 @@ fn collect_import_module_type_info(
             }
         }
 
-        if context.context.source_code_provider.exsists_source_code(&module_name) {
+        if context.context.source_code_provider.exists_source_code(&module_name) {
             import_element_map.insert(EntityID::from(ast), module_name);
         }
     }

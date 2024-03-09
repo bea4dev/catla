@@ -101,7 +101,7 @@ async fn transpile_module(
     let mut import_element_map = FxHashMap::default();
     collect_import_module_program(ast, &mut import_element_map, &name_resolved_map, &mut errors, &mut warnings, &module_context);
 
-    // start transpiling imported modules
+    // start transpile imported modules
     let context = &module_context.context;
     for module_name in import_element_map.values() {
         let module_context = try_create_module_context(&module_context.context, module_name);

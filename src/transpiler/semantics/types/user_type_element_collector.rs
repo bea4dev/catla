@@ -445,7 +445,7 @@ fn get_function_type_and_name<'allocator>(
     }
 
     let function_info = Arc::new(FunctionType {
-        is_extention: current_user_type_name.is_some(),
+        is_extension: current_user_type_name.is_some(),
         generics_define,
         argument_types,
         return_type

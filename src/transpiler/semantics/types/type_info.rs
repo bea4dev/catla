@@ -22,6 +22,7 @@ pub enum Type {
     DataStruct { data_struct_info: Arc<DataStructInfo>, generics: Arc<Vec<Type>> },
     Function{ function_info: Arc<FunctionType>, generics: Arc<Vec<Type>> },
     Generic(Arc<GenericType>),
+    LocalGeneric(LocalGenericID),
     Option(Arc<Type>),
     Result { value: Arc<Type>, error: Arc<Type> },
     Unknown
@@ -78,8 +79,12 @@ impl Eq for GenericType {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct FunctionType {
-    pub is_extention: bool,
+    pub is_extension: bool,
     pub generics_define: Vec<Arc<GenericType>>,
     pub argument_types: Vec<Type>,
     pub return_type: Type
 }
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LocalGenericID(usize);

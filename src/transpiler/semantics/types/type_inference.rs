@@ -5,34 +5,33 @@ use bumpalo::Bump;
 use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
 use either::Either;
 use fxhash::FxHashMap;
+use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::type_info::{FunctionType, GenericType, Type};
+use super::type_info::{FunctionType, GenericType, LocalGenericID, Type};
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SubstitutionElement {
-    EntityID(Spanned<EntityID>),
-    Type(Spanned<Type>)
+pub(crate) struct TypeEnvironment<'allocator> {
+    entity_type_map: HashMap<EntityID, Spanned<Either<EntityID, Type>>, DefaultHashBuilder, &'allocator Bump>,
+    generic_type_map: HashMap<LocalGenericID, Spanned<Type>, DefaultHashBuilder, &'allocator Bump>,
+    current_generics_id: usize
 }
 
-impl SubstitutionElement {
+impl<'allocator> TypeEnvironment<'allocator> {
     
-    pub fn is(&self, element: SubstitutionElement) -> Substitution {
-        Substitution { left: self.clone(), right: element }
+    pub fn new(allocator: &'allocator Bump) -> TypeEnvironment<'allocator> {
+        Self {
+            entity_type_map: HashMap::new_in(allocator),
+            generic_type_map: HashMap::new_in(allocator),
+            current_generics_id: 0,
+        }
     }
 
-}
-
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Substitution {
-    left: SubstitutionElement,
-    right: SubstitutionElement
-}
-
-pub(crate) struct TypeEnvironment {
+    pub fn new_local_generic_type(&mut self) -> Type {
+        self.current_generics_id += 1;
+        Type::LocalGeneric(LocalGenericID(self.current_generics_id))
+    }
 
 }
 
@@ -46,14 +45,13 @@ pub(crate) fn type_inference_program<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_map: &mut TypeEnvironment,
+    type_map: &mut TypeEnvironment<'allocator>,
+    type_environment: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
-    let mut type_environment = Vec::new_in(allocator);
-
     for statement in ast.statements.iter() {
         let statement = match statement {
             Ok(statement) => statement,
@@ -71,7 +69,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     module_element_type_map,
                     module_element_type_maps,
                     generics_map,
-                    &mut type_environment,
+                    type_environment,
                     type_map,
                     allocator,
                     errors,
@@ -88,7 +86,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_element_type_map,
                         module_element_type_maps,
                         generics_map,
-                        &mut type_environment,
+                        type_environment,
                         type_map,
                         allocator,
                         errors,
@@ -107,7 +105,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     module_element_type_map,
                     module_element_type_maps,
                     generics_map,
-                    &mut type_environment,
+                    type_environment,
                     type_map,
                     allocator,
                     errors,
@@ -124,7 +122,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_element_type_map,
                         module_element_type_maps,
                         generics_map,
-                        &mut type_environment,
+                        type_environment,
                         type_map,
                         allocator,
                         errors,
@@ -183,7 +181,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_element_type_map,
                         module_element_type_maps,
                         generics_map,
-                        &mut type_environment,
+                        type_environment,
                         type_map,
                         allocator,
                         errors,
@@ -202,7 +200,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     module_element_type_map,
                     module_element_type_maps,
                     generics_map,
-                    &mut type_environment,
+                    type_environment,
                     type_map,
                     allocator,
                     errors,
@@ -224,7 +222,7 @@ pub(crate) fn type_inference_program<'allocator>(
                                     module_element_type_map,
                                     module_element_type_maps,
                                     generics_map,
-                                    &mut type_environment,
+                                    type_environment,
                                     type_map,
                                     allocator,errors,warnings,
                                     context
@@ -271,8 +269,8 @@ fn type_inference_expression<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -392,8 +390,8 @@ fn type_inference_and_expression<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -446,8 +444,8 @@ fn type_inference_eqne_expression<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -500,8 +498,8 @@ fn type_inference_compare_expression<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -554,8 +552,8 @@ fn type_inference_add_or_sub_expression<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -608,8 +606,8 @@ fn type_inference_mul_or_div_expression<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -662,8 +660,8 @@ fn type_inference_factor<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -698,8 +696,8 @@ fn type_inference_primary<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -750,8 +748,8 @@ fn type_inference_primary_left<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -979,8 +977,8 @@ fn type_inference_primary_right<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1036,8 +1034,8 @@ fn type_inference_mapping_operator<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1079,8 +1077,8 @@ fn type_inference_function_call<'allocator>(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1117,8 +1115,8 @@ fn get_type(
     module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    type_environment: &mut Vec<Substitution, &'allocator Bump>,
-    type_map: &mut TypeEnvironment,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut TypeEnvironment<'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,

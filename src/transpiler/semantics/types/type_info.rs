@@ -87,4 +87,4 @@ pub struct FunctionType {
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LocalGenericID(usize);
+pub struct LocalGenericID(pub usize);

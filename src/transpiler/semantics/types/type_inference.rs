@@ -14,7 +14,7 @@ use super::type_info::{FunctionType, GenericType, LocalGenericID, Type};
 
 pub(crate) struct TypeEnvironment<'allocator> {
     entity_type_map: HashMap<EntityID, Spanned<Either<EntityID, Type>>, DefaultHashBuilder, &'allocator Bump>,
-    generic_type_map: HashMap<LocalGenericID, Spanned<Type>, DefaultHashBuilder, &'allocator Bump>,
+    generic_type_map: HashMap<LocalGenericID, Spanned<Either<LocalGenericID, Type>>, DefaultHashBuilder, &'allocator Bump>,
     return_type: Type,
     current_generics_id: usize
 }
@@ -34,13 +34,186 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
     }
 
-    pub fn new_local_generic_type(&mut self) -> Type {
+    pub fn new_local_generic_id(&mut self) -> LocalGenericID {
         self.current_generics_id += 1;
-        Type::LocalGeneric(LocalGenericID(self.current_generics_id))
+        LocalGenericID(self.current_generics_id)
     }
 
-    pub fn unify(&mut self) -> Result<(), Range<usize>> {
+    pub fn set_entity_type(&mut self, entity_id: EntityID, ty: Spanned<Type>) {
+        self.entity_type_map.insert(entity_id, ty.map(|ty| { Either::Right(ty) }));
+    }
 
+    pub fn set_generic_type(&mut self, generic_id: LocalGenericID, ty: Spanned<Type>) {
+        self.generic_type_map.insert(generic_id, ty.map(|ty| { Either::Right(ty) }));
+    }
+    
+    pub fn set_entity_id_equals(&mut self, first_entity_id: Spanned<EntityID>, second_entity_id: EntityID) {
+        let first_entity_id = first_entity_id.map(|entity_id| { Either::Left(entity_id) });
+        self.entity_type_map.insert(second_entity_id, first_entity_id);
+    }
+
+    pub fn set_generic_id_equals(&mut self, first_generic_id: Spanned<LocalGenericID>, second_generic_id: LocalGenericID) {
+        let first_generic_id = first_generic_id.map(|generic_id| { Either::Left(generic_id) });
+        self.generic_type_map.insert(second_generic_id, first_generic_id);
+    }
+
+    pub fn unify(
+        &mut self,
+        first_entity_id: EntityID,
+        second_entity_id: EntityID
+    ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
+        
+        let first_resolved = self.resolve_entity_type(first_entity_id);
+        let second_resolved = self.resolve_entity_type(second_entity_id);
+
+        self.unify_type(
+            &first_resolved.value,
+            &first_resolved.span,
+            &second_resolved.value,
+            &second_resolved.span
+        )
+    }
+
+    fn unify_type(
+        &mut self,
+        first_type: &Type,
+        first_span: &Range<usize>,
+        second_type: &Type,
+        second_span: &Range<usize>
+    ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
+
+        let eq = match first_type {
+            Type::DataStruct { data_struct_info: first_info, generics: first_generics } => {
+                if let Type::DataStruct { data_struct_info: second_info, generics: second_generics } = second_type {
+                    if first_info == second_info {
+                        self.unify_generics(first_generics, first_span, second_generics, second_span)?;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            },
+            Type::Function { function_info: first_function_info, generics: first_generics } => {
+                if let Type::Function { function_info: second_function_info, generics: second_generics } = second_type {
+                    if first_function_info == second_function_info {
+                        self.unify_generics(first_generics, first_span, second_generics, second_span)?;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            },
+            Type::LocalGeneric(first_generic_id) => {
+                if let Type::LocalGeneric(second_generic_id) = second_type {
+                    let first_type = self.resolve_generic_type(*first_generic_id);
+                    let second_type = self.resolve_generic_type(*second_generic_id);
+
+                    self.unify_type(&first_type.value, first_span, &second_type.value, second_span)?;
+                    true
+                } else {
+                    false
+                }
+            },
+            Type::Option(first_type) => {
+                if let Type::Option(second_type) = second_type {
+                    self.unify_type(first_type, first_span, second_type, second_span)?;
+                    true
+                } else {
+                    false
+                }
+            },
+            Type::Result { value: first_value_type, error: first_error_type } => {
+                if let Type::Result { value: second_value_type, error: second_error_type } = second_type {
+                    let value_type_result = self.unify_type(first_value_type, first_span, second_value_type, second_span);
+                    let error_type_result = self.unify_type(first_error_type, first_span, second_error_type, second_span);
+
+                    let mut errors = Vec::new();
+                    if let Err(error) = value_type_result {
+                        errors.extend(error);
+                    }
+                    if let Err(error) = error_type_result {
+                        errors.extend(error);
+                    }
+
+                    if !errors.is_empty() {
+                        return Err(errors);
+                    }
+
+                    true
+                } else {
+                    false
+                }
+            },
+            _ => first_type == second_type
+        };
+
+        if eq {
+            Ok(())
+        } else {
+            Err(vec![(
+                Spanned::new(first_type.clone(), first_span.clone()),
+                Spanned::new(second_type.clone(), second_span.clone())
+            )])
+        }
+    }
+
+    fn unify_generics(
+        &mut self,
+        first_generics: &Vec<Type>,
+        first_span: &Range<usize>,
+        second_generics: &Vec<Type>,
+        second_span: &Range<usize>
+    ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
+
+        let mut errors = Vec::new();
+
+        for i in 0..first_generics.len() {
+            let first_generic_type = &first_generics[i];
+            let second_generics_type = &second_generics[i];
+
+            let result = self.unify_type(
+                first_generic_type,
+                first_span,
+                second_generics_type,
+                second_span
+            );
+            
+            if let Err(error) = result {
+                errors.extend(error);
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    pub fn resolve_entity_type(&mut self, entity_id: EntityID) -> Spanned<Type> {
+        let mut current_id = entity_id;
+        loop {
+            let entity_id_or_type = self.entity_type_map.get(&current_id).unwrap();
+            match &entity_id_or_type.value {
+                Either::Left(entity_id) => current_id = *entity_id,
+                Either::Right(ty) => return Spanned::new(ty.clone(), entity_id_or_type.span.clone())
+            }
+        }
+    }
+
+    pub fn resolve_generic_type(&mut self, generic_id: LocalGenericID) -> Spanned<Type> {
+        let mut current_id = generic_id;
+        loop {
+            let generic_id_or_type = self.generic_type_map.get(&current_id).unwrap();
+            match &generic_id_or_type.value {
+                Either::Left(entity_id) => current_id = *entity_id,
+                Either::Right(ty) => return Spanned::new(ty.clone(), generic_id_or_type.span.clone())
+            }
+        }
     }
 
 }

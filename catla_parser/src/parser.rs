@@ -22,6 +22,12 @@ impl<T> Spanned<T> {
             span
         }
     }
+
+    pub fn map<U, F>(self, function: F) -> Spanned<U>
+    where F: FnOnce(T) -> U {
+        let value = function(self.value);
+        Spanned::new(value, self.span)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

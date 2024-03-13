@@ -113,8 +113,7 @@ fn collect_import_module_import(
         } else {
             let error = TranspileError::new(ModuleNotFoundError {
                 module_names: Either::Left(module_name),
-                span: element.span.clone(),
-                advice_report: AdviceReport::new()
+                span: element.span.clone()
             });
             errors.push(error);
         }
@@ -141,8 +140,7 @@ fn collect_import_module_import(
 
             let error = TranspileError::new(ModuleNotFoundError {
                 module_names: Either::Right([module_name1, module_name2]),
-                span,
-                advice_report: AdviceReport::new()
+                span
             });
             errors.push(error);
             continue
@@ -583,8 +581,7 @@ fn collect_import_module_generics(
 
 pub(crate) struct ModuleNotFoundError {
     module_names: Either<String, [String; 2]>,
-    span: Range<usize>,
-    advice_report: AdviceReport
+    span: Range<usize>
 }
 
 impl TranspileReport for ModuleNotFoundError {
@@ -623,11 +620,5 @@ impl TranspileReport for ModuleNotFoundError {
         }
 
         builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
-
-        self.advice_report.print(context, self.span.start);
-    }
-
-    fn add_advice(&mut self, module_name: String, advice: crate::transpiler::advice::Advice) {
-        self.advice_report.add_advice(module_name, advice);
     }
 }

@@ -7,7 +7,7 @@ use fxhash::FxHashMap;
 
 use crate::transpiler::semantics::types::{import_module_collector::collect_import_module_program, user_type_element_collector::collect_module_element_types_program};
 
-use self::{advice::Advice, component::ComponentContainer, context::{try_create_module_context, TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
+use self::{advice::{Advice, AdviceReport}, component::ComponentContainer, context::{try_create_module_context, TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
 
 pub mod component;
 pub mod name_resolver;
@@ -20,29 +20,47 @@ pub mod future;
 pub mod resource;
 
 
-pub struct TranspileError(pub Box<dyn TranspileReport + Send>);
-pub struct TranspileWarning(pub Box<dyn TranspileReport + Send>);
+pub struct TranspileError(Box<dyn TranspileReport + Send>, AdviceReport);
+pub struct TranspileWarning(Box<dyn TranspileReport + Send>, AdviceReport);
 
 impl TranspileError {
 
     pub(crate) fn new<T: TranspileReport + Send + 'static>(report: T) -> TranspileError {
-        Self(Box::new(report))
+        Self(Box::new(report), AdviceReport::new())
     }
 
     pub(crate) fn add_advice(&mut self, module_name: String, advice: Advice) {
-        self.0.add_advice(module_name, advice);
+        self.1.add_advice(module_name, advice);
     }
 
+}
+
+impl TranspileReport for TranspileError {
+
+    fn print(&self, context: &TranspileModuleContext) {
+        self.0.print(context);
+        self.1.print(context);
+    }
+    
 }
 
 impl TranspileWarning {
 
     pub(crate) fn new<T: TranspileReport + Send + 'static>(report: T) -> TranspileWarning {
-        Self(Box::new(report))
+        Self(Box::new(report), AdviceReport::new())
     }
 
     pub(crate) fn add_advice(&mut self, module_name: String, advice: Advice) {
-        self.0.add_advice(module_name, advice);
+        self.1.add_advice(module_name, advice);
+    }
+
+}
+
+impl TranspileReport for TranspileWarning {
+    
+    fn print(&self, context: &TranspileModuleContext) {
+        self.0.print(context);
+        self.1.print(context);
     }
 
 }

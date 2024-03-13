@@ -770,15 +770,13 @@ fn name_resolve_literal<'allocator>(
 pub(crate) struct NameAlreadyExists {
     define_span: Range<usize>,
     already_exists_span: Range<usize>,
-    advice_report: AdviceReport
 }
 
 impl NameAlreadyExists {
     pub(crate) fn new(define_span: Range<usize>, already_exists_span: Range<usize>) -> TranspileError {
         return TranspileError::new(Self {
             define_span,
-            already_exists_span,
-            advice_report: AdviceReport::new()
+            already_exists_span
         });
     }
 }
@@ -808,25 +806,18 @@ impl TranspileReport for NameAlreadyExists {
             .finish()
             .print((module_name, Source::from(context.source_code.code.as_str())))
             .unwrap();
-
-        self.advice_report.print(context, self.define_span.start);
-    }
-
-    fn add_advice(&mut self, module_name: std::prelude::v1::String, advice: super::advice::Advice) {
-        self.advice_report.add_advice(module_name, advice);
     }
 }
 
 
 
 pub(crate) struct UndefinedIdentifier {
-    literal_span: Range<usize>,
-    advice_report: AdviceReport
+    literal_span: Range<usize>
 }
 
 impl UndefinedIdentifier {
     pub(crate) fn new(literal_span: Range<usize>) -> TranspileError {
-        return TranspileError::new(UndefinedIdentifier { literal_span, advice_report: AdviceReport::new() });
+        return TranspileError::new(UndefinedIdentifier { literal_span });
     }
 }
 
@@ -849,11 +840,5 @@ impl TranspileReport for UndefinedIdentifier {
             .finish()
             .print((module_name, Source::from(context.source_code.code.as_str())))
             .unwrap();
-
-        self.advice_report.print(context, self.literal_span.start);
-    }
-
-    fn add_advice(&mut self, module_name: std::prelude::v1::String, advice: super::advice::Advice) {
-        self.advice_report.add_advice(module_name, advice);
     }
 }

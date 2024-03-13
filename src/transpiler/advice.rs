@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ops::Range};
 use ariadne::{sources, Color, Label, Report, ReportKind, Source};
 use indexmap::IndexMap;
 
-use super::context::TranspileModuleContext;
+use super::{context::TranspileModuleContext, error::TranspileReport};
 
 pub(crate) struct AdviceReport {
     elements: IndexMap<String, Vec<Advice>>
@@ -19,8 +19,12 @@ impl AdviceReport {
         let elements = self.elements.entry(module_name).or_insert_with(|| vec![]);
         elements.push(advice);
     }
-    
-    pub(crate) fn print(&self, context: &TranspileModuleContext, offset: usize) {
+
+}
+
+impl TranspileReport for AdviceReport {
+
+    fn print(&self, context: &TranspileModuleContext) {
         if self.elements.is_empty() {
             return;
         }
@@ -29,7 +33,12 @@ impl AdviceReport {
 
         let advice_color = Color::RGB(52, 226, 226);
 
-        let mut builder = Report::build(ReportKind::Custom("  > Advice", advice_color), &context.module_name, offset)
+        let position = match self.elements.first().unwrap().1.get(0).unwrap() {
+            Advice::Add { add: _, position, message_override: _ } => *position,
+            Advice::Remove { span } => span.start,
+        };
+
+        let mut builder = Report::build(ReportKind::Custom("  > Advice", advice_color), &context.module_name, position)
             .with_message(text.get_text("advice.message"));
 
         let mut source_list = Vec::new();

@@ -9,8 +9,7 @@ use crate::transpiler::{advice::{Advice, AdviceReport}, context::TranspileModule
 pub(crate) struct UnexpectedTokens {
     pub span: Range<usize>,
     pub error_code: usize,
-    pub expected: Expected,
-    pub advice_report: AdviceReport
+    pub expected: Expected
 }
 
 impl TranspileReport for UnexpectedTokens {
@@ -41,19 +40,13 @@ impl TranspileReport for UnexpectedTokens {
         builder.finish()
             .print((module_name, Source::from(context.source_code.code.as_str())))
             .unwrap();
-
-        self.advice_report.print(context, self.span.start);
-    }
-
-    fn add_advice(&mut self, module_name: String, advice: Advice) {
-        self.advice_report.add_advice(module_name, advice);
     }
 }
 
+
 pub(crate) struct UnexpectedEOF {
     error_code: usize,
-    expected: Expected,
-    advice_report: AdviceReport
+    expected: Expected
 }
 
 impl TranspileReport for UnexpectedEOF {
@@ -86,12 +79,6 @@ impl TranspileReport for UnexpectedEOF {
         builder.finish()
             .print((module_name, Source::from(context.source_code.code.as_str())))
             .unwrap();
-
-        self.advice_report.print(context, code_length);
-    }
-
-    fn add_advice(&mut self, module_name: String, advice: Advice) {
-        self.advice_report.add_advice(module_name, advice);
     }
 }
 
@@ -200,7 +187,7 @@ pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected:
         let span_start = tokens.first().unwrap().span.start;
         let span_end = tokens.last().unwrap().span.end;
 
-        let mut error = TranspileError::new(UnexpectedTokens { span: span_start..span_end, error_code, expected, advice_report: AdviceReport::new() });
+        let mut error = TranspileError::new(UnexpectedTokens { span: span_start..span_end, error_code, expected });
 
         if expected == Expected::Unnecessary {
             error.add_advice(context.module_name.clone(), Advice::Remove { span: span_start..span_end })
@@ -215,7 +202,7 @@ pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected:
     }
 
     if has_eof_error {
-        let mut error = TranspileError::new(UnexpectedEOF { error_code, expected, advice_report: AdviceReport::new() });
+        let mut error = TranspileError::new(UnexpectedEOF { error_code, expected });
 
         if let Some(add) = advice_add {
             let advice = Advice::Add { add: add.to_string(), position: context.source_code.code.len(), message_override: None };

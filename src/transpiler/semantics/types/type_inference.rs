@@ -7,7 +7,7 @@ use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
-use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{SimpleError, TranspileReport}, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
 use super::{type_info::{FunctionType, GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
 
@@ -502,8 +502,8 @@ pub(crate) fn type_inference_program<'allocator>(
                 };
 
                 if &tag_type != &Type::Unknown {
-                    let span = variable_define.name
-                        .map(|name| { name.span.clone() })
+                    let span = variable_define.name.clone()
+                        .map(|name| { name.span })
                         .unwrap_or(variable_define.span.clone());
 
                     type_environment.set_entity_type(
@@ -587,6 +587,9 @@ fn type_inference_expression<'allocator>(
                 warnings,
                 context
             );
+            
+            let mut previous_expr = &or_expression.left_expr;
+
             for right_expr in or_expression.right_exprs.iter() {
                 if let Ok(right_expr) = &right_expr.1 {
                     type_inference_and_expression(
@@ -606,8 +609,20 @@ fn type_inference_expression<'allocator>(
                         warnings,
                         context
                     );
+
+                    type_environment.unify(
+                        EntityID::from(previous_expr),
+                        EntityID::from(right_expr)
+                    );
+
+                    previous_expr = right_expr;
                 }
             }
+
+            type_environment.set_entity_id_equals(
+                EntityID::from(previous_expr),
+                EntityID::from(ast)
+            );
         },
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
@@ -1438,5 +1453,18 @@ fn type_inference_function_call<'allocator>(
                 context
             );
         }
+    }
+}
+
+
+pub(crate) struct TypeMismatchError {
+    mismatch_0: Spanned<Type>,
+    mismatch_1: Spanned<Type>,
+    errors: Vec<(Spanned<Type>, Spanned<Type>)>
+}
+
+impl TranspileReport for TypeMismatchError {
+    fn print(&self, context: &TranspileModuleContext) {
+        todo!()
     }
 }

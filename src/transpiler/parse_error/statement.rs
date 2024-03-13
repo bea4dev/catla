@@ -8,8 +8,7 @@ use crate::transpiler::{advice::{Advice, AdviceReport}, context::TranspileModule
 
 
 pub(crate) struct NotSeparatedStatement {
-    token: Spanned<String>,
-    advice_report: AdviceReport
+    token: Spanned<String>
 }
 
 impl TranspileReport for NotSeparatedStatement {
@@ -29,19 +28,12 @@ impl TranspileReport for NotSeparatedStatement {
             .finish()
             .print((context.module_name.as_str(), Source::from(context.source_code.code.as_str())))
             .unwrap();
-        
-        self.advice_report.print(context, self.token.span.start);
-    }
-
-    fn add_advice(&mut self, module_name: String, advice: Advice) {
-        self.advice_report.add_advice(module_name, advice);
     }
 }
 
 pub(crate) fn not_separated_statement_error_1(token: &Token, context: &TranspileModuleContext) -> TranspileError {
     let mut error = TranspileError::new(NotSeparatedStatement {
-        token: Spanned::new(token.text.to_string(), token.span.clone()),
-        advice_report: AdviceReport::new()
+        token: Spanned::new(token.text.to_string(), token.span.clone())
     });
     let advice = Advice::Add { add: ";".to_string(), position: token.span.start, message_override: None };
     error.add_advice(context.module_name.clone(), advice);
@@ -72,10 +64,6 @@ impl TranspileReport for StatementAttributesWithoutDefine {
             .finish()
             .print((context.module_name.as_str(), Source::from(context.source_code.code.as_str())))
             .unwrap()
-    }
-
-    fn add_advice(&mut self, module_name: String, advice: Advice) {
-        self.advice_report.add_advice(module_name, advice);
     }
 }
 

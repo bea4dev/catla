@@ -471,7 +471,7 @@ fn get_function_type_and_name<'allocator>(
 
     let function_type = Type::Function{ function_info, generics: Arc::new(Vec::new()) };
 
-    module_entity_type_map.insert(EntityID::from(ast), function_type);
+    module_entity_type_map.insert(EntityID::from(ast), function_type.clone());
 
     match &ast.name {
         Ok(name) => {

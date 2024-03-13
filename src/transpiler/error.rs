@@ -11,8 +11,6 @@ pub trait TranspileReport {
 
     fn print(&self, context: &TranspileModuleContext);
 
-    fn add_advice(&mut self, module_name: String, advice: Advice);
-
 }
 
 
@@ -119,11 +117,5 @@ impl TranspileReport for SimpleError {
         }
 
         builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
-
-        self.advice_report.print(context, self.message_span.start);
-    }
-
-    fn add_advice(&mut self, module_name: String, advice: Advice) {
-        self.advice_report.add_advice(module_name, advice);
     }
 }

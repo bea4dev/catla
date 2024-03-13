@@ -169,15 +169,14 @@ fn collect_parse_error_expression(ast: &Expression, errors: &mut Vec<TranspileEr
                     if closure.expression_or_block.result.is_err() || closure.expression_or_block.value.is_none() {
                         expected = Expected::FatArrowAndBlock;
                     } else {
-                        let mut error = UnexpectedTokens {
+                        let mut error = TranspileError::new(UnexpectedTokens {
                             span: span_start..span_end,
                             error_code: 0014,
-                            expected: Expected::FatArrow,
-                            advice_report: AdviceReport::new()
-                        };
+                            expected: Expected::FatArrow
+                        });
                         let advice = Advice::Add { add: "=>".to_string(), position: span_start, message_override: None };
                         error.add_advice(context.module_name.clone(), advice);
-                        errors.push(TranspileError::new(error));
+                        errors.push(error);
                     }
                 }
             }

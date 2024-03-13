@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex}};
 use fxhash::FxHashMap;
 use tokio::runtime::{Builder, Runtime};
 
-use crate::localize::localizer::LocalizedText;
+use crate::{localize::localizer::LocalizedText, transpiler::error::TranspileReport};
 
 use super::{future::SharedManualFuture, resource::SourceCodeProvider, semantics::types::type_info::Type, SourceCode, TranspileError, TranspileWarning};
 
@@ -59,12 +59,12 @@ impl TranspileContext {
             let module_context = self.get_module_context(entry.0).unwrap();
 
             for error in &entry.1.0 {
-                error.0.print(&module_context);
+                error.print(&module_context);
                 print!("\n");
             }
 
             for warning in &entry.1.1 {
-                warning.0.print(&module_context);
+                warning.print(&module_context);
                 print!("\n");
             }
         }

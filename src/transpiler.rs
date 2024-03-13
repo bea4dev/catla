@@ -133,6 +133,7 @@ async fn transpile_module(
 
     let mut module_element_type_map = FxHashMap::default();
     let mut generics_map = FxHashMap::default();
+    let mut module_entity_type_map = FxHashMap::default();
     collect_module_element_types_program(
         ast,
         &user_type_map,
@@ -141,6 +142,7 @@ async fn transpile_module(
         &module_user_type_map,
         &mut module_element_type_map,
         &mut generics_map,
+        &mut module_entity_type_map,
         &mut errors,
         &mut warnings,
         None,

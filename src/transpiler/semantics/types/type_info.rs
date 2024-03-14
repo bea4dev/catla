@@ -82,7 +82,7 @@ pub struct FunctionType {
     pub is_extension: bool,
     pub generics_define: Vec<Arc<GenericType>>,
     pub argument_types: Vec<Type>,
-    pub return_type: Type
+    pub return_type: Spanned<Type>
 }
 
 

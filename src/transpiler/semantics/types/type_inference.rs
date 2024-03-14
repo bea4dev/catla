@@ -7,7 +7,7 @@ use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
-use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{SimpleError, TranspileReport}, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
 use super::{type_info::{FunctionType, GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
 
@@ -15,17 +15,20 @@ use super::{type_info::{FunctionType, GenericType, LocalGenericID, Type}, user_t
 pub(crate) struct TypeEnvironment<'allocator> {
     entity_type_map: HashMap<EntityID, Either<EntityID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_type_map: HashMap<LocalGenericID, Either<LocalGenericID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
-    return_type: Type,
+    return_type: Either<EntityID, Spanned<Type>>,
     current_generics_id: usize
 }
 
 impl<'allocator> TypeEnvironment<'allocator> {
     
     pub fn new(allocator: &'allocator Bump) -> TypeEnvironment<'allocator> {
-        Self::new_with_return_type(Type::Unit, allocator)
+        Self::new_with_return_type(
+            Either::Right(Spanned::new(Type::Unit, 0..0)),
+            allocator
+        )
     }
 
-    pub fn new_with_return_type(return_type: Type, allocator: &'allocator Bump) -> TypeEnvironment<'allocator> {
+    pub fn new_with_return_type(return_type: Either<EntityID, Spanned<Type>>, allocator: &'allocator Bump) -> TypeEnvironment<'allocator> {
         Self {
             entity_type_map: HashMap::new_in(allocator),
             generic_type_map: HashMap::new_in(allocator),
@@ -95,6 +98,25 @@ impl<'allocator> TypeEnvironment<'allocator> {
             &first_resolved.span,
             &second_resolved.value,
             &second_resolved.span
+        )
+    }
+
+    pub fn unify_with_return_type(
+        &mut self,
+        return_expr_entity_id: EntityID
+    ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
+
+        let return_type = match &self.return_type {
+            Either::Left(entity_id) => self.resolve_entity_type(*entity_id),
+            Either::Right(ty) => ty.clone(),
+        };
+        let return_expr_resolved = self.resolve_entity_type(return_expr_entity_id);
+
+        self.unify_type(
+            &return_type.value,
+            &return_type.span,
+            &return_expr_resolved.value,
+            &return_expr_resolved.span
         )
     }
 
@@ -375,7 +397,7 @@ pub(crate) fn type_inference_program<'allocator>(
 
                 if let Type::Function { function_info, generics } = function_type {
                     let mut type_environment = TypeEnvironment::new_with_return_type(
-                        function_info.return_type.clone(),
+                        Either::Right(function_info.return_type.clone()),
                         allocator
                     );
 
@@ -502,8 +524,8 @@ pub(crate) fn type_inference_program<'allocator>(
                 };
 
                 if &tag_type != &Type::Unknown {
-                    let span = variable_define.name.clone()
-                        .map(|name| { name.span })
+                    let span = variable_define.name
+                        .map(|name| { name.span.clone() })
                         .unwrap_or(variable_define.span.clone());
 
                     type_environment.set_entity_type(
@@ -587,9 +609,6 @@ fn type_inference_expression<'allocator>(
                 warnings,
                 context
             );
-            
-            let mut previous_expr = &or_expression.left_expr;
-
             for right_expr in or_expression.right_exprs.iter() {
                 if let Ok(right_expr) = &right_expr.1 {
                     type_inference_and_expression(
@@ -609,20 +628,8 @@ fn type_inference_expression<'allocator>(
                         warnings,
                         context
                     );
-
-                    type_environment.unify(
-                        EntityID::from(previous_expr),
-                        EntityID::from(right_expr)
-                    );
-
-                    previous_expr = right_expr;
                 }
             }
-
-            type_environment.set_entity_id_equals(
-                EntityID::from(previous_expr),
-                EntityID::from(ast)
-            );
         },
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
@@ -1453,18 +1460,5 @@ fn type_inference_function_call<'allocator>(
                 context
             );
         }
-    }
-}
-
-
-pub(crate) struct TypeMismatchError {
-    mismatch_0: Spanned<Type>,
-    mismatch_1: Spanned<Type>,
-    errors: Vec<(Spanned<Type>, Spanned<Type>)>
-}
-
-impl TranspileReport for TypeMismatchError {
-    fn print(&self, context: &TranspileModuleContext) {
-        todo!()
     }
 }

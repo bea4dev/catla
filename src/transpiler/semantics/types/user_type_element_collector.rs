@@ -1,7 +1,7 @@
 use std::{mem, ops::DerefMut, sync::{Arc, Mutex}};
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -399,7 +399,7 @@ fn get_function_type_and_name<'allocator>(
         Some(type_tag) => {
             match &type_tag.type_info {
                 Ok(type_info) => {
-                    get_type(
+                    let ty = get_type(
                         type_info,
                         user_type_map,
                         import_element_map,
@@ -410,12 +410,13 @@ fn get_function_type_and_name<'allocator>(
                         errors,
                         warnings,
                         context
-                    )
+                    );
+                    Spanned::new(ty, type_info.span.clone())
                 },
-                _ => Type::Unknown
+                _ => Spanned::new(Type::Unknown, type_tag.span.clone())
             }
         },
-        _ => Type::Unit
+        _ => Spanned::new(Type::Unit, ast.span.clone())
     };
 
     let mut argument_types = Vec::new();

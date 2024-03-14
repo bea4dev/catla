@@ -7,7 +7,7 @@ use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
-use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{SimpleError, TranspileReport}, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
 use super::{type_info::{FunctionType, GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
 
@@ -292,8 +292,8 @@ pub(crate) fn type_inference_program<'allocator>(
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     type_environment: &mut TypeEnvironment<'allocator>,
+    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -317,6 +317,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     module_element_type_maps,
                     generics_map,
                     module_entity_type_map,
+                    false,
                     type_environment,
                     type_map,
                     allocator,
@@ -335,6 +336,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_element_type_maps,
                         generics_map,
                         module_entity_type_map,
+                        true,
                         type_environment,
                         type_map,
                         allocator,
@@ -343,7 +345,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         context
                     );
 
-                    type_environment.unify(
+                    let result = type_environment.unify(
                         EntityID::from(*right_expr),
                         EntityID::from(assignment.left_expr)
                     );
@@ -360,6 +362,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     module_element_type_maps,
                     generics_map,
                     module_entity_type_map,
+                    false,
                     type_environment,
                     type_map,
                     allocator,
@@ -378,6 +381,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_element_type_maps,
                         generics_map,
                         module_entity_type_map,
+                        false,
                         type_environment,
                         type_map,
                         allocator,
@@ -422,8 +426,8 @@ pub(crate) fn type_inference_program<'allocator>(
                             module_element_type_maps,
                             generics_map,
                             module_entity_type_map,
-                            type_map,
                             &mut type_environment,
+                            type_map,
                             allocator,
                             errors,
                             warnings,
@@ -433,25 +437,23 @@ pub(crate) fn type_inference_program<'allocator>(
                 }
             },
             StatementAST::DataStructDefine(data_struct_define) => {
-                if let Ok(name) = &data_struct_define.name {
-                    if let Some(block) = &data_struct_define.block.value {
-                        type_inference_program(
-                            block.program,
-                            user_type_map,
-                            import_element_map,
-                            name_resolved_map, module_user_type_map,
-                            module_element_type_map,
-                            module_element_type_maps,
-                            generics_map,
-                            module_entity_type_map,
-                            type_map,
-                            &mut TypeEnvironment::new(allocator),
-                            allocator,
-                            errors,
-                            warnings,
-                            context
-                        );
-                    }
+                if let Some(block) = &data_struct_define.block.value {
+                    type_inference_program(
+                        block.program,
+                        user_type_map,
+                        import_element_map,
+                        name_resolved_map, module_user_type_map,
+                        module_element_type_map,
+                        module_element_type_maps,
+                        generics_map,
+                        module_entity_type_map,
+                        &mut TypeEnvironment::new(allocator),
+                        type_map,
+                        allocator,
+                        errors,
+                        warnings,
+                        context
+                    );
                 }
             },
             StatementAST::DropStatement(drop_statement) => {
@@ -466,6 +468,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_element_type_maps,
                         generics_map,
                         module_entity_type_map,
+                        false,
                         type_environment,
                         type_map,
                         allocator,
@@ -486,6 +489,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     module_element_type_maps,
                     generics_map,
                     module_entity_type_map,
+                    false,
                     type_environment,
                     type_map,
                     allocator,
@@ -524,8 +528,8 @@ pub(crate) fn type_inference_program<'allocator>(
                 };
 
                 if &tag_type != &Type::Unknown {
-                    let span = variable_define.name
-                        .map(|name| { name.span.clone() })
+                    let span = variable_define.name.clone()
+                        .map(|name| { name.span })
                         .unwrap_or(variable_define.span.clone());
 
                     type_environment.set_entity_type(
@@ -546,6 +550,7 @@ pub(crate) fn type_inference_program<'allocator>(
                             module_element_type_maps,
                             generics_map,
                             module_entity_type_map,
+                            true,
                             type_environment,
                             type_map,
                             allocator,
@@ -583,6 +588,7 @@ fn type_inference_expression<'allocator>(
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
+    mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
     type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
@@ -592,6 +598,8 @@ fn type_inference_expression<'allocator>(
 ) {
     match ast {
         ExpressionEnum::OrExpression(or_expression) => {
+            force_be_expression |= !or_expression.right_exprs.is_empty();
+
             type_inference_and_expression(
                 &or_expression.left_expr,
                 user_type_map,
@@ -602,6 +610,7 @@ fn type_inference_expression<'allocator>(
                 module_element_type_maps,
                 generics_map,
                 module_entity_type_map,
+                force_be_expression,
                 type_environment,
                 type_map,
                 allocator,
@@ -621,12 +630,18 @@ fn type_inference_expression<'allocator>(
                         module_element_type_maps,
                         generics_map,
                         module_entity_type_map,
+                        force_be_expression,
                         type_environment,
                         type_map,
                         allocator,
                         errors,
                         warnings,
                         context
+                    );
+
+                    type_environment.unify(
+                        EntityID::from(or_expression),
+                        EntityID::from(right_expr)
                     );
                 }
             }
@@ -643,6 +658,7 @@ fn type_inference_expression<'allocator>(
                     module_element_type_maps,
                     generics_map,
                     module_entity_type_map,
+                    true,
                     type_environment,
                     type_map,
                     allocator,
@@ -650,6 +666,8 @@ fn type_inference_expression<'allocator>(
                     warnings,
                     context
                 );
+
+                type_environment.unify_with_return_type(EntityID::from(expression));
             }
         },
         ExpressionEnum::Closure(closure) => {
@@ -666,6 +684,7 @@ fn type_inference_expression<'allocator>(
                             module_element_type_maps,
                             generics_map,
                             module_entity_type_map,
+                            true,
                             type_environment,
                             type_map,
                             allocator,
@@ -690,7 +709,6 @@ fn type_inference_expression<'allocator>(
                             allocator,
                             errors,
                             warnings,
-                            None,
                             context
                         );
                     }
@@ -710,6 +728,7 @@ fn type_inference_and_expression<'allocator>(
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
+    force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
     type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
@@ -1460,5 +1479,32 @@ fn type_inference_function_call<'allocator>(
                 context
             );
         }
+    }
+}
+
+
+pub(crate) struct TypeMismatchError {
+    type_0: Spanned<Type>,
+    type_1: Spanned<Type>,
+    generics: Vec<(Spanned<Type>, Spanned<Type>)>
+}
+
+impl TypeMismatchError {
+    pub fn new(
+        type_0: Spanned<Type>,
+        type_1: Spanned<Type>,
+        generics: Vec<(Spanned<Type>, Spanned<Type>)>
+    ) -> TranspileError {
+        TranspileError::new(TypeMismatchError {
+            type_0,
+            type_1,
+            generics,
+        })
+    }
+}
+
+impl TranspileReport for TypeMismatchError {
+    fn print(&self, context: &TranspileModuleContext) {
+        todo!()
     }
 }

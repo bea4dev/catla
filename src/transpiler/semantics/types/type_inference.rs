@@ -88,7 +88,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         &mut self,
         first_entity_id: EntityID,
         second_entity_id: EntityID
-    ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
+    ) -> Result<(), TypeMismatchError> {
         
         let first_resolved = self.resolve_entity_type(first_entity_id);
         let second_resolved = self.resolve_entity_type(second_entity_id);
@@ -104,7 +104,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
     pub fn unify_with_return_type(
         &mut self,
         return_expr_entity_id: EntityID
-    ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
+    ) -> Result<(), TypeMismatchError> {
 
         let return_type = match &self.return_type {
             Either::Left(entity_id) => self.resolve_entity_type(*entity_id),
@@ -121,6 +121,37 @@ impl<'allocator> TypeEnvironment<'allocator> {
     }
 
     fn unify_type(
+        &mut self,
+        first_type: &Type,
+        first_span: &Range<usize>,
+        second_type: &Type,
+        second_span: &Range<usize>
+    ) -> Result<(), TypeMismatchError> {
+
+        let result = self.unify_type_recursive(
+            first_type,
+            first_span,
+            second_type,
+            second_span
+        );
+
+        result.map_err(|mut err| {
+            let first = Spanned::new(first_type.clone(), first_span.clone());
+            let second = Spanned::new(second_type.clone(), second_span.clone());
+
+            let remove = (first.clone(), second.clone());
+            err.retain(|element| { element != &remove });
+
+            TypeMismatchError {
+                type_0: first,
+                type_1: second,
+                generics: err
+            }
+        })
+    }
+
+
+    fn unify_type_recursive(
         &mut self,
         first_type: &Type,
         first_span: &Range<usize>,
@@ -166,7 +197,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     } else if &first.1.value != &Type::Unknown && &second.1.value == &Type::Unknown {
                         self.generic_type_map.insert(second.0, Either::Left(first.0));
                     } else {
-                        return self.unify_type(
+                        return self.unify_type_recursive(
                             &first.1.value,
                             &first.1.span,
                             &second.1.value,
@@ -181,7 +212,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             },
             Type::Option(first_type) => {
                 if let Type::Option(second_type) = second_type {
-                    self.unify_type(first_type, first_span, second_type, second_span)?;
+                    self.unify_type_recursive(first_type, first_span, second_type, second_span)?;
                     true
                 } else {
                     false
@@ -189,8 +220,18 @@ impl<'allocator> TypeEnvironment<'allocator> {
             },
             Type::Result { value: first_value_type, error: first_error_type } => {
                 if let Type::Result { value: second_value_type, error: second_error_type } = second_type {
-                    let value_type_result = self.unify_type(first_value_type, first_span, second_value_type, second_span);
-                    let error_type_result = self.unify_type(first_error_type, first_span, second_error_type, second_span);
+                    let value_type_result = self.unify_type_recursive(
+                        first_value_type,
+                        first_span,
+                        second_value_type,
+                        second_span
+                    );
+                    let error_type_result = self.unify_type_recursive(
+                        first_error_type,
+                        first_span,
+                        second_error_type,
+                        second_span
+                    );
 
                     let mut errors = Vec::new();
                     if let Err(error) = value_type_result {
@@ -236,7 +277,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             let first_generic_type = &first_generics[i];
             let second_generics_type = &second_generics[i];
 
-            let result = self.unify_type(
+            let result = self.unify_type_recursive(
                 first_generic_type,
                 first_span,
                 second_generics_type,
@@ -1487,20 +1528,6 @@ pub(crate) struct TypeMismatchError {
     type_0: Spanned<Type>,
     type_1: Spanned<Type>,
     generics: Vec<(Spanned<Type>, Spanned<Type>)>
-}
-
-impl TypeMismatchError {
-    pub fn new(
-        type_0: Spanned<Type>,
-        type_1: Spanned<Type>,
-        generics: Vec<(Spanned<Type>, Spanned<Type>)>
-    ) -> TranspileError {
-        TranspileError::new(TypeMismatchError {
-            type_0,
-            type_1,
-            generics,
-        })
-    }
 }
 
 impl TranspileReport for TypeMismatchError {

@@ -287,6 +287,16 @@ pub enum ExpressionEnum<'allocator, 'input> {
     Closure(Closure<'allocator, 'input>)
 }
 
+impl ExpressionEnum<'_, '_> {
+    pub fn get_span(&self) -> Range<usize> {
+        match self {
+            ExpressionEnum::OrExpression(or_expression) => or_expression.span.clone(),
+            ExpressionEnum::ReturnExpression(return_expression) => return_expression.span.clone(),
+            ExpressionEnum::Closure(closure) => closure.span.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrExpression<'allocator, 'input> {
     pub left_expr: AndExpression<'allocator, 'input>,

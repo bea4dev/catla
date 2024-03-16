@@ -1,4 +1,4 @@
-use std::{mem, ops::{DerefMut, Range}, sync::{Arc, Mutex}};
+use std::{borrow::Borrow, mem, ops::{DerefMut, Range}, sync::{Arc, Mutex}};
 
 use ariadne::Color;
 use bumpalo::Bump;
@@ -37,9 +37,16 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
     }
 
-    pub fn new_local_generic_id(&mut self) -> LocalGenericID {
+    pub fn new_local_generic_id(&mut self, type_span: Range<usize>) -> LocalGenericID {
         self.current_generics_id += 1;
-        LocalGenericID(self.current_generics_id)
+        let generic_id = LocalGenericID(self.current_generics_id);
+        
+        self.generic_type_map.insert(
+            generic_id,
+            Either::Right(Spanned::new(Type::Unknown, type_span))
+        );
+        
+        generic_id
     }
 
     pub fn set_entity_type(&mut self, entity_id: EntityID, ty: Spanned<Type>) {
@@ -86,12 +93,14 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
     pub fn unify(
         &mut self,
-        first_entity_id: EntityID,
-        second_entity_id: EntityID
+        first_entity_id: Spanned<EntityID>,
+        second_entity_id: Spanned<EntityID>
     ) -> Result<(), TypeMismatchError> {
         
-        let first_resolved = self.resolve_entity_type(first_entity_id);
-        let second_resolved = self.resolve_entity_type(second_entity_id);
+        let mut first_resolved = self.resolve_entity_type(first_entity_id.value);
+        let mut second_resolved = self.resolve_entity_type(second_entity_id.value);
+        first_resolved.span = first_entity_id.span.clone();
+        second_resolved.span = second_entity_id.span.clone();
 
         self.unify_type(
             &first_resolved.value,
@@ -103,14 +112,15 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
     pub fn unify_with_return_type(
         &mut self,
-        return_expr_entity_id: EntityID
+        return_expr_entity_id: Spanned<EntityID>
     ) -> Result<(), TypeMismatchError> {
 
         let return_type = match &self.return_type {
             Either::Left(entity_id) => self.resolve_entity_type(*entity_id),
             Either::Right(ty) => ty.clone(),
         };
-        let return_expr_resolved = self.resolve_entity_type(return_expr_entity_id);
+        let mut return_expr_resolved = self.resolve_entity_type(return_expr_entity_id.value);
+        return_expr_resolved.span = return_expr_entity_id.span.clone();
 
         self.unify_type(
             &return_type.value,
@@ -387,9 +397,10 @@ pub(crate) fn type_inference_program<'allocator>(
                     );
 
                     let result = type_environment.unify(
-                        EntityID::from(*right_expr),
-                        EntityID::from(assignment.left_expr)
+                        Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
+                        Spanned::new(EntityID::from(assignment.left_expr), assignment.left_expr.get_span())
                     );
+                    add_error(result, errors);
                 }
             },
             StatementAST::Exchange(exchange) => {
@@ -431,10 +442,11 @@ pub(crate) fn type_inference_program<'allocator>(
                         context
                     );
 
-                    type_environment.unify(
-                        EntityID::from(*right_expr),
-                        EntityID::from(exchange.left_expr)
+                    let result = type_environment.unify(
+                        Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
+                        Spanned::new(EntityID::from(exchange.left_expr), exchange.left_expr.get_span())
                     );
+                    add_error(result, errors);
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
@@ -606,9 +618,14 @@ pub(crate) fn type_inference_program<'allocator>(
                                 EntityID::from(variable_define)
                             );
                         } else {
+                            let tag_type_span = variable_define.type_tag.as_ref()
+                            .map(|type_tag| {
+                                type_tag.type_info.as_ref().map(|type_info| { type_info.span.clone() }).ok()
+                            }).flatten().unwrap_or(variable_define.span.clone());
+
                             type_environment.unify(
-                                EntityID::from(*expression),
-                                EntityID::from(variable_define)
+                                Spanned::new(EntityID::from(*expression), expression.get_span()),
+                                Spanned::new(EntityID::from(variable_define), tag_type_span)
                             );
                         }
                     }
@@ -659,6 +676,9 @@ fn type_inference_expression<'allocator>(
                 warnings,
                 context
             );
+
+            let mut results = Vec::new();
+
             for right_expr in or_expression.right_exprs.iter() {
                 if let Ok(right_expr) = &right_expr.1 {
                     type_inference_and_expression(
@@ -680,12 +700,15 @@ fn type_inference_expression<'allocator>(
                         context
                     );
 
-                    type_environment.unify(
-                        EntityID::from(or_expression),
-                        EntityID::from(right_expr)
+                    let result = type_environment.unify(
+                        Spanned::new(EntityID::from(&or_expression.left_expr), or_expression.left_expr.span.clone()),
+                        Spanned::new(EntityID::from(right_expr), right_expr.span.clone())
                     );
+                    results.push(result);
                 }
             }
+
+            add_errors(results, errors);
         },
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
@@ -708,7 +731,10 @@ fn type_inference_expression<'allocator>(
                     context
                 );
 
-                type_environment.unify_with_return_type(EntityID::from(expression));
+                let result = type_environment.unify_with_return_type(
+                    Spanned::new(EntityID::from(expression), expression.get_span())
+                );
+                add_error(result, errors);
             }
         },
         ExpressionEnum::Closure(closure) => {
@@ -1534,4 +1560,16 @@ impl TranspileReport for TypeMismatchError {
     fn print(&self, context: &TranspileModuleContext) {
         todo!()
     }
+}
+
+
+fn add_error(result: Result<(), TypeMismatchError>, errors: &mut Vec<TranspileError>) {
+    if let Err(error) = result {
+        errors.push(TranspileError::new(error));
+    }
+}
+
+
+fn add_errors(results: Vec<Result<(), TypeMismatchError>>, errors: &mut Vec<TranspileError>) {
+
 }

@@ -157,5 +157,6 @@ label_0 = "これは型ではなく%0です"
 label_1 = "ここで定義されています"
 [error.0034]
 message = "型が一致しません"
-label_0 = "この型は %0 です"
-label_1 = ""
+label_0 = "この型は %type です"
+label_1 = "'%generic : %generic_type"
+note = "ジェネリック型 %generics をそれぞれ一致させる必要があります"

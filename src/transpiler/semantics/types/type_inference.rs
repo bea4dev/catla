@@ -169,6 +169,41 @@ impl<'allocator> TypeEnvironment<'allocator> {
         second_span: &Range<usize>
     ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
 
+        if let Type::LocalGeneric(first_generic_id) = first_type {
+            if second_type != &Type::Unknown {
+                let first_resolved_type = self.resolve_generic_type(*first_generic_id);
+
+                return if &first_resolved_type.1.value == &Type::Unknown {
+                    self.set_generic_type(first_resolved_type.0, Spanned::new(second_type.clone(), second_span.clone()));
+                    Ok(())
+                } else {
+                    self.unify_type_recursive(
+                        &first_resolved_type.1.value,
+                        &first_resolved_type.1.span,
+                        second_type,
+                        second_span
+                    )
+                };
+            }
+        }
+        if let Type::LocalGeneric(second_generic_id) = second_type {
+            if first_type != &Type::Unknown {
+                let second_resolved_type = self.resolve_generic_type(*second_generic_id);
+
+                return if &second_resolved_type.1.value == &Type::Unknown {
+                    self.set_generic_type(second_resolved_type.0, Spanned::new(first_type.clone(), first_span.clone()));
+                    Ok(())
+                } else {
+                    self.unify_type_recursive(
+                        first_type,
+                        first_span,
+                        &second_resolved_type.1.value,
+                        &second_resolved_type.1.span
+                    )
+                }
+            }
+        }
+
         let eq = match first_type {
             Type::DataStruct { data_struct_info: first_info, generics: first_generics } => {
                 if let Type::DataStruct { data_struct_info: second_info, generics: second_generics } = second_type {
@@ -1317,6 +1352,7 @@ fn type_inference_primary_left<'allocator>(
                             module_element_type_maps,
                             generics_map,
                             module_entity_type_map,
+                            force_be_expression,
                             type_environment,
                             type_map,
                             allocator,

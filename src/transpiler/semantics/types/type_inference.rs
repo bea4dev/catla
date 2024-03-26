@@ -675,10 +675,11 @@ pub(crate) fn type_inference_program<'allocator>(
                                 type_tag.type_info.as_ref().map(|type_info| { type_info.span.clone() }).ok()
                             }).flatten().unwrap_or(variable_define.span.clone());
 
-                            type_environment.unify(
+                            let result = type_environment.unify(
                                 Spanned::new(EntityID::from(*expression), expression.get_span()),
                                 Spanned::new(EntityID::from(variable_define), tag_type_span)
                             );
+                            add_error(result, errors);
                         }
                     }
                 }
@@ -832,6 +833,7 @@ fn type_inference_expression<'allocator>(
                             module_element_type_maps,
                             generics_map,
                             module_entity_type_map,
+                            false,
                             type_environment,
                             type_map,
                             allocator,
@@ -1301,6 +1303,7 @@ fn type_inference_primary<'allocator>(
     for primary_right in ast.chain.iter() {
         type_inference_primary_right(
             primary_right,
+            EntityID::from(&ast.left),
             user_type_map,
             import_element_map,
             name_resolved_map,
@@ -1339,6 +1342,7 @@ fn type_inference_primary_left<'allocator>(
 ) {
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
+            let mut expression_entity_id = None;
             match &simple.0 {
                 SimplePrimary::Expression { expression, error_tokens: _ } => {
                     if let Ok(expression) = expression {
@@ -1360,6 +1364,7 @@ fn type_inference_primary_left<'allocator>(
                             warnings,
                             context
                         );
+                        expression_entity_id = Some(EntityID::from(*expression));
                     }
                 },
                 _ => {}
@@ -1368,6 +1373,7 @@ fn type_inference_primary_left<'allocator>(
             if let Some(function_call) = &simple.1 {
                 type_inference_function_call(
                     function_call,
+                    expression_entity_id,
                     user_type_map,
                     import_element_map,
                     name_resolved_map,
@@ -1386,25 +1392,7 @@ fn type_inference_primary_left<'allocator>(
             }
         },
         PrimaryLeftExpr::NewExpression(new_expression) => {
-            if let Ok(function_call) = &new_expression.function_call {
-                type_inference_function_call(
-                    function_call,
-                    user_type_map,
-                    import_element_map,
-                    name_resolved_map,
-                    module_user_type_map,
-                    module_element_type_map,
-                    module_element_type_maps,
-                    generics_map,
-                    module_entity_type_map,
-                    type_environment,
-                    type_map,
-                    allocator,
-                    errors,
-                    warnings,
-                    context
-                );
-            }
+            // TODO
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {
             let first_statement = &if_expression.if_statement;
@@ -1419,6 +1407,7 @@ fn type_inference_primary_left<'allocator>(
                     module_element_type_maps,
                     generics_map,
                     module_entity_type_map,
+                    force_be_expression,
                     type_environment,
                     type_map,
                     allocator,
@@ -1438,12 +1427,12 @@ fn type_inference_primary_left<'allocator>(
                     module_element_type_maps,
                     generics_map,
                     module_entity_type_map,
+                    force_be_expression,
                     type_environment,
                     type_map,
                     allocator,
                     errors,
                     warnings,
-                    None,
                     context
                 );
             }
@@ -1463,6 +1452,7 @@ fn type_inference_primary_left<'allocator>(
                                     module_element_type_maps,
                                     generics_map,
                                     module_entity_type_map,
+                                    force_be_expression,
                                     type_environment,
                                     type_map,
                                     allocator,
@@ -1482,12 +1472,12 @@ fn type_inference_primary_left<'allocator>(
                                     module_element_type_maps,
                                     generics_map,
                                     module_entity_type_map,
+                                    force_be_expression,
                                     type_environment,
                                     type_map,
                                     allocator,
                                     errors,
                                     warnings,
-                                    None,
                                     context
                                 );
                             }
@@ -1503,12 +1493,12 @@ fn type_inference_primary_left<'allocator>(
                                 module_element_type_maps,
                                 generics_map,
                                 module_entity_type_map,
+                                force_be_expression,
                                 type_environment,
                                 type_map,
                                 allocator,
                                 errors,
                                 warnings,
-                                None,
                                 context
                             );
                         }
@@ -1528,12 +1518,12 @@ fn type_inference_primary_left<'allocator>(
                     module_element_type_maps,
                     generics_map,
                     module_entity_type_map,
+                    force_be_expression,
                     type_environment,
                     type_map,
                     allocator,
                     errors,
                     warnings,
-                    None,
                     context
                 );
             }
@@ -1563,6 +1553,7 @@ fn type_inference_primary_left<'allocator>(
 
 fn type_inference_primary_right<'allocator>(
     ast: &PrimaryRight,
+    primary_left: EntityID,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -1582,6 +1573,7 @@ fn type_inference_primary_right<'allocator>(
         if let Some(function_call) = &second_expr.1 {
             type_inference_function_call(
                 function_call,
+                Some(primary_left),
                 user_type_map,
                 import_element_map,
                 name_resolved_map,
@@ -1655,12 +1647,12 @@ fn type_inference_mapping_operator<'allocator>(
             module_element_type_maps,
             generics_map,
             module_entity_type_map,
+            true,
             type_environment,
             type_map,
             allocator,
             errors,
             warnings,
-            None,
             context
         );
     }
@@ -1668,6 +1660,7 @@ fn type_inference_mapping_operator<'allocator>(
 
 fn type_inference_function_call<'allocator>(
     ast: &FunctionCall,
+    function: Option<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -1695,6 +1688,7 @@ fn type_inference_function_call<'allocator>(
                 module_element_type_maps,
                 generics_map,
                 module_entity_type_map,
+                true,
                 type_environment,
                 type_map,
                 allocator,

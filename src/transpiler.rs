@@ -5,7 +5,7 @@ use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 use fxhash::FxHashMap;
 
-use crate::transpiler::semantics::types::{import_module_collector::collect_import_module_program, user_type_element_collector::collect_module_element_types_program};
+use crate::transpiler::semantics::types::{import_module_collector::collect_import_module_program, type_inference::{type_inference_program, TypeEnvironment}, user_type_element_collector::collect_module_element_types_program};
 
 use self::{advice::{Advice, AdviceReport}, component::ComponentContainer, context::{try_create_module_context, TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
 
@@ -169,7 +169,7 @@ async fn transpile_module(
 
     let module_element_type_map = Arc::new(module_element_type_map);
     dbg!(&module_element_type_map);
-    module_context.module_element_type_future.complete(module_element_type_map).await;
+    module_context.module_element_type_future.complete(module_element_type_map.clone()).await;
 
     let mut module_element_type_maps = FxHashMap::default();
     for module_name in import_element_map.values() {
@@ -178,6 +178,24 @@ async fn transpile_module(
 
         module_element_type_maps.insert(module_name.clone(), module_element_type_map);
     }
+
+    type_inference_program(
+        ast,
+        &user_type_map,
+        &import_element_map,
+        &name_resolved_map,
+        &module_user_type_map,
+        &module_element_type_map,
+        &module_element_type_maps,
+        &generics_map,
+        &module_entity_type_map,
+        false,
+        &mut TypeEnvironment::new(&allocator),
+        &allocator,
+        &mut errors,
+        &mut warnings,
+        &module_context
+    );
 
     module_context.context.add_error_and_warning(module_name, errors, warnings);
 }

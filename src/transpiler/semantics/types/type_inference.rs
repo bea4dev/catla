@@ -382,13 +382,13 @@ pub(crate) fn type_inference_program<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
     let mut has_type = false;
+    let mut var_type_and_spans = Vec::new_in(allocator);
 
     for i in 0..ast.statements.len() {
         let statement = match &ast.statements[i] {
@@ -410,7 +410,6 @@ pub(crate) fn type_inference_program<'allocator>(
                     module_entity_type_map,
                     false,
                     type_environment,
-                    type_map,
                     allocator,
                     errors,
                     warnings,
@@ -429,7 +428,6 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_entity_type_map,
                         true,
                         type_environment,
-                        type_map,
                         allocator,
                         errors,
                         warnings,
@@ -456,7 +454,6 @@ pub(crate) fn type_inference_program<'allocator>(
                     module_entity_type_map,
                     false,
                     type_environment,
-                    type_map,
                     allocator,
                     errors,
                     warnings,
@@ -475,7 +472,6 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_entity_type_map,
                         false,
                         type_environment,
-                        type_map,
                         allocator,
                         errors,
                         warnings,
@@ -521,7 +517,6 @@ pub(crate) fn type_inference_program<'allocator>(
                             module_entity_type_map,
                             false,
                             &mut type_environment,
-                            type_map,
                             allocator,
                             errors,
                             warnings,
@@ -543,7 +538,6 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_entity_type_map,
                         false,
                         &mut TypeEnvironment::new(allocator),
-                        type_map,
                         allocator,
                         errors,
                         warnings,
@@ -565,7 +559,6 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_entity_type_map,
                         false,
                         type_environment,
-                        type_map,
                         allocator,
                         errors,
                         warnings,
@@ -589,7 +582,6 @@ pub(crate) fn type_inference_program<'allocator>(
                     module_entity_type_map,
                     force_be_expression,
                     type_environment,
-                    type_map,
                     allocator,
                     errors,
                     warnings,
@@ -659,7 +651,6 @@ pub(crate) fn type_inference_program<'allocator>(
                             module_entity_type_map,
                             true,
                             type_environment,
-                            type_map,
                             allocator,
                             errors,
                             warnings,
@@ -683,6 +674,12 @@ pub(crate) fn type_inference_program<'allocator>(
                             );
                             add_error(result, type_environment);
                         }
+
+                        if let Ok(name) = &variable_define.name {
+                            if type_environment.resolve_entity_type(EntityID::from(variable_define)).value == Type::Int32 {
+                                var_type_and_spans.push((name.span.clone(), Type::Int32));
+                            }
+                        }
                     }
                 }
             }
@@ -696,6 +693,18 @@ pub(crate) fn type_inference_program<'allocator>(
             Spanned::new(Type::Unit, ast.span.clone())
         );
     }
+
+    let mut builder = Report::build(ReportKind::Custom("Debug", Color::Cyan), &context.module_name, 0);
+
+    for var_type_and_span in var_type_and_spans {
+        builder.add_label(
+            Label::new((&context.module_name, var_type_and_span.0))
+                .with_color(Color::Green)
+                .with_message("int32")
+        );
+    }
+    
+    builder.finish().print((&context.module_name, Source::from(context.source_code.code.as_str()))).unwrap();
 }
 
 fn type_inference_expression<'allocator>(
@@ -710,7 +719,6 @@ fn type_inference_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -732,7 +740,6 @@ fn type_inference_expression<'allocator>(
                 module_entity_type_map,
                 force_be_expression,
                 type_environment,
-                type_map,
                 allocator,
                 errors,
                 warnings,
@@ -756,7 +763,6 @@ fn type_inference_expression<'allocator>(
                         module_entity_type_map,
                         force_be_expression,
                         type_environment,
-                        type_map,
                         allocator,
                         errors,
                         warnings,
@@ -773,6 +779,11 @@ fn type_inference_expression<'allocator>(
             }
 
             add_errors(results, type_environment);
+
+            type_environment.set_entity_id_equals(
+                previous.value,
+                EntityID::from(ast)
+            );
         },
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
@@ -788,7 +799,6 @@ fn type_inference_expression<'allocator>(
                     module_entity_type_map,
                     true,
                     type_environment,
-                    type_map,
                     allocator,
                     errors,
                     warnings,
@@ -817,7 +827,6 @@ fn type_inference_expression<'allocator>(
                             module_entity_type_map,
                             true,
                             type_environment,
-                            type_map,
                             allocator,
                             errors,
                             warnings,
@@ -837,7 +846,6 @@ fn type_inference_expression<'allocator>(
                             module_entity_type_map,
                             false,
                             type_environment,
-                            type_map,
                             allocator,
                             errors,
                             warnings,
@@ -862,7 +870,6 @@ fn type_inference_and_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -882,7 +889,6 @@ fn type_inference_and_expression<'allocator>(
         module_entity_type_map,
         force_be_expression,
         type_environment,
-        type_map,
         allocator,
         errors,
         warnings,
@@ -906,7 +912,6 @@ fn type_inference_and_expression<'allocator>(
                 module_entity_type_map,
                 force_be_expression,
                 type_environment,
-                type_map,
                 allocator,
                 errors,
                 warnings,
@@ -923,6 +928,11 @@ fn type_inference_and_expression<'allocator>(
     }
 
     add_errors(results, type_environment);
+
+    type_environment.set_entity_id_equals(
+        previous.value,
+        EntityID::from(ast)
+    );
 }
 
 fn type_inference_eqne_expression<'allocator>(
@@ -937,7 +947,6 @@ fn type_inference_eqne_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -957,7 +966,6 @@ fn type_inference_eqne_expression<'allocator>(
         module_entity_type_map,
         force_be_expression,
         type_environment,
-        type_map,
         allocator,
         errors,
         warnings,
@@ -981,7 +989,6 @@ fn type_inference_eqne_expression<'allocator>(
                 module_entity_type_map,
                 force_be_expression,
                 type_environment,
-                type_map,
                 allocator,
                 errors,
                 warnings,
@@ -998,6 +1005,11 @@ fn type_inference_eqne_expression<'allocator>(
     }
 
     add_errors(results, type_environment);
+
+    type_environment.set_entity_id_equals(
+        previous.value,
+        EntityID::from(ast)
+    );
 }
 
 fn type_inference_compare_expression<'allocator>(
@@ -1012,7 +1024,6 @@ fn type_inference_compare_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1032,7 +1043,6 @@ fn type_inference_compare_expression<'allocator>(
         module_entity_type_map,
         force_be_expression,
         type_environment,
-        type_map,
         allocator,
         errors,
         warnings,
@@ -1056,7 +1066,6 @@ fn type_inference_compare_expression<'allocator>(
                 module_entity_type_map,
                 force_be_expression,
                 type_environment,
-                type_map,
                 allocator,
                 errors,
                 warnings,
@@ -1073,6 +1082,11 @@ fn type_inference_compare_expression<'allocator>(
     }
 
     add_errors(results, type_environment);
+
+    type_environment.set_entity_id_equals(
+        previous.value,
+        EntityID::from(ast)
+    );
 }
 
 fn type_inference_add_or_sub_expression<'allocator>(
@@ -1087,7 +1101,6 @@ fn type_inference_add_or_sub_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1107,7 +1120,6 @@ fn type_inference_add_or_sub_expression<'allocator>(
         module_entity_type_map,
         force_be_expression,
         type_environment,
-        type_map,
         allocator,
         errors,
         warnings,
@@ -1131,7 +1143,6 @@ fn type_inference_add_or_sub_expression<'allocator>(
                 module_entity_type_map,
                 force_be_expression,
                 type_environment,
-                type_map,
                 allocator,
                 errors,
                 warnings,
@@ -1148,6 +1159,11 @@ fn type_inference_add_or_sub_expression<'allocator>(
     }
 
     add_errors(results, type_environment);
+
+    type_environment.set_entity_id_equals(
+        previous.value,
+        EntityID::from(ast)
+    );
 }
 
 fn type_inference_mul_or_div_expression<'allocator>(
@@ -1162,7 +1178,6 @@ fn type_inference_mul_or_div_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1182,7 +1197,6 @@ fn type_inference_mul_or_div_expression<'allocator>(
         module_entity_type_map,
         force_be_expression,
         type_environment,
-        type_map,
         allocator,
         errors,
         warnings,
@@ -1206,7 +1220,6 @@ fn type_inference_mul_or_div_expression<'allocator>(
                 module_entity_type_map,
                 force_be_expression,
                 type_environment,
-                type_map,
                 allocator,
                 errors,
                 warnings,
@@ -1223,6 +1236,11 @@ fn type_inference_mul_or_div_expression<'allocator>(
     }
 
     add_errors(results, type_environment);
+
+    type_environment.set_entity_id_equals(
+        previous.value,
+        EntityID::from(ast)
+    );
 }
 
 fn type_inference_factor<'allocator>(
@@ -1237,7 +1255,6 @@ fn type_inference_factor<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1256,13 +1273,22 @@ fn type_inference_factor<'allocator>(
             module_entity_type_map,
             force_be_expression,
             type_environment,
-            type_map,
             allocator,
             errors,
             warnings,
             context
         );
         // TODO - check bounds
+
+        type_environment.set_entity_id_equals(
+            EntityID::from(primary),
+            EntityID::from(ast)
+        );
+    } else {
+        type_environment.set_entity_type(
+            EntityID::from(ast),
+            Spanned::new(Type::Unknown, ast.span.clone())
+        );
     }
 }
 
@@ -1278,7 +1304,6 @@ fn type_inference_primary<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1296,7 +1321,6 @@ fn type_inference_primary<'allocator>(
         module_entity_type_map,
         force_be_expression,
         type_environment,
-        type_map,
         allocator,
         errors,
         warnings,
@@ -1317,7 +1341,6 @@ fn type_inference_primary<'allocator>(
             generics_map,
             module_entity_type_map,
             type_environment,
-            type_map,
             allocator,
             errors,
             warnings,
@@ -1325,6 +1348,11 @@ fn type_inference_primary<'allocator>(
         );
         previous_primary = EntityID::from(primary_right);
     }
+
+    type_environment.set_entity_id_equals(
+        previous_primary,
+        EntityID::from(ast)
+    );
 }
 
 fn type_inference_primary_left<'allocator>(
@@ -1339,7 +1367,6 @@ fn type_inference_primary_left<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1362,7 +1389,6 @@ fn type_inference_primary_left<'allocator>(
                             module_entity_type_map,
                             force_be_expression,
                             type_environment,
-                            type_map,
                             allocator,
                             errors,
                             warnings,
@@ -1405,6 +1431,17 @@ fn type_inference_primary_left<'allocator>(
                                 Spanned::new(Type::Unknown, identifier.span.clone())
                             );
                         }
+                    } else {
+                        let ty = if identifier.value.parse::<i32>().is_ok() {
+                            Type::Int32
+                        } else {
+                            Type::Unknown
+                        };
+
+                        type_environment.set_entity_type(
+                            EntityID::from(&simple.0),
+                            Spanned::new(ty, identifier.span.clone())
+                        );
                     }
                 },
                 SimplePrimary::NullKeyword(null_keyword_span) => {
@@ -1431,11 +1468,20 @@ fn type_inference_primary_left<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     type_environment,
-                    type_map,
                     allocator,
                     errors,
                     warnings,
                     context
+                );
+                
+                type_environment.set_entity_id_equals(
+                    EntityID::from(function_call),
+                    EntityID::from(ast)
+                );
+            } else {
+                type_environment.set_entity_id_equals(
+                    EntityID::from(&simple.0),
+                    EntityID::from(ast)
                 );
             }
         },
@@ -1457,7 +1503,6 @@ fn type_inference_primary_left<'allocator>(
                     module_entity_type_map,
                     force_be_expression,
                     type_environment,
-                    type_map,
                     allocator,
                     errors,
                     warnings,
@@ -1477,7 +1522,6 @@ fn type_inference_primary_left<'allocator>(
                     module_entity_type_map,
                     force_be_expression,
                     type_environment,
-                    type_map,
                     allocator,
                     errors,
                     warnings,
@@ -1502,7 +1546,6 @@ fn type_inference_primary_left<'allocator>(
                                     module_entity_type_map,
                                     force_be_expression,
                                     type_environment,
-                                    type_map,
                                     allocator,
                                     errors,
                                     warnings,
@@ -1522,7 +1565,6 @@ fn type_inference_primary_left<'allocator>(
                                     module_entity_type_map,
                                     force_be_expression,
                                     type_environment,
-                                    type_map,
                                     allocator,
                                     errors,
                                     warnings,
@@ -1543,7 +1585,6 @@ fn type_inference_primary_left<'allocator>(
                                 module_entity_type_map,
                                 force_be_expression,
                                 type_environment,
-                                type_map,
                                 allocator,
                                 errors,
                                 warnings,
@@ -1568,7 +1609,6 @@ fn type_inference_primary_left<'allocator>(
                     module_entity_type_map,
                     force_be_expression,
                     type_environment,
-                    type_map,
                     allocator,
                     errors,
                     warnings,
@@ -1590,7 +1630,6 @@ fn type_inference_primary_left<'allocator>(
             generics_map,
             module_entity_type_map,
             type_environment,
-            type_map,
             allocator,
             errors,
             warnings,
@@ -1611,7 +1650,6 @@ fn type_inference_primary_right<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1631,7 +1669,6 @@ fn type_inference_primary_right<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 type_environment,
-                type_map,
                 allocator,
                 errors,
                 warnings,
@@ -1652,7 +1689,6 @@ fn type_inference_primary_right<'allocator>(
             generics_map,
             module_entity_type_map,
             type_environment,
-            type_map,
             allocator,
             errors,
             warnings,
@@ -1672,7 +1708,6 @@ fn type_inference_mapping_operator<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1697,7 +1732,6 @@ fn type_inference_mapping_operator<'allocator>(
             module_entity_type_map,
             true,
             type_environment,
-            type_map,
             allocator,
             errors,
             warnings,
@@ -1718,7 +1752,6 @@ fn type_inference_function_call<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     type_environment: &mut TypeEnvironment<'allocator>,
-    type_map: &mut FxHashMap<EntityID, Type>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1738,7 +1771,6 @@ fn type_inference_function_call<'allocator>(
                 module_entity_type_map,
                 true,
                 type_environment,
-                type_map,
                 allocator,
                 errors,
                 warnings,

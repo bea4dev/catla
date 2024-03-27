@@ -30,6 +30,10 @@ import test::test_module1
 class TestClass2 {
     var field0: test_module1::TestClass1
 }
+
+let a = 100
+let b = a
+let c = b
 ";
 
     let settings = TranspileSettings {

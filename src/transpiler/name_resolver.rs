@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::Range};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
-use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, StatementAST, TypeInfo, TypeTag}};
+use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeInfo, TypeTag}};
 use either::Either::{Left, Right};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -92,7 +92,7 @@ impl<'allocator> NameEnvironment<'allocator> {
                         loop {
                             let name_environment = &environments[current_entity_id];
                             if let Some(separator) = name_environment.separator {
-                                separators.push(separator);
+                                separators.push(Spanned::new(separator, name_environment.span.clone()));
                             }
 
                             match name_environment.name_define_info_map.borrow().get(name) {
@@ -121,14 +121,14 @@ impl<'allocator> NameEnvironment<'allocator> {
 
 pub(crate) struct FoundDefineInfo {
     pub define_info: DefineWithName,
-    pub separators: Vec<EnvironmentSeparatorKind>
+    pub separators: Vec<Spanned<EnvironmentSeparatorKind>>
 }
 
 impl FoundDefineInfo {
     
     pub(crate) fn has_separator(&self, kind: &[EnvironmentSeparatorKind]) -> bool {
         for separator in self.separators.iter() {
-            if kind.contains(separator) {
+            if kind.contains(&separator.value) {
                 return true;
             }
         }

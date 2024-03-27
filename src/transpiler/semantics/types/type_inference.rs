@@ -1,13 +1,13 @@
 use std::{alloc::Allocator, borrow::Borrow, mem, ops::{DerefMut, Range}, sync::{Arc, Mutex}};
 
-use ariadne::Color;
+use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
 use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
-use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{SimpleError, TranspileReport}, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
 use super::{type_info::{FunctionType, GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
 
@@ -16,6 +16,7 @@ pub(crate) struct TypeEnvironment<'allocator> {
     entity_type_map: HashMap<EntityID, Either<EntityID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_type_map: HashMap<LocalGenericID, Either<LocalGenericID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, Spanned<Type>>,
+    type_mismatch_errors: Vec<TypeMismatchError, &'allocator Bump>,
     current_generics_id: usize
 }
 
@@ -33,7 +34,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
             entity_type_map: HashMap::new_in(allocator),
             generic_type_map: HashMap::new_in(allocator),
             return_type,
-            current_generics_id: 0,
+            type_mismatch_errors: Vec::new_in(allocator),
+            current_generics_id: 0
         }
     }
 
@@ -438,7 +440,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
                         Spanned::new(EntityID::from(assignment.left_expr), assignment.left_expr.get_span())
                     );
-                    add_error(result, errors);
+                    add_error(result, type_environment);
                 }
             },
             StatementAST::Exchange(exchange) => {
@@ -484,7 +486,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
                         Spanned::new(EntityID::from(exchange.left_expr), exchange.left_expr.get_span())
                     );
-                    add_error(result, errors);
+                    add_error(result, type_environment);
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
@@ -679,7 +681,7 @@ pub(crate) fn type_inference_program<'allocator>(
                                 Spanned::new(EntityID::from(*expression), expression.get_span()),
                                 Spanned::new(EntityID::from(variable_define), tag_type_span)
                             );
-                            add_error(result, errors);
+                            add_error(result, type_environment);
                         }
                     }
                 }
@@ -770,7 +772,7 @@ fn type_inference_expression<'allocator>(
                 }
             }
 
-            add_errors(results, errors);
+            add_errors(results, type_environment);
         },
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
@@ -796,7 +798,7 @@ fn type_inference_expression<'allocator>(
                 let result = type_environment.unify_with_return_type(
                     Spanned::new(EntityID::from(expression), expression.get_span())
                 );
-                add_error(result, errors);
+                add_error(result, type_environment);
             }
         },
         ExpressionEnum::Closure(closure) => {
@@ -920,7 +922,7 @@ fn type_inference_and_expression<'allocator>(
         }
     }
 
-    add_errors(results, errors);
+    add_errors(results, type_environment);
 }
 
 fn type_inference_eqne_expression<'allocator>(
@@ -995,7 +997,7 @@ fn type_inference_eqne_expression<'allocator>(
         }
     }
 
-    add_errors(results, errors);
+    add_errors(results, type_environment);
 }
 
 fn type_inference_compare_expression<'allocator>(
@@ -1070,7 +1072,7 @@ fn type_inference_compare_expression<'allocator>(
         }
     }
 
-    add_errors(results, errors);
+    add_errors(results, type_environment);
 }
 
 fn type_inference_add_or_sub_expression<'allocator>(
@@ -1145,7 +1147,7 @@ fn type_inference_add_or_sub_expression<'allocator>(
         }
     }
 
-    add_errors(results, errors);
+    add_errors(results, type_environment);
 }
 
 fn type_inference_mul_or_div_expression<'allocator>(
@@ -1220,7 +1222,7 @@ fn type_inference_mul_or_div_expression<'allocator>(
         }
     }
 
-    add_errors(results, errors);
+    add_errors(results, type_environment);
 }
 
 fn type_inference_factor<'allocator>(
@@ -1300,10 +1302,12 @@ fn type_inference_primary<'allocator>(
         warnings,
         context
     );
+
+    let mut previous_primary = EntityID::from(&ast.left);
     for primary_right in ast.chain.iter() {
         type_inference_primary_right(
             primary_right,
-            EntityID::from(&ast.left),
+            previous_primary,
             user_type_map,
             import_element_map,
             name_resolved_map,
@@ -1319,6 +1323,7 @@ fn type_inference_primary<'allocator>(
             warnings,
             context
         );
+        previous_primary = EntityID::from(primary_right);
     }
 }
 
@@ -1342,7 +1347,6 @@ fn type_inference_primary_left<'allocator>(
 ) {
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
-            let mut expression_entity_id = None;
             match &simple.0 {
                 SimplePrimary::Expression { expression, error_tokens: _ } => {
                     if let Ok(expression) = expression {
@@ -1364,16 +1368,60 @@ fn type_inference_primary_left<'allocator>(
                             warnings,
                             context
                         );
-                        expression_entity_id = Some(EntityID::from(*expression));
+                        type_environment.set_entity_id_equals(
+                            EntityID::from(*expression),
+                            EntityID::from(&simple.0)
+                        );
                     }
                 },
-                _ => {}
+                SimplePrimary::Identifier(identifier) => {
+                    if let Some(resolved) = name_resolved_map.get(&EntityID::from(identifier)) {
+                        let link = match resolved.define_info.define_kind {
+                            DefineKind::Import => false,
+                            DefineKind::Function => {
+                                // TODO - check is method
+                                true
+                            },
+                            DefineKind::Variable | DefineKind::FunctionArgument | DefineKind::ClosureArgument => {
+                                if resolved.has_separator(&[EnvironmentSeparatorKind::DataStruct, EnvironmentSeparatorKind::Function]) {
+                                    errors.push(OutOfEnvironmentVariable::new(identifier.span.clone(), resolved));
+                                    false
+                                } else {
+                                    true
+                                }
+                            },
+                            DefineKind::UserType => false,
+                            DefineKind::Generics => false,
+                        };
+
+                        if link {
+                            type_environment.set_entity_id_equals(
+                                resolved.define_info.entity_id,
+                                EntityID::from(&simple.0)
+                            );
+                        } else {
+                            type_environment.set_entity_type(
+                                EntityID::from(&simple.0),
+                                Spanned::new(Type::Unknown, identifier.span.clone())
+                            );
+                        }
+                    }
+                },
+                SimplePrimary::NullKeyword(null_keyword_span) => {
+                    let new_generic_type = Type::LocalGeneric(
+                        type_environment.new_local_generic_id(null_keyword_span.clone())
+                    );
+                    type_environment.set_entity_type(
+                        EntityID::from(&simple.0),
+                        Spanned::new(Type::Option(Arc::new(new_generic_type)), null_keyword_span.clone())
+                    );
+                }
             }
 
             if let Some(function_call) = &simple.1 {
                 type_inference_function_call(
                     function_call,
-                    expression_entity_id,
+                    EntityID::from(&simple.0),
                     user_type_map,
                     import_element_map,
                     name_resolved_map,
@@ -1553,7 +1601,7 @@ fn type_inference_primary_left<'allocator>(
 
 fn type_inference_primary_right<'allocator>(
     ast: &PrimaryRight,
-    primary_left: EntityID,
+    previous_primary: EntityID,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -1573,7 +1621,7 @@ fn type_inference_primary_right<'allocator>(
         if let Some(function_call) = &second_expr.1 {
             type_inference_function_call(
                 function_call,
-                Some(primary_left),
+                previous_primary,
                 user_type_map,
                 import_element_map,
                 name_resolved_map,
@@ -1660,7 +1708,7 @@ fn type_inference_mapping_operator<'allocator>(
 
 fn type_inference_function_call<'allocator>(
     ast: &FunctionCall,
-    function: Option<EntityID>,
+    function: EntityID,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -1714,13 +1762,93 @@ impl TranspileReport for TypeMismatchError {
 }
 
 
-fn add_error(result: Result<(), TypeMismatchError>, errors: &mut Vec<TranspileError>) {
+fn add_error(result: Result<(), TypeMismatchError>, type_environment: &mut TypeEnvironment) {
     if let Err(error) = result {
-        errors.push(TranspileError::new(error));
+        type_environment.type_mismatch_errors.push(error);
     }
 }
 
 
-fn add_errors<A: Allocator>(results: Vec<Result<(), TypeMismatchError>, A>, errors: &mut Vec<TranspileError>) {
+fn add_errors<A: Allocator>(results: Vec<Result<(), TypeMismatchError>, A>, type_environment: &mut TypeEnvironment) {
 
+}
+
+
+struct OutOfEnvironmentVariable {
+    identifier_span: Range<usize>,
+    defined_span: Range<usize>,
+    environment_spans: Vec<Range<usize>>
+}
+
+impl OutOfEnvironmentVariable {
+    
+    pub fn new(identifier_span: Range<usize>, resolved: &FoundDefineInfo) -> TranspileError {
+        let defined_span = resolved.define_info.span.clone();
+        let mut environment_spans = Vec::new();
+        for separator in resolved.separators.iter() {
+            let across = match separator.value {
+                EnvironmentSeparatorKind::Function => false,
+                EnvironmentSeparatorKind::DataStruct => false,
+                EnvironmentSeparatorKind::Closure => true
+            };
+
+            if !across {
+                environment_spans.push(separator.span.clone());
+            }
+        }
+        
+        TranspileError::new(
+            OutOfEnvironmentVariable {
+                identifier_span,
+                defined_span,
+                environment_spans,
+            }
+        )
+    }
+
+}
+
+impl TranspileReport for OutOfEnvironmentVariable {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let error_code = 0035;
+        let key = ErrorMessageKey::new(error_code);
+
+        let message = key.get_massage(text, ErrorMessageType::Message);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.identifier_span.start)
+            .with_code(error_code)
+            .with_message(message);
+
+        builder.add_label(
+            Label::new((module_name, self.identifier_span.clone()))
+                .with_color(Color::Red)
+                .with_message(key.get_massage(text, ErrorMessageType::Label(0)))
+        );
+
+        builder.add_label(
+            Label::new((module_name, self.defined_span.clone()))
+                .with_color(Color::Yellow)
+                .with_message(key.get_massage(text, ErrorMessageType::Label(1)))
+        );
+
+        for environment_span in self.environment_spans.iter() {
+            builder.add_label(
+                Label::new((module_name, environment_span.clone()))
+                    .with_color(Color::Yellow)
+                    .with_message(key.get_massage(text, ErrorMessageType::Label(2)))
+            );
+        }
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            builder.set_note(note);
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+        builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+    }
 }

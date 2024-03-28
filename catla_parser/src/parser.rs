@@ -383,6 +383,7 @@ pub enum MulOrDivOpKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[repr(C)]
 pub struct Factor<'allocator, 'input> {
     pub negative_keyword_span: Option<Range<usize>>,
     pub primary: PrimaryResult<'allocator, 'input>,
@@ -401,6 +402,7 @@ pub struct Primary<'allocator, 'input> {
 pub type PrimaryResult<'allocator, 'input> = ParseResult<'allocator, 'input, Primary<'allocator, 'input>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[repr(C)]
 pub struct PrimaryLeft<'allocator, 'input> {
     pub first_expr: PrimaryLeftExpr<'allocator, 'input>,
     pub mapping_operator: Option<MappingOperator<'allocator, 'input>>,

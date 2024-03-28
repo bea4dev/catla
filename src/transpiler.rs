@@ -168,7 +168,7 @@ async fn transpile_module(
     );
 
     let module_element_type_map = Arc::new(module_element_type_map);
-    dbg!(&module_element_type_map);
+    //dbg!(&module_element_type_map);
     module_context.module_element_type_future.complete(module_element_type_map.clone()).await;
 
     let mut module_element_type_maps = FxHashMap::default();

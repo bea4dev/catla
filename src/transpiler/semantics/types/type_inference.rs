@@ -52,10 +52,12 @@ impl<'allocator> TypeEnvironment<'allocator> {
     }
 
     pub fn set_entity_type(&mut self, entity_id: EntityID, ty: Spanned<Type>) {
-        let entity_id_or_type = self.entity_type_map.get(&entity_id).unwrap();
-        let next_entity_id_or_type = match &entity_id_or_type {
-            Either::Left(entity_id) => Either::Left(*entity_id),
-            Either::Right(ty) => Either::Right(ty.clone()),
+        let next_entity_id_or_type = match self.entity_type_map.get(&entity_id){
+            Some(value) => value.clone(),
+            None => {
+                self.entity_type_map.insert(entity_id, Either::Right(ty));
+                return;
+            }
         };
 
         match next_entity_id_or_type {
@@ -69,10 +71,12 @@ impl<'allocator> TypeEnvironment<'allocator> {
     }
 
     pub fn set_generic_type(&mut self, generic_id: LocalGenericID, ty: Spanned<Type>) {
-        let generic_id_or_type = self.generic_type_map.get(&generic_id).unwrap();
-        let next_generic_id_or_type = match &generic_id_or_type {
-            Either::Left(generic_id) => Either::Left(*generic_id),
-            Either::Right(ty) => Either::Right(ty.clone()),
+        let next_generic_id_or_type = match self.generic_type_map.get(&generic_id) {
+            Some(value) => value.clone(),
+            None => {
+                self.generic_type_map.insert(generic_id, Either::Right(ty));
+                return;
+            }
         };
 
         match next_generic_id_or_type {
@@ -347,7 +351,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         let mut current_id = entity_id;
         loop {
             let entity_id_or_type = self.entity_type_map.get(&current_id).unwrap();
-            match &entity_id_or_type {
+            match entity_id_or_type {
                 Either::Left(entity_id) => current_id = *entity_id,
                 Either::Right(ty) => return ty.clone()
             }
@@ -780,10 +784,12 @@ fn type_inference_expression<'allocator>(
 
             add_errors(results, type_environment);
 
-            type_environment.set_entity_id_equals(
-                previous.value,
-                EntityID::from(ast)
-            );
+            if previous.value != EntityID::from(ast) {
+                type_environment.set_entity_id_equals(
+                    previous.value,
+                    EntityID::from(ast)
+                );
+            }
         },
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
@@ -929,10 +935,12 @@ fn type_inference_and_expression<'allocator>(
 
     add_errors(results, type_environment);
 
-    type_environment.set_entity_id_equals(
-        previous.value,
-        EntityID::from(ast)
-    );
+    if previous.value != EntityID::from(ast) {
+        type_environment.set_entity_id_equals(
+            previous.value,
+            EntityID::from(ast)
+        );
+    }
 }
 
 fn type_inference_eqne_expression<'allocator>(
@@ -1006,10 +1014,12 @@ fn type_inference_eqne_expression<'allocator>(
 
     add_errors(results, type_environment);
 
-    type_environment.set_entity_id_equals(
-        previous.value,
-        EntityID::from(ast)
-    );
+    if previous.value != EntityID::from(ast) {
+        type_environment.set_entity_id_equals(
+            previous.value,
+            EntityID::from(ast)
+        );
+    }
 }
 
 fn type_inference_compare_expression<'allocator>(
@@ -1083,10 +1093,12 @@ fn type_inference_compare_expression<'allocator>(
 
     add_errors(results, type_environment);
 
-    type_environment.set_entity_id_equals(
-        previous.value,
-        EntityID::from(ast)
-    );
+    if previous.value != EntityID::from(ast) {
+        type_environment.set_entity_id_equals(
+            previous.value,
+            EntityID::from(ast)
+        );
+    }
 }
 
 fn type_inference_add_or_sub_expression<'allocator>(
@@ -1160,10 +1172,12 @@ fn type_inference_add_or_sub_expression<'allocator>(
 
     add_errors(results, type_environment);
 
-    type_environment.set_entity_id_equals(
-        previous.value,
-        EntityID::from(ast)
-    );
+    if previous.value != EntityID::from(ast) {
+        type_environment.set_entity_id_equals(
+            previous.value,
+            EntityID::from(ast)
+        );
+    }
 }
 
 fn type_inference_mul_or_div_expression<'allocator>(
@@ -1237,10 +1251,12 @@ fn type_inference_mul_or_div_expression<'allocator>(
 
     add_errors(results, type_environment);
 
-    type_environment.set_entity_id_equals(
-        previous.value,
-        EntityID::from(ast)
-    );
+    if previous.value != EntityID::from(ast) {
+        type_environment.set_entity_id_equals(
+            previous.value,
+            EntityID::from(ast)
+        );
+    }
 }
 
 fn type_inference_factor<'allocator>(
@@ -1327,11 +1343,11 @@ fn type_inference_primary<'allocator>(
         context
     );
 
-    let mut previous_primary = EntityID::from(&ast.left);
+    let mut previous = EntityID::from(&ast.left);
     for primary_right in ast.chain.iter() {
         type_inference_primary_right(
             primary_right,
-            previous_primary,
+            previous,
             user_type_map,
             import_element_map,
             name_resolved_map,
@@ -1346,13 +1362,15 @@ fn type_inference_primary<'allocator>(
             warnings,
             context
         );
-        previous_primary = EntityID::from(primary_right);
+        previous = EntityID::from(primary_right);
     }
 
-    type_environment.set_entity_id_equals(
-        previous_primary,
-        EntityID::from(ast)
-    );
+    if previous != EntityID::from(ast) {
+        type_environment.set_entity_id_equals(
+            previous,
+            EntityID::from(ast)
+        );
+    }
 }
 
 fn type_inference_primary_left<'allocator>(

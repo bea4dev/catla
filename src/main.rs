@@ -13,27 +13,13 @@ fn main() {
 
     let source = 
 "
-import test::test_module2::TestClass2
-
-class TestClass1 {
-    var field0: TestClass2
-
-    function test_method() -> TestClass2 {}
-}
-
-function test(i: int) -> TestClass2 {}
-";
-let source1 = 
-"
-import test::test_module1
-
-class TestClass2 {
-    var field0: test_module1::TestClass1
-}
-
 let a = 100
 let b = a
 let c = b
+";
+let source1 = 
+"
+
 ";
 
     let settings = TranspileSettings {

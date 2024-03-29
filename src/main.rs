@@ -13,7 +13,7 @@ fn main() {
 
     let source = 
 "
-let a = 100
+let a = 100.0
 let b = a
 let c = b
 ";

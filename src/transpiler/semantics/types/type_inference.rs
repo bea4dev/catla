@@ -370,9 +370,69 @@ impl<'allocator> TypeEnvironment<'allocator> {
             }
         }
     }
+    
+    pub fn get_type_display_string(&self, ty: &Type) -> String {
+        match ty {
+            Type::Int8 => "int8".to_string(),
+            Type::Int16 => "int16".to_string(),
+            Type::Int32 => "int32".to_string(),
+            Type::Int64 => "int64".to_string(),
+            Type::Uint8 => "uint8".to_string(),
+            Type::Uint16 => "uint16".to_string(),
+            Type::Uint32 => "uint32".to_string(),
+            Type::Uint64 => "uint64".to_string(),
+            Type::Float32 => "float32".to_string(),
+            Type::Float64 => "float64".to_string(),
+            Type::Bool => "bool".to_string(),
+            Type::Unit => "unit".to_string(),
+            Type::DataStruct { data_struct_info, generics } => {
+                let mut name = data_struct_info.name.value.clone();
+                self.add_generics_info(&mut name, generics);
+                name
+            },
+            Type::Function { function_info, generics } => {
+                let mut name = "function".to_string();
+
+                name += "(";
+                for i in 0..generics.len() {
+                    let argument = &function_info.argument_types[i];
+                    if i != 0 {
+                        name += ", ";
+                    }
+                    name += self.get_type_display_string(argument).as_str();
+                }
+                name += ")";
+
+                self.add_generics_info(&mut name, generics);
+                name
+            },
+            Type::Generic(generic_type) => generic_type.name.clone(),
+            Type::LocalGeneric(generic_id) => format!("'{}", generic_id.0),
+            Type::Option(value_type) => format!("{}?", self.get_type_display_string(value_type)),
+            Type::Result { value, error } => {
+                format!("{}!{}", self.get_type_display_string(value), self.get_type_display_string(error))
+            },
+            Type::Unknown => "unknown".to_string()
+        }
+    }
+
+    fn add_generics_info(&self, name: &mut String, generics: &Vec<Type>) {
+        if !generics.is_empty() {
+            *name += "<";
+    
+            for i in 0..generics.len() {
+                let generic = &generics[i];
+                if i != 0 {
+                    *name += ", ";
+                }
+                *name += self.get_type_display_string(generic).as_str();
+            }
+    
+            *name += ">";
+        }
+    }
 
 }
-
 
 pub(crate) fn type_inference_program<'allocator>(
     ast: Program,
@@ -680,9 +740,10 @@ pub(crate) fn type_inference_program<'allocator>(
                         }
 
                         if let Ok(name) = &variable_define.name {
-                            if type_environment.resolve_entity_type(EntityID::from(variable_define)).value == Type::Int32 {
-                                var_type_and_spans.push((name.span.clone(), Type::Int32));
-                            }
+                            var_type_and_spans.push((
+                                name.span.clone(),
+                                type_environment.resolve_entity_type(EntityID::from(variable_define)).value
+                            ));
                         }
                     }
                 }
@@ -704,7 +765,7 @@ pub(crate) fn type_inference_program<'allocator>(
         builder.add_label(
             Label::new((&context.module_name, var_type_and_span.0))
                 .with_color(Color::Green)
-                .with_message("int32")
+                .with_message(type_environment.get_type_display_string(&var_type_and_span.1))
         );
     }
     
@@ -1450,8 +1511,15 @@ fn type_inference_primary_left<'allocator>(
                             );
                         }
                     } else {
-                        let ty = if identifier.value.parse::<i32>().is_ok() {
+                        let text = identifier.value;
+                        let ty = if text.parse::<i32>().is_ok() {
                             Type::Int32
+                        } else if text.parse::<i64>().is_ok() {
+                            Type::Int64
+                        } else if text.parse::<f32>().is_ok() {
+                            Type::Float32
+                        } else if text.parse::<f64>().is_ok() {
+                            Type::Float64
                         } else {
                             Type::Unknown
                         };

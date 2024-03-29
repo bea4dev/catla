@@ -67,6 +67,7 @@ impl Eq for DataStructInfo {}
 #[derive(Debug)]
 pub struct GenericType {
     pub(crate) define_entity_id: EntityID,
+    pub name: String,
     pub bounds: Mutex<Vec<Type>>
 }
 

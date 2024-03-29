@@ -168,14 +168,37 @@ fn tokenizers<'input>() -> [Tokenizer<'input>; NUMBER_OF_TOKENIZERS] {
 fn literal_tokenizer(current_input: &str) -> (usize, TokenKind) {
     let mut input_chars = current_input.chars();
     let mut current_byte_length = 0;
+    let mut is_all_char_numeric = true;
     loop {
         let current_char = match input_chars.next() {
             Some(c) => c,
             _ => break
         };
+
         if !(current_char == '_' || current_char.is_alphanumeric()) {
-            break;
+            // for float value
+            if is_all_char_numeric && current_char == '.' {
+                match input_chars.next() {
+                    Some(next_char) => {
+                        if next_char.is_numeric() {
+                            current_byte_length += current_char.len_utf8();
+                            current_byte_length += next_char.len_utf8();
+                            continue;
+                        } else {
+                            break;
+                        }
+                    },
+                    _ => break
+                }
+            } else {
+                break;
+            }
         }
+
+        if !current_char.is_numeric() {
+            is_all_char_numeric = false;
+        }
+
         current_byte_length += current_char.len_utf8();
     }
 

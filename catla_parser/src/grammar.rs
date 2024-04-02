@@ -66,8 +66,8 @@ bnf_rules!(
 
     function_call       ::= [ ":" generics_info ] "(" [ [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
 
-    new_expression      ::= "new" [ "acyclic" ] literal { "::" [ line_feed ] literal } field_set
-    field_set           ::= "{" [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] } "}"
+    new_expression      ::= "new" [ "acyclic" ] literal { "::" [ line_feed ] literal } field_assign
+    field_assign        ::= "{" [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] } "}"
 
     return_expression   ::= "return" [ expression ]
 

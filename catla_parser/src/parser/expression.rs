@@ -448,7 +448,7 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     let mut error_tokens = Vec::new_in(cursor.allocator);
     match parse_literal(cursor) {
         Some(literal) => path.push(literal),
-        _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::ParenthesisLeft, TokenKind::LineFeed]))
+        _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
     }
 
     if error_tokens.is_empty() {
@@ -459,18 +459,91 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
                     match parse_literal(cursor) {
                         Some(literal) => path.push(literal),
-                        _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::ParenthesisLeft, TokenKind::LineFeed]))
+                        _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
                     };
                 },
-                TokenKind::ParenthesisLeft => break,
-                _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::ParenthesisLeft, TokenKind::LineFeed]))
+                TokenKind::BraceLeft => break,
+                _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
             }
         }
     }
+    
+    let brace_left_token = cursor.current();
+    let field_assigns = if brace_left_token.get_kind() == TokenKind::BraceLeft {
+        cursor.next();
 
-    let function_call = parse_function_call(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+        let mut field_assigns = Vec::new_in(cursor.allocator);
 
-    return Some(NewExpression { new_keyword_span, acyclic_keyword_span, path, error_tokens, function_call, span: span.elapsed(cursor) });
+        loop {
+            skip(cursor, &[TokenKind::LineFeed]);
+
+            let name = match cursor.current().get_kind() {
+                TokenKind::Literal => parse_literal(cursor).unwrap(),
+                TokenKind::BraceRight => {
+                    cursor.next();
+                    break;
+                },
+                _ => {
+                    error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceRight, TokenKind::Comma, TokenKind::LineFeed]));
+
+                    match cursor.next().get_kind() {
+                        TokenKind::BraceRight => break,
+                        TokenKind::Comma => continue,
+                        _ => {
+                            cursor.prev();
+                            break
+                        }
+                    }
+                }
+            };
+
+            if cursor.next().get_kind() != TokenKind::Colon {
+                cursor.prev();
+                error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceRight, TokenKind::Comma, TokenKind::LineFeed]));
+
+                match cursor.next().get_kind() {
+                    TokenKind::BraceRight => break,
+                    TokenKind::Comma => continue,
+                    _ => {
+                        cursor.prev();
+                        break
+                    }
+                }
+            }
+
+            skip(cursor, &[TokenKind::LineFeed]);
+
+            let expression = parse_expression(cursor).ok_or_else(|| { unexpected_token_error(&cursor.allocator, cursor.current()) });
+
+            skip(cursor, &[TokenKind::LineFeed]);
+
+            field_assigns.push(FieldAssign { name, expression });
+
+            match cursor.next().get_kind() {
+                TokenKind::BraceRight => break,
+                TokenKind::Comma => continue,
+                _ => {
+                    cursor.prev();
+                    error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceRight, TokenKind::Comma, TokenKind::LineFeed]));
+
+                    match cursor.next().get_kind() {
+                        TokenKind::BraceRight => break,
+                        TokenKind::Comma => continue,
+                        _ => {
+                            cursor.prev();
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(field_assigns)
+    } else {
+        Err(unexpected_token_error(cursor.allocator, brace_left_token))
+    };
+
+    return Some(NewExpression { new_keyword_span, acyclic_keyword_span, path, error_tokens, field_assigns, span: span.elapsed(cursor) });
 }
 
 fn parse_mapping_operator<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<MappingOperator<'allocator, 'input>> {

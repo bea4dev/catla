@@ -84,6 +84,7 @@ impl_ast!{
     MappingOperatorKind<'_, '_>,
     FunctionCall<'_, '_>,
     NewExpression<'_, '_>,
+    FieldAssign<'_, '_>,
     ElseIfOrElse<'_, '_>,
     ReturnExpression<'_, '_>,
     Closure<'_, '_>,
@@ -489,9 +490,17 @@ pub struct NewExpression<'allocator, 'input> {
     pub new_keyword_span: Range<usize>,
     pub acyclic_keyword_span: Option<Range<usize>>,
     pub path: Vec<Literal<'input>, &'allocator Bump>,
+    pub field_assigns: FieldAssignsResult<'allocator, 'input>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
-    pub function_call: FunctionCallResult<'allocator, 'input>,
     pub span: Range<usize>
+}
+
+pub type FieldAssignsResult<'allocator, 'input> = ParseResult<'allocator, 'input, Vec<FieldAssign<'allocator, 'input>, &'allocator Bump>>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldAssign<'allocator, 'input> {
+    pub name: Literal<'input>,
+    pub expression: ExpressionResult<'allocator, 'input>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

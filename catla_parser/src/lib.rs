@@ -12,7 +12,10 @@ fn test() {
 
     let source = 
 "
-function <T: Any + Map<int, String>> test() {}
+new TestClass {
+    field0: 100,
+    field1: 200
+}
 ";
 
     let allocator = Bump::new();

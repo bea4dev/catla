@@ -4,9 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ariadne = { version = "0.3.0", features = ["auto-color"] }
 either = "1.9.0"
 bnf_rules = "0.1.1"
-bumpalo = { version = "3.13.0", features = ["collections", "boxed"] }
+bumpalo = { version = "3.13.0", features = ["collections", "boxed", "allocator_api", "allocator-api2"] }
 proc-macro-regex = "1.1.0"
 allocator-api2 = "0.2.16"

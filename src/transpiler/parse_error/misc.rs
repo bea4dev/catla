@@ -107,7 +107,8 @@ pub(crate) enum Expected {
     FunctionCall,
     IfStatementOrBlock,
     TypeInfo,
-    GreaterThan
+    GreaterThan,
+    FieldAssign
 }
 
 impl Expected {
@@ -136,7 +137,8 @@ impl Expected {
             Expected::FunctionCall => "function_call",
             Expected::IfStatementOrBlock => "if_statement_or_block",
             Expected::TypeInfo => "type_info",
-            Expected::GreaterThan => "greater_than"
+            Expected::GreaterThan => "greater_than",
+            Expected::FieldAssign => "field_assign"
         });
     }
 }
@@ -179,7 +181,8 @@ pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected:
         Expected::FunctionCall => None,
         Expected::IfStatementOrBlock => Some("{ /* do something */ }"),
         Expected::TypeInfo => None,
-        Expected::GreaterThan => Some(">")
+        Expected::GreaterThan => Some(">"),
+        Expected::FieldAssign => None
     };
 
     if !unexpected_tokens.is_empty() {

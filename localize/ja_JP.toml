@@ -23,6 +23,7 @@ function_call = "ここには関数呼び出しが必要です"
 if_statement_or_block = "if式もしくはブロックが必要です"
 type_info = "型情報が必要です"
 greater_than = "括弧を'>'で閉じる必要があります"
+field_assign = "フィールドの初期化式が必要です"
 
 [advice]
 message = "以下のように修正すると解決できるかもしれません"

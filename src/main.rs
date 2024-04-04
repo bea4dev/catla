@@ -4,7 +4,7 @@ use std::{thread, time::Duration};
 
 use transpiler::resource::TestSourceCodeProvider;
 
-use crate::transpiler::{SourceCode, transpile, context::{TranspileSettings, TranspileContext}};
+use crate::transpiler::{transpile, context::{TranspileSettings, TranspileContext}};
 
 pub mod transpiler;
 pub mod localize;

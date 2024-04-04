@@ -19,14 +19,23 @@ pub enum Type {
     Float64,
     Bool,
     Unit,
-    DataStruct { data_struct_info: Arc<DataStructInfo>, generics: Arc<Vec<Type>> },
+    UserType { user_type_info: Arc<DataStructInfo>, generics: Arc<Vec<Type>> },
     Function{ function_info: Arc<FunctionType>, generics: Arc<Vec<Type>> },
     Generic(Arc<GenericType>),
     LocalGeneric(LocalGenericID),
-    Option(Arc<Type>),
-    Result { value: Arc<Type>, error: Arc<Type> },
+    Option(Type),
+    Result { value: Type, error: Type },
     Unknown
 }
+
+impl Type {
+    
+    pub(crate) fn get_element_type(&self) -> Option<Type> {
+        
+    }
+
+}
+
 
 pub static PRIMITIVE_TYPE_NAMES: &[&str] = &[
     "int",

@@ -38,7 +38,7 @@ pub(crate) fn collect_user_type_program(
                     collect_user_type_program(block.program, user_type_map, context);
                 }
             },
-            StatementAST::DataStructDefine(data_struct_define) => {
+            StatementAST::UserTypeDefine(data_struct_define) => {
                 if let Ok(name) = &data_struct_define.name {
                     let name = Spanned::new(name.value.to_string(), name.span.clone());
                     let type_name = name.value.clone();
@@ -72,8 +72,8 @@ pub(crate) fn collect_user_type_program(
                         );
                     }
 
-                    let ty = Type::DataStruct{
-                        data_struct_info: Arc::new(data_struct_info),
+                    let ty = Type::UserType{
+                        user_type_info: Arc::new(data_struct_info),
                         generics: Arc::new(Vec::new())
                     };
                     user_type_map.insert(type_name, ty);

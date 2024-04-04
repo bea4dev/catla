@@ -4,7 +4,7 @@ use either::Either::{Right, Left, self};
 
 use self::{statement::{not_separated_statement_error_1, statement_attributes_without_define}, misc::{unexpected_token_error, Expected, UnexpectedTokens}};
 
-use super::{advice::{Advice, AdviceReport}, context::TranspileModuleContext, error::TranspileReport, TranspileError, TranspileWarning};
+use super::{advice::Advice, context::TranspileModuleContext, TranspileError, TranspileWarning};
 
 pub mod statement;
 pub mod misc;
@@ -145,7 +145,7 @@ pub fn collect_parse_error_program(
                     context
                 );
             },
-            StatementAST::DataStructDefine(data_struct_define) => {
+            StatementAST::UserTypeDefine(data_struct_define) => {
                 collect_parse_error_only_parse_result_error(
                     &data_struct_define.name,
                     Expected::DataStructName,

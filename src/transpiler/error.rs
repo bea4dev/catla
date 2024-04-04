@@ -4,7 +4,7 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 
 use crate::localize::localizer::LocalizedText;
 
-use super::{advice::{Advice, AdviceReport}, context::TranspileModuleContext, TranspileError};
+use super::{context::TranspileModuleContext, TranspileError};
 
 
 pub trait TranspileReport {
@@ -60,8 +60,7 @@ pub(crate) struct SimpleError {
     error_code: usize,
     message_span: Range<usize>,
     message_replace: Vec<String>,
-    labels: Vec<(Range<usize>, Color)>,
-    advice_report: AdviceReport
+    labels: Vec<(Range<usize>, Color)>
 }
 
 impl SimpleError {
@@ -71,7 +70,7 @@ impl SimpleError {
         message_replace: Vec<String>,
         labels: Vec<(Range<usize>, Color)>
     ) -> TranspileError {
-        TranspileError::new(SimpleError { error_code, message_span, message_replace, labels, advice_report: AdviceReport::new() })
+        TranspileError::new(SimpleError { error_code, message_span, message_replace, labels })
     }
 }
 

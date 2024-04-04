@@ -220,7 +220,7 @@ fn parse_statement_with_attributes<'allocator, 'input>(cursor: &mut TokenCursor<
     }
 
     if let Some(define) = parse_data_struct_define(cursor, &statement_attributes) {
-        return Some(Ok(StatementAST::DataStructDefine(define)));
+        return Some(Ok(StatementAST::UserTypeDefine(define)));
     }
 
     return if statement_attributes.is_empty() {
@@ -515,16 +515,16 @@ pub fn parse_generics_define_element<'allocator, 'input>(cursor: &mut TokenCurso
     return Some(GenericsElement { name, bounds, span: span.elapsed(cursor) });
 }
 
-fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<DataStructDefine<'allocator, 'input>> {
+fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<UserTypeDefine<'allocator, 'input>> {
     let span = Span::start(cursor);
     
     let kind_token = cursor.next();
     let kind_span = kind_token.map(|token| { token.span.clone() });
 
     let kind = match kind_token.get_kind() {
-        TokenKind::Class     => DataStructKind::new(DataStructKindEnum::Class, kind_span.unwrap()),
-        TokenKind::Struct    => DataStructKind::new(DataStructKindEnum::Struct, kind_span.unwrap()),
-        TokenKind::Interface => DataStructKind::new(DataStructKindEnum::Interface, kind_span.unwrap()),
+        TokenKind::Class     => UserTypeKind::new(DataStructKindEnum::Class, kind_span.unwrap()),
+        TokenKind::Struct    => UserTypeKind::new(DataStructKindEnum::Struct, kind_span.unwrap()),
+        TokenKind::Interface => UserTypeKind::new(DataStructKindEnum::Interface, kind_span.unwrap()),
         _ => {
             cursor.prev();
             return None;
@@ -547,7 +547,7 @@ fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
 
     let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
     
-    return Some(DataStructDefine { attributes: statement_attributes.clone(), kind, name, generics_define, super_type_info, error_tokens, block, span: span.elapsed(cursor) });
+    return Some(UserTypeDefine { attributes: statement_attributes.clone(), kind, name, generics_define, super_type_info, error_tokens, block, span: span.elapsed(cursor) });
 }
 
 fn parse_super_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<SuperTypeInfo<'allocator, 'input>> {

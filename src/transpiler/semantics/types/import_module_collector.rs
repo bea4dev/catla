@@ -5,7 +5,7 @@ use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression,
 use either::Either;
 use fxhash::FxHashMap;
 
-use crate::transpiler::{advice::AdviceReport, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, TranspileReport}, name_resolver::FoundDefineInfo, TranspileError, TranspileWarning};
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, TranspileReport}, name_resolver::FoundDefineInfo, TranspileError, TranspileWarning};
 
 
 pub(crate) fn collect_import_module_program(
@@ -57,7 +57,7 @@ pub(crate) fn collect_import_module_program(
                     collect_import_module_type_tag(type_tag, import_element_map, name_resolved_map, errors, warnings, context);
                 }
             },
-            StatementAST::DataStructDefine(data_struct_define) => {
+            StatementAST::UserTypeDefine(data_struct_define) => {
                 if let Some(block) = &data_struct_define.block.value {
                     collect_import_module_program(block.program, import_element_map, name_resolved_map, errors, warnings, context);
                 }

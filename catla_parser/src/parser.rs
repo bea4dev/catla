@@ -56,7 +56,7 @@ impl_ast!{
     FunctionArguments<'_, '_>,
     GenericsDefine<'_, '_>,
     GenericsElement<'_, '_>,
-    DataStructDefine<'_, '_>,
+    UserTypeDefine<'_, '_>,
     SuperTypeInfo<'_, '_>,
     Import<'_, '_>,
     ImportElements<'_, '_>,
@@ -117,7 +117,7 @@ pub enum StatementAST<'allocator, 'input> {
     StatementAttributes(Vec<StatementAttribute, &'allocator Bump>),
     VariableDefine(VariableDefine<'allocator, 'input>),
     FunctionDefine(FunctionDefine<'allocator, 'input>),
-    DataStructDefine(DataStructDefine<'allocator, 'input>),
+    UserTypeDefine(UserTypeDefine<'allocator, 'input>),
     DropStatement(DropStatement<'allocator, 'input>),
     Expression(Expression<'allocator, 'input>)
 }
@@ -190,9 +190,9 @@ pub struct GenericsElement<'allocator, 'input> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DataStructDefine<'allocator, 'input> {
+pub struct UserTypeDefine<'allocator, 'input> {
     pub attributes: Vec<StatementAttribute, &'allocator Bump>,
-    pub kind: DataStructKind,
+    pub kind: UserTypeKind,
     pub name: LiteralResult<'allocator, 'input>,
     pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
     pub super_type_info: Option<SuperTypeInfo<'allocator, 'input>>,
@@ -201,7 +201,7 @@ pub struct DataStructDefine<'allocator, 'input> {
     pub span: Range<usize>
 }
 
-pub type DataStructKind = Spanned<DataStructKindEnum>;
+pub type UserTypeKind = Spanned<DataStructKindEnum>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataStructKindEnum {

@@ -36,7 +36,7 @@ pub(crate) fn validate_syntax_program(
                 },
                 StatementAST::VariableDefine(variable_define) => (true, variable_define.span.clone()),
                 StatementAST::FunctionDefine(function_define) => (true, function_define.span.clone()),
-                StatementAST::DataStructDefine(data_struct_define) => (true, data_struct_define.span.clone()),
+                StatementAST::UserTypeDefine(data_struct_define) => (true, data_struct_define.span.clone()),
                 StatementAST::DropStatement(drop_statement) => (false, drop_statement.span.clone()),
                 StatementAST::Expression(expression) => (false, get_expression_span(expression)),
             };
@@ -100,7 +100,7 @@ pub(crate) fn validate_syntax_program(
                     validate_syntax_program(block.program, context, None, errors, warnings);
                 }
             },
-            StatementAST::DataStructDefine(data_struct_define) => {
+            StatementAST::UserTypeDefine(data_struct_define) => {
                 if let Some(block) = &data_struct_define.block.value {
                     validate_syntax_program(block.program, context, Some(data_struct_define.span.clone()), errors, warnings);
                 }

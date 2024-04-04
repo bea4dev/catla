@@ -94,7 +94,7 @@ pub(crate) fn collect_module_element_types_program(
             if let Some(element) = element {
                 let user_type = user_type_map.get(*user_type_name).unwrap().clone();
 
-                if let Type::DataStruct{ data_struct_info, generics: _ } = user_type {
+                if let Type::UserType{ user_type_info: data_struct_info, generics: _ } = user_type {
                     let mut element_map = data_struct_info.element_types.lock().unwrap();
                     element_map.insert(element.0.to_string(), element.1);
                 }
@@ -201,7 +201,7 @@ pub(crate) fn collect_module_element_types_program(
                     );
                 }
             },
-            StatementAST::DataStructDefine(data_struct_define) => {
+            StatementAST::UserTypeDefine(data_struct_define) => {
                 if let Ok(name) = &data_struct_define.name {
                     if let Some(generics_define) = &data_struct_define.generics_define {
                         let generic_types = get_generic_type(
@@ -219,7 +219,7 @@ pub(crate) fn collect_module_element_types_program(
                         
                         // set generic bounds type
                         let user_type = user_type_map.get(name.value).unwrap().clone();
-                        if let Type::DataStruct{ data_struct_info, generics: _ } = user_type {
+                        if let Type::UserType{ user_type_info: data_struct_info, generics: _ } = user_type {
                             let size = data_struct_info.generics_define.len();
                             if size == generic_types.len() {
                                 for i in 0..size {
@@ -1318,8 +1318,8 @@ pub(crate) fn get_type(
         }
 
         type_info = match &type_info {
-            Type::DataStruct { data_struct_info, generics: _ } => {
-                Type::DataStruct { data_struct_info: data_struct_info.clone(), generics: Arc::new(generics_types) }
+            Type::UserType { user_type_info: data_struct_info, generics: _ } => {
+                Type::UserType { user_type_info: data_struct_info.clone(), generics: Arc::new(generics_types) }
             },
             Type::Function { function_info, generics: _ } => {
                 Type::Function { function_info: function_info.clone(), generics: Arc::new(generics_types) }
@@ -1343,7 +1343,7 @@ pub(crate) fn get_type(
 
     for attribute in ast.type_attributes.iter() {
         type_info = match &attribute.value {
-            TypeAttributeEnum::Optional => Type::Option(Arc::new(type_info)),
+            TypeAttributeEnum::Optional => Type::Option(type_info),
             TypeAttributeEnum::Result(error_type) => {
                 let error_type = match error_type {
                     Some(error_type) => {
@@ -1378,7 +1378,7 @@ pub(crate) fn get_type(
                     },
                     _ => Type::Unit // TODO - default error class object
                 };
-                Type::Result { value: Arc::new(type_info), error: Arc::new(error_type) }
+                Type::Result { value: type_info, error: error_type }
             }
         };
     }

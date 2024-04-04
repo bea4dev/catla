@@ -9,7 +9,7 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::localize::localizer::LocalizedText;
 
-use super::{advice::AdviceReport, component::{ComponentContainer, EntityID}, error::{ErrorMessageKey, ErrorMessageType, TranspileReport}, semantics::types::type_info::PRIMITIVE_TYPE_NAMES, TranspileError, TranspileWarning};
+use super::{component::{ComponentContainer, EntityID}, error::{ErrorMessageKey, ErrorMessageType, TranspileReport}, semantics::types::type_info::PRIMITIVE_TYPE_NAMES, TranspileError, TranspileWarning};
 
 
 #[derive(Debug, Clone)]
@@ -191,7 +191,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                     }
                 }
             },
-            StatementAST::DataStructDefine(data_struct_define) => {
+            StatementAST::UserTypeDefine(data_struct_define) => {
                 if let Ok(data_struct_name) = &data_struct_define.name {
                     let entity_id = EntityID::from(data_struct_define);
                     let define_info = DefineWithName { entity_id, span: data_struct_name.span.clone(), define_kind: DefineKind::UserType };
@@ -272,7 +272,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                     name_resolve_block(block, entity_id, name_environments, resolved_map, errors, warnings, allocator);
                 }
             },
-            StatementAST::DataStructDefine(data_struct_define) => {
+            StatementAST::UserTypeDefine(data_struct_define) => {
                 let name_environment = NameEnvironment::new(
                     Some(current_environment_id),
                     Some(EnvironmentSeparatorKind::DataStruct),

@@ -211,8 +211,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
 
         let eq = match first_type {
-            Type::DataStruct { data_struct_info: first_info, generics: first_generics } => {
-                if let Type::DataStruct { data_struct_info: second_info, generics: second_generics } = second_type {
+            Type::UserType { user_type_info: first_info, generics: first_generics } => {
+                if let Type::UserType { user_type_info: second_info, generics: second_generics } = second_type {
                     if first_info == second_info {
                         self.unify_generics(first_generics, first_span, second_generics, second_span)?;
                         true
@@ -263,7 +263,12 @@ impl<'allocator> TypeEnvironment<'allocator> {
             },
             Type::Option(first_type) => {
                 if let Type::Option(second_type) = second_type {
-                    self.unify_type_recursive(first_type, first_span, second_type, second_span)?;
+                    self.unify_type_recursive(
+                        &first_type,
+                        first_span,
+                        &second_type,
+                        second_span
+                    )?;
                     true
                 } else {
                     false
@@ -272,15 +277,15 @@ impl<'allocator> TypeEnvironment<'allocator> {
             Type::Result { value: first_value_type, error: first_error_type } => {
                 if let Type::Result { value: second_value_type, error: second_error_type } = second_type {
                     let value_type_result = self.unify_type_recursive(
-                        first_value_type,
+                        &first_value_type,
                         first_span,
-                        second_value_type,
+                        &second_value_type,
                         second_span
                     );
                     let error_type_result = self.unify_type_recursive(
-                        first_error_type,
+                        &first_error_type,
                         first_span,
-                        second_error_type,
+                        &second_error_type,
                         second_span
                     );
 
@@ -325,13 +330,10 @@ impl<'allocator> TypeEnvironment<'allocator> {
         let mut errors = Vec::new();
 
         for i in 0..first_generics.len() {
-            let first_generic_type = &first_generics[i];
-            let second_generics_type = &second_generics[i];
-
             let result = self.unify_type_recursive(
-                first_generic_type,
+                &first_generics[i],
                 first_span,
-                second_generics_type,
+                &second_generics[i],
                 second_span
             );
             
@@ -385,8 +387,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
             Type::Float64 => "float64".to_string(),
             Type::Bool => "bool".to_string(),
             Type::Unit => "unit".to_string(),
-            Type::DataStruct { data_struct_info, generics } => {
-                let mut name = data_struct_info.name.value.clone();
+            Type::UserType { user_type_info, generics } => {
+                let mut name = user_type_info.name.value.clone();
                 self.add_generics_info(&mut name, generics);
                 name
             },
@@ -421,11 +423,10 @@ impl<'allocator> TypeEnvironment<'allocator> {
             *name += "<";
     
             for i in 0..generics.len() {
-                let generic = &generics[i];
                 if i != 0 {
                     *name += ", ";
                 }
-                *name += self.get_type_display_string(generic).as_str();
+                *name += self.get_type_display_string(&generics[i]).as_str();
             }
     
             *name += ">";
@@ -589,7 +590,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     }
                 }
             },
-            StatementAST::DataStructDefine(data_struct_define) => {
+            StatementAST::UserTypeDefine(data_struct_define) => {
                 if let Some(block) = &data_struct_define.block.value {
                     type_inference_program(
                         block.program,
@@ -1531,12 +1532,10 @@ fn type_inference_primary_left<'allocator>(
                     }
                 },
                 SimplePrimary::NullKeyword(null_keyword_span) => {
-                    let new_generic_type = Type::LocalGeneric(
-                        type_environment.new_local_generic_id(null_keyword_span.clone())
-                    );
+                    let generic_id = type_environment.new_local_generic_id(null_keyword_span.clone());
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
-                        Spanned::new(Type::Option(Arc::new(new_generic_type)), null_keyword_span.clone())
+                        Spanned::new(Type::Option(Type::LocalGeneric(generic_id)), null_keyword_span.clone())
                     );
                 }
             }
@@ -1619,21 +1618,31 @@ fn type_inference_primary_left<'allocator>(
                 }
             };
 
-            if !new_expression.path.is_empty() && &user_type == &Type::Unknown {
-                let span_start = new_expression.path.first().unwrap().span.start;
-                let span_end = new_expression.path.last().unwrap().span.end;
-                let span = span_start..span_end;
+            if let Type::UserType { user_type_info, generics } = user_type {
+                let number_of_generics = user_type_info.generics_define.len();
+                let mut generics = Vec::with_capacity(number_of_generics);
+                for _ in 0..number_of_generics {
+                    let local_generic_id = type_environment.new_local_generic_id(new_expression.span.clone());
+                    generics.push(Type::LocalGeneric(local_generic_id));
+                }
+                let user_type = Type::UserType { user_type_info, generics: Arc::new(generics) };
 
-                let error = SimpleError::new(
-                    0036,
-                    span.clone(),
-                    vec![],
-                    vec![(span, Color::Red)]
-                );
-                errors.push(error);
+                
+            } else {
+                if !new_expression.path.is_empty() {
+                    let span_start = new_expression.path.first().unwrap().span.start;
+                    let span_end = new_expression.path.last().unwrap().span.end;
+                    let span = span_start..span_end;
+
+                    let error = SimpleError::new(
+                        0036,
+                        span.clone(),
+                        vec![],
+                        vec![(span, Color::Red)]
+                    );
+                    errors.push(error);
+                }
             }
-
-            
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {
             let first_statement = &if_expression.if_statement;

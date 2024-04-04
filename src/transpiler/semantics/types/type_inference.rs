@@ -1535,7 +1535,7 @@ fn type_inference_primary_left<'allocator>(
                     let generic_id = type_environment.new_local_generic_id(null_keyword_span.clone());
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
-                        Spanned::new(Type::Option(Type::LocalGeneric(generic_id)), null_keyword_span.clone())
+                        Spanned::new(Type::Option(Arc::new(Type::LocalGeneric(generic_id))), null_keyword_span.clone())
                     );
                 }
             }

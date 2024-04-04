@@ -1343,7 +1343,7 @@ pub(crate) fn get_type(
 
     for attribute in ast.type_attributes.iter() {
         type_info = match &attribute.value {
-            TypeAttributeEnum::Optional => Type::Option(type_info),
+            TypeAttributeEnum::Optional => Type::Option(Arc::new(type_info)),
             TypeAttributeEnum::Result(error_type) => {
                 let error_type = match error_type {
                     Some(error_type) => {
@@ -1378,7 +1378,7 @@ pub(crate) fn get_type(
                     },
                     _ => Type::Unit // TODO - default error class object
                 };
-                Type::Result { value: type_info, error: error_type }
+                Type::Result { value: Arc::new(type_info), error: Arc::new(error_type) }
             }
         };
     }

@@ -23,19 +23,10 @@ pub enum Type {
     Function{ function_info: Arc<FunctionType>, generics: Arc<Vec<Type>> },
     Generic(Arc<GenericType>),
     LocalGeneric(LocalGenericID),
-    Option(Type),
-    Result { value: Type, error: Type },
+    Option(Arc<Type>),
+    Result { value: Arc<Type>, error: Arc<Type> },
     Unknown
 }
-
-impl Type {
-    
-    pub(crate) fn get_element_type(&self) -> Option<Type> {
-        
-    }
-
-}
-
 
 pub static PRIMITIVE_TYPE_NAMES: &[&str] = &[
     "int",

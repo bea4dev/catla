@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, NewExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -384,28 +384,26 @@ fn collect_import_module_primary_left(
         },
         PrimaryLeftExpr::NewExpression(new_expression) => {
             if new_expression.path.len() > 1 {
-                let mut module_name = if let Some(resolved) = name_resolved_map.get(&EntityID::from(&new_expression.path[0])) {
-                    let import_entity_id = resolved.define_info.entity_id;
-                    import_element_map.get(&import_entity_id).unwrap().clone()
-                } else {
-                    new_expression.path[0].value.to_string()
-                };
-                
-                for i in 1..new_expression.path.len() - 1 {
-                    let path = &new_expression.path[i];
-                    module_name += path.value;
-                    if i != new_expression.path.len() - 2 {
-                        module_name += "::";
-                    }
-                }
+                let module_name = get_module_name_from_new_expression(new_expression, import_element_map, name_resolved_map);
 
                 if context.context.source_code_provider.exists_source_code(&module_name) {
                     import_element_map.insert(EntityID::from(new_expression), module_name);
                 }
             }
             
-            if let Ok(function_call) = &new_expression.function_call {
-                collect_import_module_function_call(function_call, import_element_map, name_resolved_map, errors,warnings, context);
+            if let Ok(field_assigns) = &new_expression.field_assigns {
+                for field_assign in field_assigns.iter() {
+                    if let Ok(expression) = &field_assign.expression {
+                        collect_import_module_expression(
+                            &expression,
+                            import_element_map,
+                            name_resolved_map,
+                            errors,
+                            warnings,
+                            context
+                        );
+                    }
+                }
             }
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {
@@ -445,6 +443,33 @@ fn collect_import_module_primary_left(
     if let Some(mapping_operator) = &ast.mapping_operator {
         collect_import_module_mapping_operator(mapping_operator, import_element_map, name_resolved_map, errors,warnings, context);
     }
+}
+
+pub(crate) fn get_module_name_from_new_expression(
+    new_expression: &NewExpression,
+    import_element_map: &FxHashMap<EntityID, String>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>
+) -> String {
+    if new_expression.path.len() <= 1 {
+        return String::new();
+    }
+
+    let mut module_name = if let Some(resolved) = name_resolved_map.get(&EntityID::from(&new_expression.path[0])) {
+        let import_entity_id = resolved.define_info.entity_id;
+        import_element_map.get(&import_entity_id).unwrap().clone()
+    } else {
+        new_expression.path[0].value.to_string()
+    };
+    
+    for i in 1..new_expression.path.len() - 1 {
+        let path = &new_expression.path[i];
+        module_name += path.value;
+        if i != new_expression.path.len() - 2 {
+            module_name += "::";
+        }
+    }
+
+    return module_name;
 }
 
 fn collect_import_module_primary_right(

@@ -277,8 +277,12 @@ fn validate_syntax_primary_left(
             }
         },
         PrimaryLeftExpr::NewExpression(new_expression) => {
-            if let Ok(function_call) = &new_expression.function_call {
-                validate_syntax_function_call(function_call, context,errors, warnings);
+            if let Ok(field_assigns) = &new_expression.field_assigns {
+                for field_assign in field_assigns.iter() {
+                    if let Ok(expression) = &field_assign.expression {
+                        validate_syntax_expression(&expression, context, errors, warnings);
+                    }
+                }
             }
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {

@@ -240,8 +240,12 @@ fn collect_user_type_primary_left(
             }
         },
         PrimaryLeftExpr::NewExpression(new_expression) => {
-            if let Ok(function_call) = &new_expression.function_call {
-                collect_user_type_function_call(function_call, user_type_map, context);
+            if let Ok(field_assigns) = &new_expression.field_assigns {
+                for field_assign in field_assigns.iter() {
+                    if let Ok(expression) = &field_assign.expression {
+                        collect_user_type_expression(&expression, user_type_map, context);
+                    }
+                }
             }
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {

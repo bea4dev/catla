@@ -9,7 +9,7 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{type_info::{FunctionType, GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
+use super::{import_module_collector::get_module_name_from_new_expression, type_info::{FunctionType, GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
 
 
 pub(crate) struct TypeEnvironment<'allocator> {
@@ -1572,7 +1572,68 @@ fn type_inference_primary_left<'allocator>(
             }
         },
         PrimaryLeftExpr::NewExpression(new_expression) => {
-            // TODO
+            let user_type = if new_expression.path.len() > 1 {
+                let module_name = get_module_name_from_new_expression(new_expression, import_element_map, name_resolved_map);
+                
+                if let Some(user_type_map) = module_user_type_map.get(&module_name) {
+                    if let Some(user_type) = user_type_map.get(new_expression.path.last().unwrap().value) {
+                        user_type.clone()
+                    } else {
+                        Type::Unknown
+                    }
+                } else {
+                    Type::Unknown
+                }
+            } else {
+                if let Some(name) = new_expression.path.last() {
+                    if let Some(resolved) = name_resolved_map.get(&EntityID::from(name)) {
+                        match resolved.define_info.define_kind {
+                            DefineKind::Import => {
+                                if let Some(module_name) = import_element_map.get(&resolved.define_info.entity_id) {
+                                    if let Some(user_type_map) = module_user_type_map.get(module_name) {
+                                        if let Some(user_type) = user_type_map.get(name.value) {
+                                            user_type.clone()
+                                        } else {
+                                            Type::Unknown
+                                        }
+                                    } else {
+                                        Type::Unknown
+                                    }
+                                } else {
+                                    Type::Unknown
+                                }
+                            },
+                            DefineKind::UserType => {
+                                user_type_map.get(name.value).unwrap().clone()
+                            },
+                            DefineKind::Generics => {
+                                Type::Generic(generics_map.get(&resolved.define_info.entity_id).unwrap().clone())
+                            },
+                            _ => Type::Unknown
+                        }
+                    } else {
+                        Type::Unknown
+                    }
+                } else {
+                    Type::Unknown
+                }
+            };
+
+            if !new_expression.path.is_empty() && &user_type == &Type::Unknown {
+                let span_start = new_expression.path.first().unwrap().span.start;
+                let span_end = new_expression.path.last().unwrap().span.end;
+                let span = span_start..span_end;
+
+                let error = SimpleError::new(
+                    0036,
+                    span.clone(),
+                    vec![],
+                    vec![(span, Color::Red)]
+                );
+                errors.push(error);
+            }
+
+            
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {
             let first_statement = &if_expression.if_statement;

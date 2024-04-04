@@ -946,20 +946,24 @@ fn collect_module_element_types_primary_left(
             }
         },
         PrimaryLeftExpr::NewExpression(new_expression) => {
-            if let Ok(function_call) = &new_expression.function_call {
-                collect_module_element_types_function_call(
-                    function_call,
-                    user_type_map,
-                    import_element_map,
-                    name_resolved_map,
-                    module_user_type_map,
-                    module_element_type_map,
-                    generics_map,
-                    module_entity_type_map,
-                    errors,
-                    warnings,
-                    context
-                );
+            if let Ok(field_assigns) = &new_expression.field_assigns {
+                for field_assign in field_assigns.iter() {
+                    if let Ok(expression) = &field_assign.expression {
+                        collect_module_element_types_expression(
+                            &expression,
+                            user_type_map,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            generics_map,
+                            module_entity_type_map,
+                            errors,
+                            warnings,
+                            context
+                        );
+                    }
+                }
             }
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {

@@ -4,7 +4,7 @@ use ariadne::{Report, ReportKind, Label, Source, Color};
 use bumpalo::Bump;
 use catla_parser::{lexer::Token, parser::{Spanned, StatementAttribute}};
 
-use crate::transpiler::{advice::{Advice, AdviceReport}, context::TranspileModuleContext, error::{TranspileReport, ErrorMessageKey, ErrorMessageType}, TranspileError};
+use crate::transpiler::{advice::Advice, context::TranspileModuleContext, error::{TranspileReport, ErrorMessageKey, ErrorMessageType}, TranspileError};
 
 
 pub(crate) struct NotSeparatedStatement {
@@ -43,8 +43,7 @@ pub(crate) fn not_separated_statement_error_1(token: &Token, context: &Transpile
 
 
 pub(crate) struct StatementAttributesWithoutDefine {
-    attributes_span: Range<usize>,
-    advice_report: AdviceReport
+    attributes_span: Range<usize>
 }
 
 impl TranspileReport for StatementAttributesWithoutDefine {
@@ -71,7 +70,6 @@ pub(crate) fn statement_attributes_without_define(attributes: &Vec<StatementAttr
     let span_start = attributes.first().unwrap().span.start;
     let span_end = attributes.last().unwrap().span.end;
     TranspileError::new(StatementAttributesWithoutDefine {
-        attributes_span: span_start..span_end,
-        advice_report: AdviceReport::new()
+        attributes_span: span_start..span_end
     })
 }

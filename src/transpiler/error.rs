@@ -80,11 +80,16 @@ impl TranspileReport for SimpleError {
         let text = &context.context.localized_text;
         let key = ErrorMessageKey::new(self.error_code);
 
-        let mut message = key.get_massage(text, ErrorMessageType::Message);
-        for i in 0..self.message_replace.len() {
-            let target = format!("%{}", i);
-            message = message.replace(&target, &self.message_replace[i]);
+        fn replace_message(mut message: String, message_replace: &Vec<String>) -> String {
+            for i in 0..message_replace.len() {
+                let target = format!("%{}", i);
+                message = message.replace(&target, &message_replace[i]);
+            }
+            message
         }
+
+        let mut message = key.get_massage(text, ErrorMessageType::Message);
+        message = replace_message(message, &self.message_replace);
 
         let mut builder = Report::build(ReportKind::Error, module_name, self.message_span.start)
             .with_code(self.error_code)
@@ -93,11 +98,7 @@ impl TranspileReport for SimpleError {
         let mut index = 0;
         for label in self.labels.iter() {
             let mut message = key.get_massage(text, ErrorMessageType::Label(index));
-
-            for i in 0..self.message_replace.len() {
-                let target = format!("%{}", i);
-                message = message.replace(&target, &self.message_replace[i]);
-            }
+            message = replace_message(message, &self.message_replace);
 
             builder.add_label(
                 Label::new((module_name, label.0.clone()))
@@ -108,11 +109,13 @@ impl TranspileReport for SimpleError {
         }
 
         if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
-            builder.set_note(note);
+            let message = replace_message(note, &self.message_replace);
+            builder.set_note(message);
         }
 
         if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
-            builder.set_help(help);
+            let message = replace_message(help, &self.message_replace);
+            builder.set_help(message);
         }
 
         builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();

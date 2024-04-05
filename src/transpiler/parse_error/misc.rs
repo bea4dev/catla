@@ -3,7 +3,7 @@ use std::ops::Range;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use catla_parser::parser::{Spanned, ASTParseError};
 
-use crate::transpiler::{advice::{Advice, AdviceReport}, context::TranspileModuleContext, error::{TranspileReport, ErrorMessageKey, ErrorMessageType}, TranspileError};
+use crate::transpiler::{advice::Advice, context::TranspileModuleContext, error::{TranspileReport, ErrorMessageKey, ErrorMessageType}, TranspileError};
 
 
 pub(crate) struct UnexpectedTokens {

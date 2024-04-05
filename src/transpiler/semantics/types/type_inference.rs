@@ -1,6 +1,6 @@
 use std::{alloc::Allocator, borrow::Borrow, mem, ops::{DerefMut, Range}, sync::{Arc, Mutex}};
 
-use ariadne::{Color, Label, Report, ReportKind, Source};
+use ariadne::{Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
 use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
 use either::Either;
@@ -16,7 +16,7 @@ pub(crate) struct TypeEnvironment<'allocator> {
     entity_type_map: HashMap<EntityID, Either<EntityID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_type_map: HashMap<LocalGenericID, Either<LocalGenericID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, Spanned<Type>>,
-    type_mismatch_errors: Vec<TypeMismatchError, &'allocator Bump>,
+    lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
     current_generics_id: usize
 }
 
@@ -34,7 +34,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             entity_type_map: HashMap::new_in(allocator),
             generic_type_map: HashMap::new_in(allocator),
             return_type,
-            type_mismatch_errors: Vec::new_in(allocator),
+            lazy_type_reports: Vec::new_in(allocator),
             current_generics_id: 0
         }
     }
@@ -90,10 +90,16 @@ impl<'allocator> TypeEnvironment<'allocator> {
     }
     
     pub fn set_entity_id_equals(&mut self, first_entity_id: EntityID, second_entity_id: EntityID) {
+        if first_entity_id == second_entity_id {
+            return;
+        }
         self.entity_type_map.insert(second_entity_id, Either::Left(first_entity_id));
     }
 
     pub fn set_generic_id_equals(&mut self, first_generic_id: LocalGenericID, second_generic_id: LocalGenericID) {
+        if first_generic_id == second_generic_id {
+            return;
+        }
         self.generic_type_map.insert(second_generic_id, Either::Left(first_generic_id));
     }
 
@@ -349,7 +355,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
     }
 
-    pub fn resolve_entity_type(&mut self, entity_id: EntityID) -> Spanned<Type> {
+    pub fn resolve_entity_type(&self, entity_id: EntityID) -> Spanned<Type> {
         let mut current_id = entity_id;
         loop {
             let entity_id_or_type = self.entity_type_map.get(&current_id).unwrap();
@@ -360,7 +366,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
     }
 
-    pub fn resolve_generic_type(&mut self, generic_id: LocalGenericID) -> (LocalGenericID, Spanned<Type>) {
+    pub fn resolve_generic_type(&self, generic_id: LocalGenericID) -> (LocalGenericID, Spanned<Type>) {
         let mut current_id = generic_id;
         loop {
             let generic_id_or_type = self.generic_type_map.get(&current_id).unwrap();
@@ -409,7 +415,9 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 name
             },
             Type::Generic(generic_type) => generic_type.name.clone(),
-            Type::LocalGeneric(generic_id) => format!("'{}", generic_id.0),
+            Type::LocalGeneric(generic_id) => {
+                self.get_type_display_string(&self.resolve_generic_type(*generic_id).1.value)
+            },
             Type::Option(value_type) => format!("{}?", self.get_type_display_string(value_type)),
             Type::Result { value, error } => {
                 format!("{}!{}", self.get_type_display_string(value), self.get_type_display_string(error))
@@ -430,6 +438,19 @@ impl<'allocator> TypeEnvironment<'allocator> {
             }
     
             *name += ">";
+        }
+    }
+
+    fn add_lazy_type_error_report<T: 'static + LazyTypeReport>(&mut self, report: T) {
+        self.lazy_type_reports.push(Box::new(report));
+    }
+
+    fn collect_lazy_type_report(&self, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+        for report in self.lazy_type_reports.iter() {
+            match report.build_report(self) {
+                Either::Left(error) => errors.push(error),
+                Either::Right(warning) => warnings.push(warning),
+            }
         }
     }
 
@@ -752,6 +773,8 @@ pub(crate) fn type_inference_program<'allocator>(
             _ => {}
         }
     }
+
+    type_environment.collect_lazy_type_report(errors, warnings);
 
     if !has_type {
         type_environment.set_entity_type(
@@ -1561,12 +1584,12 @@ fn type_inference_primary_left<'allocator>(
                 
                 type_environment.set_entity_id_equals(
                     EntityID::from(function_call),
-                    EntityID::from(ast)
+                    EntityID::from(&ast.first_expr)
                 );
             } else {
                 type_environment.set_entity_id_equals(
                     EntityID::from(&simple.0),
-                    EntityID::from(ast)
+                    EntityID::from(&ast.first_expr)
                 );
             }
         },
@@ -1627,7 +1650,53 @@ fn type_inference_primary_left<'allocator>(
                 }
                 let user_type = Type::UserType { user_type_info, generics: Arc::new(generics) };
 
-                
+                if let Ok(field_assigns) = &new_expression.field_assigns {
+                    for field_assign in field_assigns.iter() {
+                        if let Some(element_type) = user_type.get_element_type_with_local_generic(field_assign.name.value) {
+                            type_environment.set_entity_type(
+                                EntityID::from(field_assign),
+                                Spanned::new(element_type, field_assign.name.span.clone())
+                            );
+
+                            if let Ok(expression) = &field_assign.expression {
+                                type_inference_expression(
+                                    &expression,
+                                    user_type_map,
+                                    import_element_map,
+                                    name_resolved_map,
+                                    module_user_type_map,
+                                    module_element_type_map,
+                                    module_element_type_maps,
+                                    generics_map,
+                                    module_entity_type_map,
+                                    force_be_expression,
+                                    type_environment,
+                                    allocator,
+                                    errors,
+                                    warnings,
+                                    context
+                                );
+
+                                let result = type_environment.unify(
+                                    Spanned::new(EntityID::from(field_assign), field_assign.name.span.clone()),
+                                    Spanned::new(EntityID::from(*expression), expression.get_span())
+                                );
+                                add_error(result, type_environment);
+                            }
+                        } else {
+                            let error = NotFoundTypeElementError {
+                                user_type: user_type.clone(),
+                                name: field_assign.name.clone().map(|name| { name.to_string() }),
+                            };
+                            type_environment.add_lazy_type_error_report(error);
+                        }
+                    }
+                }
+
+                type_environment.set_entity_type(
+                    EntityID::from(&ast.first_expr),
+                    Spanned::new(user_type, new_expression.span.clone())
+                );
             } else {
                 if !new_expression.path.is_empty() {
                     let span_start = new_expression.path.first().unwrap().span.start;
@@ -1642,6 +1711,11 @@ fn type_inference_primary_left<'allocator>(
                     );
                     errors.push(error);
                 }
+                
+                type_environment.set_entity_type(
+                    EntityID::from(&ast.first_expr),
+                    Spanned::new(Type::Unknown, new_expression.span.clone())
+                );
             }
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {
@@ -1791,6 +1865,16 @@ fn type_inference_primary_left<'allocator>(
             warnings,
             context
         );
+
+        type_environment.set_entity_id_equals(
+            EntityID::from(&mapping_operator.value),
+            EntityID::from(ast)
+        );
+    } else {
+        type_environment.set_entity_id_equals(
+            EntityID::from(&ast.first_expr),
+            EntityID::from(ast)
+        );
     }
 }
 
@@ -1937,22 +2021,121 @@ fn type_inference_function_call<'allocator>(
 }
 
 
+pub(crate) trait LazyTypeReport {
+    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning>;
+}
+
+
 pub(crate) struct TypeMismatchError {
     type_0: Spanned<Type>,
     type_1: Spanned<Type>,
     generics: Vec<(Spanned<Type>, Spanned<Type>)>
 }
 
-impl TranspileReport for TypeMismatchError {
+impl LazyTypeReport for TypeMismatchError {
+    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+        let func = |ty| { type_environment.get_type_display_string(&ty) };
+
+        let type_0 = self.type_0.clone().map(func);
+        let type_1 = self.type_1.clone().map(func);
+        let generics = self.generics.iter()
+            .map(|generic| { (generic.0.clone().map(func), generic.1.clone().map(func)) })
+            .collect();
+        
+        let error = TypeMismatchErrorReport {
+            type_0,
+            type_1,
+            generics
+        };
+        Either::Left(TranspileError::new(error))
+    }
+}
+
+struct TypeMismatchErrorReport {
+    type_0: Spanned<String>,
+    type_1: Spanned<String>,
+    generics: Vec<(Spanned<String>, Spanned<String>)>
+}
+
+impl TranspileReport for TypeMismatchErrorReport {
     fn print(&self, context: &TranspileModuleContext) {
-        todo!()
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let error_code = 0034;
+        let key = ErrorMessageKey::new(error_code);
+
+        let message = key.get_massage(text, ErrorMessageType::Message);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.type_0.span.start)
+            .with_code(error_code)
+            .with_message(message);
+
+        builder.add_label(
+            Label::new((module_name, self.type_0.span.clone()))
+                .with_color(Color::Red)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(0))
+                        .replace("%type", self.type_0.value.clone().fg(Color::Red).to_string().as_str())
+                )
+        );
+
+        builder.add_label(
+            Label::new((module_name, self.type_1.span.clone()))
+                .with_color(Color::Red)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(0))
+                        .replace("%type", self.type_1.value.clone().fg(Color::Red).to_string().as_str())
+                )
+        );
+
+        let mut color_generator = ColorGenerator::new();
+        let mut generic_ids = String::new();
+        for i in 0..self.generics.len() {
+            let generic = &self.generics[i];
+            let color = color_generator.next();
+
+            let message_0 = key.get_massage(text, ErrorMessageType::Label(1))
+                .replace("%generic", format!("'{}", i.to_string()).fg(color).to_string().as_str())
+                .replace("%type", generic.0.value.clone().fg(color).to_string().as_str());
+
+            builder.add_label(
+                Label::new((module_name, generic.0.span.clone()))
+                    .with_color(color)
+                    .with_message(message_0)
+            );
+
+            let message_1 = key.get_massage(text, ErrorMessageType::Label(1))
+                .replace("%generic", format!("'{}", i.to_string()).fg(color).to_string().as_str())
+                .replace("%type", generic.1.value.clone().fg(color).to_string().as_str());
+
+            builder.add_label(
+                Label::new((module_name, generic.1.span.clone()))
+                    .with_color(color)
+                    .with_message(message_1)
+            );
+
+            if i != 0 {
+                generic_ids += " ";
+            }
+            generic_ids += format!("'{}", i).fg(color).to_string().as_str();
+        }
+
+        if !self.generics.is_empty() {
+            builder.set_note(key.get_massage(text, ErrorMessageType::Note).replace("%generics", &generic_ids));
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+        builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
     }
 }
 
 
 fn add_error(result: Result<(), TypeMismatchError>, type_environment: &mut TypeEnvironment) {
     if let Err(error) = result {
-        type_environment.type_mismatch_errors.push(error);
+        type_environment.lazy_type_reports.push(Box::new(error));
     }
 }
 
@@ -2038,5 +2221,24 @@ impl TranspileReport for OutOfEnvironmentVariable {
         }
 
         builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+    }
+}
+
+
+
+struct NotFoundTypeElementError {
+    user_type: Type,
+    name: Spanned<String>
+}
+
+impl LazyTypeReport for NotFoundTypeElementError {
+    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+        let error = SimpleError::new(
+            0037,
+            self.name.span.clone(),
+            vec![type_environment.get_type_display_string(&self.user_type), self.name.value.to_string()],
+            vec![(self.name.span.clone(), Color::Red)]
+        );
+        Either::Left(error)
     }
 }

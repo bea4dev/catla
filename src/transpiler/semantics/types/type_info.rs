@@ -28,6 +28,64 @@ pub enum Type {
     Unknown
 }
 
+impl Type {
+    
+    pub(crate) fn get_element_type_with_local_generic(&self, name: &str) -> Option<Type> {
+        fn get_type_with_generics(ty: &Type, generics_define: &Vec<Arc<GenericType>>, local_generics: &Arc<Vec<Type>>) -> Type {
+            match ty {
+                Type::UserType { user_type_info, generics } => {
+                    let mut new_generics = Vec::with_capacity(generics.len());
+                    for generic in generics.iter() {
+                        let ty = get_type_with_generics(generic, generics_define, local_generics);
+                        new_generics.push(ty);
+                    }
+
+                    Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(new_generics) }
+                },
+                Type::Function { function_info, generics } => {
+                    let mut new_generics = Vec::with_capacity(generics.len());
+                    for generic in generics.iter() {
+                        let ty = get_type_with_generics(generic, generics_define, local_generics);
+                        new_generics.push(ty);
+                    }
+
+                    Type::Function { function_info: function_info.clone(), generics: Arc::new(new_generics) }
+                },
+                Type::Generic(generic) => {
+                    // resolve generic id, if local generic exists
+                    match generics_define.iter().position(|element| { element == generic }) {
+                        Some(index) => local_generics.get(index).cloned().unwrap_or(ty.clone()),
+                        _ => ty.clone(),
+                    }
+                },
+                Type::Option(value_type) => get_type_with_generics(&value_type, generics_define, local_generics),
+                Type::Result { value, error } => {
+                    let new_value_type = get_type_with_generics(value, generics_define, local_generics);
+                    let new_error_type = get_type_with_generics(error, generics_define, local_generics);
+
+                    Type::Result { value: Arc::new(new_value_type), error: Arc::new(new_error_type) }
+                },
+                _ => ty.clone()
+            }
+        }
+        
+        match self {
+            Type::UserType { user_type_info, generics } => {
+                let element_type = {
+                    let element_type_map = user_type_info.element_types.lock().unwrap();
+                    element_type_map.get(name).cloned()
+                };
+
+                element_type.map(|ty| { get_type_with_generics(&ty, &user_type_info.generics_define, generics) })
+            },
+            _ => None
+        }
+    }
+
+}
+
+
+
 pub static PRIMITIVE_TYPE_NAMES: &[&str] = &[
     "int",
     "int8",

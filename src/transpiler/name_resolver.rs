@@ -248,7 +248,16 @@ pub(crate) fn name_resolve_program<'allocator>(
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
-                let name_environment = NameEnvironment::new(Some(current_environment_id), Some(EnvironmentSeparatorKind::Function), environment_span.clone(), allocator);
+                let environment_span = match &function_define.block.value {
+                    Some(block) => block.span.clone(),
+                    _ => function_define.span.clone()
+                };
+                let name_environment = NameEnvironment::new(
+                    Some(current_environment_id),
+                    Some(EnvironmentSeparatorKind::Function),
+                    environment_span,
+                    allocator
+                );
 
                 if let Some(generics_define) = &function_define.generics_define {
                     name_resolve_generics_define(generics_define, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);

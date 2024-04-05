@@ -13,9 +13,12 @@ fn main() {
 
     let source = 
 "
-let a = 100.0
-let b = a
-let c = b
+class TestClass<T, U> {
+    let field0: T
+    let field1: U
+}
+
+let a: TestClass<float, bool> = new TestClass { field0: 100, field1: 200 }
 ";
 let source1 = 
 "

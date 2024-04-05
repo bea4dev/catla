@@ -58,7 +58,10 @@ impl Type {
                         _ => ty.clone(),
                     }
                 },
-                Type::Option(value_type) => get_type_with_generics(&value_type, generics_define, local_generics),
+                Type::Option(value_type) => {
+                    let new_value_type = get_type_with_generics(&value_type, generics_define, local_generics);
+                    Type::Option(Arc::new(new_value_type))
+                },
                 Type::Result { value, error } => {
                     let new_value_type = get_type_with_generics(value, generics_define, local_generics);
                     let new_error_type = get_type_with_generics(error, generics_define, local_generics);

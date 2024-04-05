@@ -14,11 +14,13 @@ fn main() {
     let source = 
 "
 class TestClass<T, U> {
-    let field0: T
+    let field0: T?
     let field1: U
+    let field2: TestClass<T, U>
 }
 
-let a: TestClass<float, bool> = new TestClass { field0: 100, field1: 200 }
+let a: TestClass<float, bool> = new TestClass { field0: null, field1: 200 }
+let b: int = a.field2.field0
 ";
 let source1 = 
 "

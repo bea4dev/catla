@@ -1450,12 +1450,10 @@ fn type_inference_primary<'allocator>(
         previous = EntityID::from(primary_right);
     }
 
-    if previous != EntityID::from(ast) {
-        type_environment.set_entity_id_equals(
-            previous,
-            EntityID::from(ast)
-        );
-    }
+    type_environment.set_entity_id_equals(
+        previous,
+        EntityID::from(ast)
+    );
 }
 
 fn type_inference_primary_left<'allocator>(
@@ -1851,6 +1849,7 @@ fn type_inference_primary_left<'allocator>(
     if let Some(mapping_operator) = &ast.mapping_operator {
         type_inference_mapping_operator(
             mapping_operator,
+            EntityID::from(&ast.first_expr),
             user_type_map,
             import_element_map,
             name_resolved_map,
@@ -1895,11 +1894,30 @@ fn type_inference_primary_right<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
-    if let Some(second_expr) = &ast.second_expr {
+    let second_expr_id = if let Some(second_expr) = &ast.second_expr {
+        let user_type = type_environment.resolve_entity_type(previous_primary);
+        let literal_entity_id = EntityID::from(&second_expr.0);
+        let element_type = match user_type.value.get_element_type_with_local_generic(second_expr.0.value) {
+            Some(element_type) => element_type,
+            _ => {
+                let error = NotFoundTypeElementError {
+                    user_type: user_type.value,
+                    name: second_expr.0.clone().map(|name| { name.to_string() })
+                };
+                type_environment.add_lazy_type_error_report(error);
+
+                Type::Unknown
+            }
+        };
+        type_environment.set_entity_type(
+            literal_entity_id,
+            Spanned::new(element_type, second_expr.0.span.clone())
+        );
+
         if let Some(function_call) = &second_expr.1 {
             type_inference_function_call(
                 function_call,
-                previous_primary,
+                literal_entity_id,
                 user_type_map,
                 import_element_map,
                 name_resolved_map,
@@ -1914,12 +1932,19 @@ fn type_inference_primary_right<'allocator>(
                 warnings,
                 context
             );
+
+            EntityID::from(function_call)
+        } else {
+            literal_entity_id
         }
-    }
+    } else {
+        previous_primary
+    };
 
     if let Some(mapping_operator) = &ast.mapping_operator {
         type_inference_mapping_operator(
             mapping_operator,
+            second_expr_id,
             user_type_map,
             import_element_map,
             name_resolved_map,
@@ -1939,6 +1964,7 @@ fn type_inference_primary_right<'allocator>(
 
 fn type_inference_mapping_operator<'allocator>(
     ast: &MappingOperator,
+    previous_entity_id: EntityID,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,

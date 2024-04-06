@@ -2,7 +2,7 @@ use std::{alloc::Allocator, borrow::Borrow, mem, ops::{DerefMut, Range}, sync::{
 
 use ariadne::{Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -122,6 +122,69 @@ impl<'allocator> TypeEnvironment<'allocator> {
         )
     }
 
+    pub fn unify_with_implicit_convert(
+        &mut self,
+        first_entity_id: Spanned<EntityID>,
+        second_entity_id: Spanned<EntityID>,
+        first_is_expr: bool
+    ) -> Result<(), TypeMismatchError> {
+
+        let mut first_resolved = self.resolve_entity_type(first_entity_id.value);
+        let mut second_resolved = self.resolve_entity_type(second_entity_id.value);
+        first_resolved.span = first_entity_id.span.clone();
+        second_resolved.span = second_entity_id.span.clone();
+
+        if first_is_expr {
+            if second_resolved.value.is_option_or_result() && !first_resolved.value.is_option_or_result() {
+                let new_first_type = if let Type::Option(_) = &second_resolved.value {
+                    Type::Option(Arc::new(first_resolved.value))
+                } else if let Type::Result { value: _, error } = &second_resolved.value {
+                    Type::Result { value: Arc::new(first_resolved.value), error: error.clone() }
+                } else {
+                    unreachable!()
+                };
+
+                self.unify_type(
+                    &new_first_type,
+                    &first_resolved.span,
+                    &second_resolved.value,
+                    &second_resolved.span
+                )
+            } else {
+                self.unify_type(
+                    &first_resolved.value,
+                    &first_resolved.span,
+                    &second_resolved.value,
+                    &second_resolved.span
+                )
+            }
+        } else {
+            if first_resolved.value.is_option_or_result() && !second_resolved.value.is_option_or_result() {
+                let new_second_type = if let Type::Option(_) = &first_resolved.value {
+                    Type::Option(Arc::new(second_resolved.value))
+                } else if let Type::Result { value: _, error } = &first_resolved.value {
+                    Type::Result { value: Arc::new(second_resolved.value), error: error.clone() }
+                } else {
+                    unreachable!()
+                };
+
+                self.unify_type(
+                    &first_resolved.value,
+                    &first_resolved.span,
+                    &new_second_type,
+                    &second_resolved.span
+                )
+            } else {
+                self.unify_type(
+                    &first_resolved.value,
+                    &first_resolved.span,
+                    &second_resolved.value,
+                    &second_resolved.span
+                )
+            }
+        }
+    }
+
     pub fn unify_with_return_type(
         &mut self,
         return_expr_entity_id: Spanned<EntityID>
@@ -142,7 +205,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         )
     }
 
-    fn unify_type(
+    pub fn unify_type(
         &mut self,
         first_type: &Type,
         first_span: &Range<usize>,
@@ -458,7 +521,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ImplicitConvert {
+pub(crate) enum ImplicitConvertKind {
     Some,
     Ok,
     Error
@@ -478,7 +541,7 @@ pub(crate) fn type_inference_program<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -828,7 +891,7 @@ fn type_inference_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -987,7 +1050,7 @@ fn type_inference_and_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1069,7 +1132,7 @@ fn type_inference_eqne_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1151,7 +1214,7 @@ fn type_inference_compare_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1233,7 +1296,7 @@ fn type_inference_add_or_sub_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1315,7 +1378,7 @@ fn type_inference_mul_or_div_expression<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1397,7 +1460,7 @@ fn type_inference_factor<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1448,7 +1511,7 @@ fn type_inference_primary<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1514,7 +1577,7 @@ fn type_inference_primary_left<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1767,6 +1830,7 @@ fn type_inference_primary_left<'allocator>(
             }
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {
+            let mut blocks = Vec::new_in(allocator);
             let first_statement = &if_expression.if_statement;
             if let Ok(condition) = &first_statement.condition {
                 type_inference_expression(
@@ -1787,26 +1851,21 @@ fn type_inference_primary_left<'allocator>(
                     warnings,
                     context
                 );
+
+                let condition_type = type_environment.resolve_entity_type(EntityID::from(*condition));
+                
+                let result = type_environment.unify_type(
+                    &Type::Bool,
+                    &condition.get_span(),
+                    &condition_type.value,
+                    &condition_type.span
+                );
+                if result.is_err() {
+                    type_environment.add_lazy_type_error_report(InvalidConditionType { ty: condition_type });
+                }
             }
             if let Some(block) = &first_statement.block.value {
-                type_inference_program(
-                    block.program,
-                    user_type_map,
-                    import_element_map,
-                    name_resolved_map,
-                    module_user_type_map,
-                    module_element_type_map,
-                    module_element_type_maps,
-                    generics_map,
-                    module_entity_type_map,
-                    force_be_expression,
-                    type_environment,
-                    implicit_convert_map,
-                    allocator,
-                    errors,
-                    warnings,
-                    context
-                );
+                blocks.push(block);
             }
 
             for else_if_or_block in if_expression.chain.iter() {
@@ -1832,51 +1891,31 @@ fn type_inference_primary_left<'allocator>(
                                     warnings,
                                     context
                                 );
+
+                                let condition_type = type_environment.resolve_entity_type(EntityID::from(*condition));
+                
+                                let result = type_environment.unify_type(
+                                    &Type::Bool,
+                                    &condition.get_span(),
+                                    &condition_type.value,
+                                    &condition_type.span
+                                );
+                                if result.is_err() {
+                                    type_environment.add_lazy_type_error_report(InvalidConditionType { ty: condition_type });
+                                }
                             }
                             if let Some(block) = &if_statement.block.value {
-                                type_inference_program(
-                                    block.program,
-                                    user_type_map,
-                                    import_element_map,
-                                    name_resolved_map,
-                                    module_user_type_map,
-                                    module_element_type_map,
-                                    module_element_type_maps,
-                                    generics_map,
-                                    module_entity_type_map,
-                                    force_be_expression,
-                                    type_environment,
-                                    implicit_convert_map,
-                                    allocator,
-                                    errors,
-                                    warnings,
-                                    context
-                                );
+                                blocks.push(block);
                             }
                         },
                         Either::Right(block) => {
-                            type_inference_program(
-                                block.program,
-                                user_type_map,
-                                import_element_map,
-                                name_resolved_map,
-                                module_user_type_map,
-                                module_element_type_map,
-                                module_element_type_maps,
-                                generics_map,
-                                module_entity_type_map,
-                                force_be_expression,
-                                type_environment,
-                                implicit_convert_map,
-                                allocator,
-                                errors,
-                                warnings,
-                                context
-                            );
+                            blocks.push(block);
                         }
                     }
                 }
             }
+
+
         },
         PrimaryLeftExpr::LoopExpression(loop_expression) => {
             if let Ok(block) = &loop_expression.block {
@@ -1934,6 +1973,144 @@ fn type_inference_primary_left<'allocator>(
     }
 }
 
+fn type_inference_blocks<'allocator>(
+    blocks: &Vec<&Block, &'allocator Bump>,
+    parent_ast_entity_id: Spanned<EntityID>,
+    user_type_map: &FxHashMap<String, Type>,
+    import_element_map: &FxHashMap<EntityID, String>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
+    module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
+    module_entity_type_map: &FxHashMap<EntityID, Type>,
+    force_be_expression: bool,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
+    allocator: &'allocator Bump,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    let mut first_type = match blocks.first() {
+        Some(block) => {
+            type_inference_program(
+                block.program,
+                user_type_map,
+                import_element_map,
+                name_resolved_map,
+                module_user_type_map,
+                module_element_type_map,
+                module_element_type_maps,
+                generics_map,
+                module_entity_type_map,
+                force_be_expression,
+                type_environment,
+                implicit_convert_map,
+                allocator,
+                errors,
+                warnings,
+                context
+            );
+
+            type_environment.resolve_entity_type(EntityID::from(block.program))
+        },
+        _ => {
+            type_environment.set_entity_type(
+                parent_ast_entity_id.value,
+                Spanned::new(Type::Unknown, parent_ast_entity_id.span)
+            );
+            return;
+        }
+    };
+
+    for i in 1..blocks.len() {
+        let block = blocks[i];
+        
+        type_inference_program(
+            block.program,
+            user_type_map,
+            import_element_map,
+            name_resolved_map,
+            module_user_type_map,
+            module_element_type_map,
+            module_element_type_maps,
+            generics_map,
+            module_entity_type_map,
+            force_be_expression,
+            type_environment,
+            implicit_convert_map,
+            allocator,
+            errors,
+            warnings,
+            context
+        );
+
+        let second_type = type_environment.resolve_entity_type(EntityID::from(block.program));
+
+        let result = type_environment.unify_type(
+            &first_type.value,
+            &first_type.span,
+            &second_type.value,
+            &second_type.span
+        );
+
+        if let Err(error) = result {
+            if error.generics.is_empty() {
+                if let Type::Unit = &second_type.value {
+                    // TODO - replace with std error type
+                    first_type.value = Type::Result {
+                        value: Arc::new(first_type.value.clone()),
+                        error: Arc::new(Type::Unit)
+                    };
+                    for block in blocks[0..=i].iter() {
+                        implicit_convert_map.insert(EntityID::from(block.program), ImplicitConvertKind::Ok);
+                    }
+                } else if second_type.value.is_option_or_result() {
+                    let result = if let Type::Option(value_type) = &second_type.value {
+                        type_environment.unify_type(
+                            &first_type.value,
+                            &first_type.span,
+                            &value_type,
+                            &second_type.span
+                        )
+                    } else if let Type::Result { value, error } = &second_type.value {
+                        type_environment.unify_type(
+                            &first_type.value,
+                            &first_type.span,
+                            &value,
+                            &second_type.span
+                        )
+                    } else {
+                        unreachable!()
+                    };
+
+                    if let Err(_) = result {
+                        type_environment.add_lazy_type_error_report(error);
+                    } else {
+                        first_type.value = second_type.value;
+
+                        let convert_kind = if let Type::Option(_) = &first_type.value {
+                            ImplicitConvertKind::Some
+                        } else {
+                            ImplicitConvertKind::Ok
+                        };
+                        for block in blocks[0..=i].iter() {
+                            implicit_convert_map.insert(EntityID::from(block.program), convert_kind);
+                        }
+                    }
+                } else {
+                    type_environment.add_lazy_type_error_report(error);
+                }
+            } else {
+                type_environment.add_lazy_type_error_report(error);
+            }
+        }
+    }
+
+    type_environment.set_entity_type(parent_ast_entity_id.value, first_type);
+}
+
 fn type_inference_primary_right<'allocator>(
     ast: &PrimaryRight,
     previous_primary: EntityID,
@@ -1946,7 +2123,7 @@ fn type_inference_primary_right<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -2034,7 +2211,7 @@ fn type_inference_mapping_operator<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -2080,7 +2257,7 @@ fn type_inference_function_call<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     type_environment: &mut TypeEnvironment<'allocator>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvert>,
+    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -2328,6 +2505,26 @@ impl LazyTypeReport for NotFoundTypeElementError {
             self.name.span.clone(),
             vec![type_environment.get_type_display_string(&self.user_type), self.name.value.to_string()],
             vec![(self.name.span.clone(), Color::Red)]
+        );
+        Either::Left(error)
+    }
+}
+
+
+
+struct InvalidConditionType {
+    ty: Spanned<Type>
+}
+
+impl LazyTypeReport for InvalidConditionType {
+    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+        let ty = self.ty.clone().map(|ty| { type_environment.get_type_display_string(&ty) });
+        
+        let error = SimpleError::new(
+            0038,
+            self.ty.span.clone(),
+            vec![ty.value],
+            vec![(ty.span, Color::Red)]
         );
         Either::Left(error)
     }

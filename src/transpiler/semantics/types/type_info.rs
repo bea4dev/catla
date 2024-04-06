@@ -85,6 +85,14 @@ impl Type {
         }
     }
 
+    pub fn is_option_or_result(&self) -> bool {
+        match self {
+            Type::Option(_) => true,
+            Type::Result { value: _, error: _ } => true,
+            _ => false
+        }
+    }
+
 }
 
 

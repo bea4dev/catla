@@ -179,6 +179,7 @@ async fn transpile_module(
         module_element_type_maps.insert(module_name.clone(), module_element_type_map);
     }
 
+    let mut implicit_convert_map = FxHashMap::default();
     type_inference_program(
         ast,
         &user_type_map,
@@ -191,6 +192,7 @@ async fn transpile_module(
         &module_entity_type_map,
         false,
         &mut TypeEnvironment::new(&allocator),
+        &mut implicit_convert_map,
         &allocator,
         &mut errors,
         &mut warnings,

@@ -180,6 +180,7 @@ async fn transpile_module(
     }
 
     let mut implicit_convert_map = FxHashMap::default();
+    let mut type_environment = TypeEnvironment::new(&allocator);
     type_inference_program(
         ast,
         &user_type_map,
@@ -191,13 +192,15 @@ async fn transpile_module(
         &generics_map,
         &module_entity_type_map,
         false,
-        &mut TypeEnvironment::new(&allocator),
+        &mut type_environment,
         &mut implicit_convert_map,
         &allocator,
         &mut errors,
         &mut warnings,
         &module_context
     );
+
+    type_environment.collect_lazy_type_report(&mut errors, &mut warnings);
 
     module_context.context.add_error_and_warning(module_name, errors, warnings);
 }

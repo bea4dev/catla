@@ -62,10 +62,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
         match next_entity_id_or_type {
             Either::Left(entity_id) => self.set_entity_type(entity_id, ty),
-            Either::Right(old_type) => {
-                if let Type::Unknown = &old_type.value {
-                    self.entity_type_map.insert(entity_id, Either::Right(ty));
-                }
+            Either::Right(_) => {
+                self.entity_type_map.insert(entity_id, Either::Right(ty));
             }
         }
     }
@@ -81,10 +79,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
         match next_generic_id_or_type {
             Either::Left(generic_id) => self.set_generic_type(generic_id, ty),
-            Either::Right(old_type) => {
-                if let Type::Unknown = &old_type.value {
-                    self.generic_type_map.insert(generic_id, Either::Right(ty));
-                }
+            Either::Right(_) => {
+                self.generic_type_map.insert(generic_id, Either::Right(ty));
             }
         }
     }
@@ -508,7 +504,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         self.lazy_type_reports.push(Box::new(report));
     }
 
-    fn collect_lazy_type_report(&self, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
+    pub(crate) fn collect_lazy_type_report(&self, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>) {
         for report in self.lazy_type_reports.iter() {
             match report.build_report(self) {
                 Either::Left(error) => errors.push(error),
@@ -688,10 +684,14 @@ pub(crate) fn type_inference_program<'allocator>(
                             context
                         );
                     }
+
+                    type_environment.collect_lazy_type_report(errors, warnings);
                 }
             },
             StatementAST::UserTypeDefine(data_struct_define) => {
                 if let Some(block) = &data_struct_define.block.value {
+                    let mut type_environment = TypeEnvironment::new(allocator);
+
                     type_inference_program(
                         block.program,
                         user_type_map,
@@ -702,13 +702,15 @@ pub(crate) fn type_inference_program<'allocator>(
                         generics_map,
                         module_entity_type_map,
                         false,
-                        &mut TypeEnvironment::new(allocator),
+                        &mut type_environment,
                         implicit_convert_map,
                         allocator,
                         errors,
                         warnings,
                         context
                     );
+
+                    type_environment.collect_lazy_type_report(errors, warnings);
                 }
             },
             StatementAST::DropStatement(drop_statement) => {
@@ -856,8 +858,6 @@ pub(crate) fn type_inference_program<'allocator>(
             _ => {}
         }
     }
-
-    type_environment.collect_lazy_type_report(errors, warnings);
 
     if !has_type {
         type_environment.set_entity_type(
@@ -1669,6 +1669,18 @@ fn type_inference_primary_left<'allocator>(
                         EntityID::from(&simple.0),
                         Spanned::new(Type::Option(Arc::new(Type::LocalGeneric(generic_id))), null_keyword_span.clone())
                     );
+                },
+                SimplePrimary::TrueKeyword(keyword_span) => {
+                    type_environment.set_entity_type(
+                        EntityID::from(&simple.0),
+                        Spanned::new(Type::Bool, keyword_span.clone())
+                    );
+                },
+                SimplePrimary::FalseKeyword(keyword_span) => {
+                    type_environment.set_entity_type(
+                        EntityID::from(&simple.0),
+                        Spanned::new(Type::Bool, keyword_span.clone())
+                    );
                 }
             }
 
@@ -1915,7 +1927,25 @@ fn type_inference_primary_left<'allocator>(
                 }
             }
 
-
+            type_inference_blocks(
+                blocks,
+                Spanned::new(EntityID::from(&ast.first_expr), if_expression.span.clone()),
+                user_type_map,
+                import_element_map,
+                name_resolved_map,
+                module_user_type_map,
+                module_element_type_map,
+                module_element_type_maps,
+                generics_map,
+                module_entity_type_map,
+                force_be_expression,
+                type_environment,
+                implicit_convert_map,
+                allocator,
+                errors,
+                warnings,
+                context
+            );
         },
         PrimaryLeftExpr::LoopExpression(loop_expression) => {
             if let Ok(block) = &loop_expression.block {
@@ -1974,7 +2004,7 @@ fn type_inference_primary_left<'allocator>(
 }
 
 fn type_inference_blocks<'allocator>(
-    blocks: &Vec<&Block, &'allocator Bump>,
+    blocks: Vec<&Block, &'allocator Bump>,
     parent_ast_entity_id: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
@@ -2024,6 +2054,10 @@ fn type_inference_blocks<'allocator>(
         }
     };
 
+    type_environment.set_entity_type(parent_ast_entity_id.value, first_type.clone());
+
+    let mut has_implicit_convert = false;
+
     for i in 1..blocks.len() {
         let block = blocks[i];
         
@@ -2046,17 +2080,20 @@ fn type_inference_blocks<'allocator>(
             context
         );
 
-        let second_type = type_environment.resolve_entity_type(EntityID::from(block.program));
+        if !force_be_expression {
+            continue;
+        }
 
-        let result = type_environment.unify_type(
-            &first_type.value,
-            &first_type.span,
-            &second_type.value,
-            &second_type.span
+        let result = type_environment.unify_with_implicit_convert(
+            Spanned::new(parent_ast_entity_id.value, first_type.span.clone()),
+            Spanned::new(EntityID::from(block.program), block.program.span.clone()),
+            false
         );
 
+        let second_type = type_environment.resolve_entity_type(EntityID::from(block.program));
+
         if let Err(error) = result {
-            if error.generics.is_empty() {
+            if error.generics.is_empty() && !has_implicit_convert {
                 if let Type::Unit = &second_type.value {
                     // TODO - replace with std error type
                     first_type.value = Type::Result {
@@ -2066,6 +2103,7 @@ fn type_inference_blocks<'allocator>(
                     for block in blocks[0..=i].iter() {
                         implicit_convert_map.insert(EntityID::from(block.program), ImplicitConvertKind::Ok);
                     }
+                    has_implicit_convert = true;
                 } else if second_type.value.is_option_or_result() {
                     let result = if let Type::Option(value_type) = &second_type.value {
                         type_environment.unify_type(
@@ -2074,7 +2112,7 @@ fn type_inference_blocks<'allocator>(
                             &value_type,
                             &second_type.span
                         )
-                    } else if let Type::Result { value, error } = &second_type.value {
+                    } else if let Type::Result { value, error: _ } = &second_type.value {
                         type_environment.unify_type(
                             &first_type.value,
                             &first_type.span,
@@ -2088,7 +2126,13 @@ fn type_inference_blocks<'allocator>(
                     if let Err(_) = result {
                         type_environment.add_lazy_type_error_report(error);
                     } else {
-                        first_type.value = second_type.value;
+                        first_type.value = if let Type::Option(_) = &second_type.value {
+                            Type::Option(Arc::new(first_type.value))
+                        } else if let Type::Result { value: _, error } = &second_type.value {
+                            Type::Result { value: Arc::new(first_type.value), error: error.clone() }
+                        } else {
+                            unreachable!()
+                        };
 
                         let convert_kind = if let Type::Option(_) = &first_type.value {
                             ImplicitConvertKind::Some
@@ -2098,6 +2142,7 @@ fn type_inference_blocks<'allocator>(
                         for block in blocks[0..=i].iter() {
                             implicit_convert_map.insert(EntityID::from(block.program), convert_kind);
                         }
+                        has_implicit_convert = true;
                     }
                 } else {
                     type_environment.add_lazy_type_error_report(error);
@@ -2108,7 +2153,7 @@ fn type_inference_blocks<'allocator>(
         }
     }
 
-    type_environment.set_entity_type(parent_ast_entity_id.value, first_type);
+    type_environment.set_entity_type(parent_ast_entity_id.value, first_type.clone());
 }
 
 fn type_inference_primary_right<'allocator>(

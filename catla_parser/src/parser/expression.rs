@@ -363,6 +363,8 @@ fn parse_simple_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
         },
         TokenKind::Literal => Some(SimplePrimary::Identifier(parse_literal(cursor).unwrap())),
         TokenKind::Null    => Some(SimplePrimary::NullKeyword(cursor.next().unwrap().span.clone())),
+        TokenKind::True    => Some(SimplePrimary::TrueKeyword(cursor.next().unwrap().span.clone())),
+        TokenKind::False   => Some(SimplePrimary::FalseKeyword(cursor.next().unwrap().span.clone())),
         _ => None
     }
 }

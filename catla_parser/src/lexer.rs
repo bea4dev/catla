@@ -53,6 +53,8 @@ pub enum TokenKind {
     If,
     Else,
     Return,
+    True,
+    False,
     FatArrow,
     ThinArrow,
     Literal,
@@ -99,7 +101,7 @@ impl<'input> Tokenizer<'input> {
     }
 }
 
-const NUMBER_OF_TOKENIZERS: usize = 58;
+const NUMBER_OF_TOKENIZERS: usize = 60;
 
 #[inline(always)]
 fn tokenizers<'input>() -> [Tokenizer<'input>; NUMBER_OF_TOKENIZERS] {
@@ -154,6 +156,8 @@ fn tokenizers<'input>() -> [Tokenizer<'input>; NUMBER_OF_TOKENIZERS] {
         Tokenizer::Keyword(TokenKind::If, "if"),
         Tokenizer::Keyword(TokenKind::Else, "else"),
         Tokenizer::Keyword(TokenKind::Return, "return"),
+        Tokenizer::Keyword(TokenKind::True, "true"),
+        Tokenizer::Keyword(TokenKind::False, "false"),
         Tokenizer::Keyword(TokenKind::FatArrow, "=>"),
         Tokenizer::Keyword(TokenKind::ThinArrow, "->"),
         Tokenizer::Functional(literal_tokenizer),

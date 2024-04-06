@@ -21,6 +21,12 @@ class TestClass<T, U> {
 
 let a: TestClass<float, bool> = new TestClass { field0: null, field1: 200 }
 let b: int = a.field2.field0
+
+let c = if true {
+    100
+} else {
+    null
+}
 ";
 let source1 = 
 "

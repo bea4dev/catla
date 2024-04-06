@@ -53,7 +53,7 @@ bnf_rules!(
     primary             ::= primary_left { primary_right }
     primary_left        ::= ( simple_primary [ function_call ] | new_expression | if_expression | loop_expression ) [ mapping_operator ]
     primary_right       ::= ( "." | "::" ) /* [ line_feed ] */ [ literal [ function_call ] ] [ mapping_operator ]
-    simple_primary      ::= "(" expression ")" | literal | "null"
+    simple_primary      ::= "(" expression ")" | literal | "null" | "true" | "false"
     mapping_operator    ::= "?" | "?" "!" | "!" | "!" "!" | ( "?" | "!" ) ":" block
 
     if_expression       ::= if_statement { "else" ( if_statement | block ) }

@@ -459,7 +459,9 @@ pub enum PrimarySeparatorKind {
 pub enum SimplePrimary<'allocator, 'input> {
     Expression{ expression: ExpressionResult<'allocator, 'input>, error_tokens: Vec<Token<'input>, &'allocator Bump> },
     Identifier(Literal<'input>),
-    NullKeyword(Range<usize>)
+    NullKeyword(Range<usize>),
+    TrueKeyword(Range<usize>),
+    FalseKeyword(Range<usize>)
 }
 
 pub type MappingOperator<'allocator, 'input> = Spanned<MappingOperatorKind<'allocator, 'input>>;

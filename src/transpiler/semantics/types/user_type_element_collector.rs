@@ -7,7 +7,7 @@ use fxhash::FxHashMap;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::type_info::{FunctionType, GenericType, Type};
+use super::type_info::{FunctionDefineInfo, FunctionType, GenericType, Type};
 
 
 pub(crate) fn collect_module_element_types_program(
@@ -463,11 +463,18 @@ fn get_function_type_and_name<'allocator>(
         );
     }
 
+    let define_info = FunctionDefineInfo {
+        module_name: context.module_name.clone(),
+        arguments_span: ast.args.span.clone(),
+        span: ast.span.clone()
+    };
+
     let function_info = Arc::new(FunctionType {
         is_extension: current_user_type_name.is_some(),
         generics_define,
         argument_types,
-        return_type
+        return_type,
+        define_info
     });
 
     let function_type = Type::Function{ function_info, generics: Arc::new(Vec::new()) };

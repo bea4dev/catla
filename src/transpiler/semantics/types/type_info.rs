@@ -1,6 +1,7 @@
 use std::{collections::HashMap, ops::Range, sync::{Arc, Mutex}};
 
 use catla_parser::parser::{DataStructKindEnum, Spanned};
+use derivative::Derivative;
 
 use crate::transpiler::component::EntityID;
 
@@ -30,47 +31,49 @@ pub enum Type {
 
 impl Type {
     
-    pub(crate) fn get_element_type_with_local_generic(&self, name: &str) -> Option<Type> {
-        fn get_type_with_generics(ty: &Type, generics_define: &Vec<Arc<GenericType>>, local_generics: &Arc<Vec<Type>>) -> Type {
-            match ty {
-                Type::UserType { user_type_info, generics } => {
-                    let mut new_generics = Vec::with_capacity(generics.len());
-                    for generic in generics.iter() {
-                        let ty = get_type_with_generics(generic, generics_define, local_generics);
-                        new_generics.push(ty);
-                    }
+    fn get_type_with_generics(ty: &Type, generics_define: &Vec<Arc<GenericType>>, local_generics: &Arc<Vec<Type>>) -> Type {
+        match ty {
+            Type::UserType { user_type_info, generics } => {
+                let mut new_generics = Vec::with_capacity(generics.len());
+                for generic in generics.iter() {
+                    let ty = Type::get_type_with_generics(generic, generics_define, local_generics);
+                    new_generics.push(ty);
+                }
 
-                    Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(new_generics) }
-                },
-                Type::Function { function_info, generics } => {
-                    let mut new_generics = Vec::with_capacity(generics.len());
-                    for generic in generics.iter() {
-                        let ty = get_type_with_generics(generic, generics_define, local_generics);
-                        new_generics.push(ty);
-                    }
+                Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(new_generics) }
+            },
+            Type::Function { function_info, generics } => {
+                let mut new_generics = Vec::with_capacity(generics.len());
+                for generic in generics.iter() {
+                    let ty = Type::get_type_with_generics(generic, generics_define, local_generics);
+                    new_generics.push(ty);
+                }
 
-                    Type::Function { function_info: function_info.clone(), generics: Arc::new(new_generics) }
-                },
-                Type::Generic(generic) => {
-                    // resolve generic id, if local generic exists
-                    match generics_define.iter().position(|element| { element == generic }) {
-                        Some(index) => local_generics.get(index).cloned().unwrap_or(ty.clone()),
-                        _ => ty.clone(),
-                    }
-                },
-                Type::Option(value_type) => {
-                    let new_value_type = get_type_with_generics(&value_type, generics_define, local_generics);
-                    Type::Option(Arc::new(new_value_type))
-                },
-                Type::Result { value, error } => {
-                    let new_value_type = get_type_with_generics(value, generics_define, local_generics);
-                    let new_error_type = get_type_with_generics(error, generics_define, local_generics);
+                Type::Function { function_info: function_info.clone(), generics: Arc::new(new_generics) }
+            },
+            Type::Generic(generic) => {
+                // resolve generic id, if local generic exists
+                match generics_define.iter().position(|element| { element == generic }) {
+                    Some(index) => local_generics.get(index).cloned().unwrap_or(ty.clone()),
+                    _ => ty.clone(),
+                }
+            },
+            Type::Option(value_type) => {
+                let new_value_type = Type::get_type_with_generics(&value_type, generics_define, local_generics);
+                Type::Option(Arc::new(new_value_type))
+            },
+            Type::Result { value, error } => {
+                let new_value_type = Type::get_type_with_generics(value, generics_define, local_generics);
+                let new_error_type = Type::get_type_with_generics(error, generics_define, local_generics);
 
-                    Type::Result { value: Arc::new(new_value_type), error: Arc::new(new_error_type) }
-                },
-                _ => ty.clone()
-            }
+                Type::Result { value: Arc::new(new_value_type), error: Arc::new(new_error_type) }
+            },
+            _ => ty.clone()
         }
+    }
+
+    pub(crate) fn get_element_type_with_local_generic(&self, name: &str) -> Option<Type> {
+        
         
         match self {
             Type::UserType { user_type_info, generics } => {
@@ -79,7 +82,7 @@ impl Type {
                     element_type_map.get(name).cloned()
                 };
 
-                element_type.map(|ty| { get_type_with_generics(&ty, &user_type_info.generics_define, generics) })
+                element_type.map(|ty| { Type::get_type_with_generics(&ty, &user_type_info.generics_define, generics) })
             },
             _ => None
         }
@@ -90,6 +93,17 @@ impl Type {
             Type::Option(_) => true,
             Type::Result { value: _, error: _ } => true,
             _ => false
+        }
+    }
+
+    pub(crate) fn get_indexed_element_type_with_local_generic(&self, index: usize) -> Option<Type> {
+        match self {
+            Type::Function { function_info, generics } => {
+                let element_type = function_info.argument_types.get(index);
+
+                element_type.map(|ty| { Type::get_type_with_generics(ty, &function_info.generics_define, generics) })
+            },
+            _ => None
         }
     }
 
@@ -147,12 +161,22 @@ impl PartialEq for GenericType {
 }
 impl Eq for GenericType {}
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq, Eq)]
 pub struct FunctionType {
     pub is_extension: bool,
     pub generics_define: Vec<Arc<GenericType>>,
     pub argument_types: Vec<Type>,
-    pub return_type: Spanned<Type>
+    pub return_type: Spanned<Type>,
+    #[derivative(PartialEq="ignore")]
+    pub define_info: FunctionDefineInfo
+}
+
+#[derive(Debug)]
+pub struct FunctionDefineInfo {
+    pub module_name: String,
+    pub arguments_span: Range<usize>,
+    pub span: Range<usize>
 }
 
 

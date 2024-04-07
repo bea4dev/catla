@@ -2,7 +2,7 @@ use std::{alloc::Allocator, borrow::Borrow, mem, ops::{DerefMut, Range}, sync::{
 
 use ariadne::{Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -10,6 +10,11 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
 use super::{import_module_collector::get_module_name_from_new_expression, type_info::{FunctionType, GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
+
+
+
+const IF_CONDITION_TYPE_ERROR: usize = 0038;
+const FUNCTION_CALL_TYPE_ERROR: usize = 0039;
 
 
 pub(crate) struct TypeEnvironment<'allocator> {
@@ -1689,6 +1694,7 @@ fn type_inference_primary_left<'allocator>(
                 type_inference_function_call(
                     function_call,
                     EntityID::from(&simple.0),
+                    false,
                     user_type_map,
                     import_element_map,
                     name_resolved_map,
@@ -1764,7 +1770,7 @@ fn type_inference_primary_left<'allocator>(
                 }
             };
 
-            if let Type::UserType { user_type_info, generics } = user_type {
+            if let Type::UserType { user_type_info, generics: _ } = user_type {
                 let number_of_generics = user_type_info.generics_define.len();
                 let mut generics = Vec::with_capacity(number_of_generics);
                 for _ in 0..number_of_generics {
@@ -1874,7 +1880,9 @@ fn type_inference_primary_left<'allocator>(
                     &condition_type.span
                 );
                 if result.is_err() {
-                    type_environment.add_lazy_type_error_report(InvalidConditionType { ty: condition_type });
+                    type_environment.add_lazy_type_error_report(
+                        SimpleTypeError { error_code: IF_CONDITION_TYPE_ERROR, ty: condition_type }
+                    );
                 }
             }
             if let Some(block) = &first_statement.block.value {
@@ -1914,7 +1922,9 @@ fn type_inference_primary_left<'allocator>(
                                     &condition_type.span
                                 );
                                 if result.is_err() {
-                                    type_environment.add_lazy_type_error_report(InvalidConditionType { ty: condition_type });
+                                    type_environment.add_lazy_type_error_report(
+                                        SimpleTypeError { error_code: IF_CONDITION_TYPE_ERROR, ty: condition_type }
+                                    );
                                 }
                             }
                             if let Some(block) = &if_statement.block.value {
@@ -2199,6 +2209,7 @@ fn type_inference_primary_right<'allocator>(
             type_inference_function_call(
                 function_call,
                 literal_entity_id,
+                ast.separator.value == PrimarySeparatorKind::Dot,
                 user_type_map,
                 import_element_map,
                 name_resolved_map,
@@ -2294,6 +2305,7 @@ fn type_inference_mapping_operator<'allocator>(
 fn type_inference_function_call<'allocator>(
     ast: &FunctionCall,
     function: EntityID,
+    is_method_call: bool,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -2309,27 +2321,110 @@ fn type_inference_function_call<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
-    if let Ok(arg_exprs) = &ast.arg_exprs {
-        for arg_expr in arg_exprs.iter() {
-            type_inference_expression(
-                &arg_expr,
-                user_type_map,
-                import_element_map,
-                name_resolved_map,
-                module_user_type_map,
-                module_element_type_map,
-                module_element_type_maps,
-                generics_map,
-                module_entity_type_map,
-                true,
-                type_environment,
-                implicit_convert_map,
-                allocator,
-                errors,
-                warnings,
-                context
-            );
+    let function_type = type_environment.resolve_entity_type(function);
+
+    if let Type::Function { function_info, generics: _ } = function_type.value {
+        let is_method_call = is_method_call && function_info.is_extension;
+        
+        let number_of_generics = function_info.generics_define.len();
+        let mut generics = Vec::with_capacity(number_of_generics);
+        for _ in 0..number_of_generics {
+            let generic_id = type_environment.new_local_generic_id(ast.span.clone());
+            generics.push(Type::LocalGeneric(generic_id));
         }
+
+        let function_type = Type::Function {
+            function_info: function_info.clone(),
+            generics: Arc::new(generics)
+        };
+
+        if let Ok(arg_exprs) = &ast.arg_exprs {
+            let is_method_call = is_method_call && function_info.is_extension;
+
+            let number_of_args = if is_method_call {
+                (function_info.argument_types.len() - 1, arg_exprs.len())
+            } else {
+                (function_info.argument_types.len(), arg_exprs.len())
+            };
+
+            if number_of_args.0 != number_of_args.1 {
+                let error = TranspileError::new(ArgumentCountMismatchError {
+                    defined_count: number_of_args.0,
+                    specified_count: number_of_args.1,
+                    defined_module: function_info.define_info.module_name.clone(),
+                    defined_span: function_info.define_info.arguments_span.clone(),
+                    specified_span: ast.span.clone()
+                });
+                errors.push(error);
+            }
+            
+            let mut define_arg_index = if is_method_call { 1 } else { 0 };
+
+            for arg_expr in arg_exprs.iter() {
+                type_inference_expression(
+                    &arg_expr,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    generics_map,
+                    module_entity_type_map,
+                    true,
+                    type_environment,
+                    implicit_convert_map,
+                    allocator,
+                    errors,
+                    warnings,
+                    context
+                );
+
+                if let Some(defined_arg) = function_type.get_indexed_element_type_with_local_generic(define_arg_index) {
+                    type_environment.set_entity_type(
+                        EntityID::from(ast),
+                        Spanned::new(defined_arg, arg_expr.get_span())
+                    );
+
+                    let result = type_environment.unify_with_implicit_convert(
+                        Spanned::new(EntityID::from(*arg_expr), arg_expr.get_span()),
+                        Spanned::new(EntityID::from(ast), arg_expr.get_span()),
+                        true
+                    );
+
+                    if let Err(error) = result {
+                        
+                    }
+                }
+
+                define_arg_index += 1;
+            }
+        } else {
+            let number_of_args = if is_method_call {
+                function_info.argument_types.len() - 1
+            } else {
+                function_info.argument_types.len()
+            };
+
+            if number_of_args != 0 {
+                let error = TranspileError::new(ArgumentCountMismatchError {
+                    defined_count: number_of_args,
+                    specified_count: 0,
+                    defined_module: function_info.define_info.module_name.clone(),
+                    defined_span: function_info.define_info.arguments_span.clone(),
+                    specified_span: ast.span.clone()
+                });
+                errors.push(error);
+            }
+        }
+    } else {
+        type_environment.add_lazy_type_error_report(
+            SimpleTypeError { error_code: FUNCTION_CALL_TYPE_ERROR, ty: function_type }
+        );
+        type_environment.set_entity_type(
+            EntityID::from(ast),
+            Spanned::new(Type::Unknown, ast.span.clone())
+        );
     }
 }
 
@@ -2558,20 +2653,76 @@ impl LazyTypeReport for NotFoundTypeElementError {
 
 
 
-struct InvalidConditionType {
+struct SimpleTypeError {
+    error_code: usize,
     ty: Spanned<Type>
 }
 
-impl LazyTypeReport for InvalidConditionType {
+impl LazyTypeReport for SimpleTypeError {
     fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
         let ty = self.ty.clone().map(|ty| { type_environment.get_type_display_string(&ty) });
         
         let error = SimpleError::new(
-            0038,
+            self.error_code,
             self.ty.span.clone(),
             vec![ty.value],
             vec![(ty.span, Color::Red)]
         );
         Either::Left(error)
+    }
+}
+
+
+
+struct ArgumentCountMismatchError {
+    defined_count: usize,
+    specified_count: usize,
+    defined_module: String,
+    defined_span: Range<usize>,
+    specified_span: Range<usize>
+}
+
+impl TranspileReport for ArgumentCountMismatchError {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let error_code = 0040;
+        let key = ErrorMessageKey::new(error_code);
+
+        let message = key.get_massage(text, ErrorMessageType::Message);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.specified_span.start)
+            .with_code(error_code)
+            .with_message(message);
+
+        builder.add_label(
+            Label::new((module_name, self.specified_span.clone()))
+                .with_color(Color::Red)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(0))
+                        .replace("%defined", self.defined_count.to_string().fg(Color::Green).to_string().as_str())
+                        .replace("%specified", self.specified_count.to_string().fg(Color::Yellow).to_string().as_str())
+                )
+        );
+
+        builder.add_label(
+            Label::new((&self.defined_module, self.defined_span.clone()))
+                .with_color(Color::Yellow)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(1))
+                        .replace("%defined", self.defined_count.to_string().fg(Color::Green).to_string().as_str())
+                        .replace("%specified", self.specified_count.to_string().fg(Color::Yellow).to_string().as_str())
+                )
+        );
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            builder.set_note(note);
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+        builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
     }
 }

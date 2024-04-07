@@ -13,20 +13,8 @@ fn main() {
 
     let source = 
 "
-class TestClass<T, U> {
-    let field0: T?
-    let field1: U
-    let field2: TestClass<T, U>
-}
-
-let a: TestClass<float, bool> = new TestClass { field0: null, field1: 200 }
-let b: int = a.field2.field0
-
-let c = if true {
-    100
-} else {
-    null
-}
+let a = if true { 100 } else { null }
+let b: int? = 100
 ";
 let source1 = 
 "

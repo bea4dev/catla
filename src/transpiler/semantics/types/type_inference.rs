@@ -479,7 +479,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             },
             Type::Option(value_type) => format!("{}?", self.get_type_display_string(value_type)),
             Type::Result { value, error } => {
-                format!("{}!{}", self.get_type_display_string(value), self.get_type_display_string(error))
+                format!("{}!<{}>", self.get_type_display_string(value), self.get_type_display_string(error))
             },
             Type::Unknown => "unknown".to_string()
         }
@@ -839,9 +839,10 @@ pub(crate) fn type_inference_program<'allocator>(
                                 type_tag.type_info.as_ref().map(|type_info| { type_info.span.clone() }).ok()
                             }).flatten().unwrap_or(variable_define.span.clone());
 
-                            let result = type_environment.unify(
+                            let result = type_environment.unify_with_implicit_convert(
                                 Spanned::new(EntityID::from(*expression), expression.get_span()),
-                                Spanned::new(EntityID::from(variable_define), tag_type_span)
+                                Spanned::new(EntityID::from(variable_define), tag_type_span),
+                                true
                             );
                             add_error(result, type_environment);
                         }

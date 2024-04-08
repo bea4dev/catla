@@ -107,6 +107,16 @@ impl Type {
         }
     }
 
+    pub(crate) fn get_return_type_with_local_generic(&self) -> Option<Type> {
+        match self {
+            Type::Function { function_info, generics } => {
+                let return_type = &function_info.return_type.value;
+                Some(Type::get_type_with_generics(return_type, &function_info.generics_define, generics))
+            },
+            _ => None
+        }
+    }
+
 }
 
 

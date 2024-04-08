@@ -1635,10 +1635,25 @@ fn type_inference_primary_left<'allocator>(
                                 }
                             },
                             DefineKind::UserType => false,
-                            DefineKind::Generics => false,
+                            DefineKind::Generics => false
                         };
 
                         if link {
+                            if resolved.define_info.define_kind != DefineKind::Variable {
+                                let ty = if let Some(user_type) = user_type_map.get(identifier.value) {
+                                    user_type.clone()
+                                } else if let Some(element_type) = module_element_type_map.get(identifier.value) {
+                                    element_type.clone()
+                                } else {
+                                    Type::Unknown
+                                };
+
+                                type_environment.set_entity_type(
+                                    resolved.define_info.entity_id,
+                                    Spanned::new(ty, resolved.define_info.span.clone())
+                                );
+                            }
+
                             type_environment.set_entity_id_equals(
                                 resolved.define_info.entity_id,
                                 EntityID::from(&simple.0)
@@ -2380,10 +2395,10 @@ fn type_inference_function_call<'allocator>(
                     context
                 );
 
-                if let Some(defined_arg) = function_type.get_indexed_element_type_with_local_generic(define_arg_index) {
+                if let Some(defined_arg_type) = function_type.get_indexed_element_type_with_local_generic(define_arg_index) {
                     type_environment.set_entity_type(
                         EntityID::from(ast),
-                        Spanned::new(defined_arg, arg_expr.get_span())
+                        Spanned::new(defined_arg_type, arg_expr.get_span())
                     );
 
                     let result = type_environment.unify_with_implicit_convert(
@@ -2393,7 +2408,7 @@ fn type_inference_function_call<'allocator>(
                     );
 
                     if let Err(error) = result {
-                        
+                        type_environment.add_lazy_type_error_report(error);
                     }
                 }
 
@@ -2417,10 +2432,18 @@ fn type_inference_function_call<'allocator>(
                 errors.push(error);
             }
         }
+
+        let return_type = function_type.get_return_type_with_local_generic().unwrap();
+
+        type_environment.set_entity_type(
+            EntityID::from(ast),
+            Spanned::new(return_type, ast.span.clone())
+        );
     } else {
         type_environment.add_lazy_type_error_report(
             SimpleTypeError { error_code: FUNCTION_CALL_TYPE_ERROR, ty: function_type }
         );
+
         type_environment.set_entity_type(
             EntityID::from(ast),
             Spanned::new(Type::Unknown, ast.span.clone())
@@ -2478,23 +2501,35 @@ impl TranspileReport for TypeMismatchErrorReport {
             .with_code(error_code)
             .with_message(message);
 
-        builder.add_label(
-            Label::new((module_name, self.type_0.span.clone()))
-                .with_color(Color::Red)
-                .with_message(
-                    key.get_massage(text, ErrorMessageType::Label(0))
-                        .replace("%type", self.type_0.value.clone().fg(Color::Red).to_string().as_str())
-                )
-        );
+        if &self.type_0.span == &self.type_1.span {
+            builder.add_label(
+                Label::new((module_name, self.type_0.span.clone()))
+                    .with_color(Color::Red)
+                    .with_message(
+                        key.get_massage(text, ErrorMessageType::Label(2))
+                            .replace("%found", self.type_0.value.clone().fg(Color::Red).to_string().as_str())
+                            .replace("%expected", self.type_1.value.clone().fg(Color::Yellow).to_string().as_str())
+                    )
+            );
+        } else {
+            builder.add_label(
+                Label::new((module_name, self.type_0.span.clone()))
+                    .with_color(Color::Red)
+                    .with_message(
+                        key.get_massage(text, ErrorMessageType::Label(0))
+                            .replace("%type", self.type_0.value.clone().fg(Color::Red).to_string().as_str())
+                    )
+            );
 
-        builder.add_label(
-            Label::new((module_name, self.type_1.span.clone()))
-                .with_color(Color::Red)
-                .with_message(
-                    key.get_massage(text, ErrorMessageType::Label(0))
-                        .replace("%type", self.type_1.value.clone().fg(Color::Red).to_string().as_str())
-                )
-        );
+            builder.add_label(
+                Label::new((module_name, self.type_1.span.clone()))
+                    .with_color(Color::Red)
+                    .with_message(
+                        key.get_massage(text, ErrorMessageType::Label(0))
+                            .replace("%type", self.type_1.value.clone().fg(Color::Red).to_string().as_str())
+                    )
+            );
+        }
 
         let mut color_generator = ColorGenerator::new();
         let mut generic_ids = String::new();

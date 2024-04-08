@@ -15,6 +15,10 @@ fn main() {
 "
 let a = if true { 100 } else { null }
 let b: int? = 100
+
+let c = test(1)
+
+function <T> test(i: T) -> T { return i }
 ";
 let source1 = 
 "

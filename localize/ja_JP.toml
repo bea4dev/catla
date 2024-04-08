@@ -160,6 +160,7 @@ label_1 = "ここで定義されています"
 message = "型が一致しません"
 label_0 = "この型は %type です"
 label_1 = "ここでジェネリック型変数%genericの型を指定しています : %type"
+label_2 = "型 %expected が期待されましたが、見つかった型は %found です"
 note = "ジェネリック型変数 %generics の型をそれぞれ一致させる必要があります"
 [error.0035]
 message = "変数をキャプチャできません"

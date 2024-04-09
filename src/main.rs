@@ -13,12 +13,18 @@ fn main() {
 
     let source = 
 "
-let a = if true { 100 } else { null }
-let b: int? = 100
+class TestClass<T> {
+    let field: T?
 
-let c: int? = test(null)
+    function test() -> TestClass<T> {
+        return new TestClass {
+            field: null
+        }
+    }
+}
 
-function <T> test(i: T?) -> T? { return i }
+let a = new TestClass { field: 100 }
+let b = a.test().field
 ";
 let source1 = 
 "

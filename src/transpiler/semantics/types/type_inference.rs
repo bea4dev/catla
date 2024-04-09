@@ -493,6 +493,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
             Type::Function { function_info, generics } => {
                 let mut name = "function".to_string();
 
+                self.add_generics_info(&mut name, generics);
+
                 name += "(";
                 for i in 0..generics.len() {
                     let argument = &function_info.argument_types[i];
@@ -503,7 +505,11 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 }
                 name += ")";
 
-                self.add_generics_info(&mut name, generics);
+                if function_info.return_type.value != Type::Unit {
+                    name += " -> ";
+                    name += self.get_type_display_string(&function_info.return_type.value).as_str();
+                }
+
                 name
             },
             Type::Generic(generic_type) => generic_type.name.clone(),
@@ -1858,9 +1864,10 @@ fn type_inference_primary_left<'allocator>(
                                     context
                                 );
 
-                                let result = type_environment.unify(
+                                let result = type_environment.unify_with_implicit_convert(
                                     Spanned::new(EntityID::from(field_assign), field_assign.name.span.clone()),
-                                    Spanned::new(EntityID::from(*expression), expression.get_span())
+                                    Spanned::new(EntityID::from(*expression), expression.get_span()),
+                                    false
                                 );
                                 add_error(result, type_environment);
                             }
@@ -2303,6 +2310,16 @@ fn type_inference_primary_right<'allocator>(
             errors,
             warnings,
             context
+        );
+
+        type_environment.set_entity_id_equals(
+            EntityID::from(&mapping_operator.value),
+            EntityID::from(ast)
+        );
+    } else {
+        type_environment.set_entity_id_equals(
+            second_expr_id,
+            EntityID::from(ast)
         );
     }
 }

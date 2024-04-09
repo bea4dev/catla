@@ -49,13 +49,33 @@ impl Type {
                     new_generics.push(ty);
                 }
 
-                Type::Function { function_info: function_info.clone(), generics: Arc::new(new_generics) }
+                let mut argument_types = Vec::with_capacity(function_info.argument_types.len());
+                for argument_type in function_info.argument_types.iter() {
+                    let ty = Type::get_type_with_generics(argument_type, generics_define, local_generics);
+                    argument_types.push(ty);
+                }
+
+                let return_type = Type::get_type_with_generics(
+                    &function_info.return_type.value,
+                    generics_define,
+                    local_generics
+                );
+
+                let function_info = FunctionType {
+                    is_extension: function_info.is_extension,
+                    generics_define: function_info.generics_define.clone(),
+                    argument_types,
+                    return_type: Spanned::new(return_type, function_info.return_type.span.clone()),
+                    define_info: function_info.define_info.clone()
+                };
+
+                Type::Function { function_info: Arc::new(function_info), generics: Arc::new(new_generics) }
             },
             Type::Generic(generic) => {
                 // resolve generic id, if local generic exists
                 match generics_define.iter().position(|element| { element == generic }) {
                     Some(index) => local_generics.get(index).cloned().unwrap_or(ty.clone()),
-                    _ => ty.clone(),
+                    _ => ty.clone()
                 }
             },
             Type::Option(value_type) => {
@@ -73,8 +93,6 @@ impl Type {
     }
 
     pub(crate) fn get_element_type_with_local_generic(&self, name: &str) -> Option<Type> {
-        
-        
         match self {
             Type::UserType { user_type_info, generics } => {
                 let element_type = {
@@ -182,7 +200,7 @@ pub struct FunctionType {
     pub define_info: FunctionDefineInfo
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunctionDefineInfo {
     pub module_name: String,
     pub arguments_span: Range<usize>,

@@ -135,21 +135,38 @@ impl<'allocator> TypeEnvironment<'allocator> {
         first_resolved.span = first_entity_id.span.clone();
         second_resolved.span = second_entity_id.span.clone();
 
+        self.unify_type_with_implicit_convert(
+            &first_resolved.value,
+            &first_resolved.span,
+            &second_resolved.value,
+            &second_resolved.span,
+            first_is_expr
+        )
+    }
+
+    pub fn unify_type_with_implicit_convert(
+        &mut self,
+        first_type: &Type,
+        first_span: &Range<usize>,
+        second_type: &Type,
+        second_span: &Range<usize>,
+        first_is_expr: bool
+    ) -> Result<(), TypeMismatchError> {
         if first_is_expr {
-            if second_resolved.value.is_option_or_result() {
-                let ty = if let Type::LocalGeneric(generic_id) = &first_resolved.value {
+            if second_type.is_option_or_result() {
+                let ty = if let Type::LocalGeneric(generic_id) = first_type {
                     self.resolve_generic_type(*generic_id).1.value
                 } else {
-                    first_resolved.value.clone()
+                    first_type.clone()
                 };
 
-                let new_first_type = if let Type::Option(_) = &second_resolved.value {
+                let new_first_type = if let Type::Option(_) = second_type {
                     if let Type::Option(_) = &ty {
                         ty
                     } else {
                         Type::Option(Arc::new(ty))
                     }
-                } else if let Type::Result { value: _, error } = &second_resolved.value {
+                } else if let Type::Result { value: _, error } = second_type {
                     if let Type::Result { value: _, error: _ } = &ty {
                         ty
                     } else {
@@ -161,33 +178,33 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
                 self.unify_type(
                     &new_first_type,
-                    &first_resolved.span,
-                    &second_resolved.value,
-                    &second_resolved.span
+                    first_span,
+                    second_type,
+                    second_span
                 )
             } else {
                 self.unify_type(
-                    &first_resolved.value,
-                    &first_resolved.span,
-                    &second_resolved.value,
-                    &second_resolved.span
+                    first_type,
+                    first_span,
+                    second_type,
+                    second_span
                 )
             }
         } else {
-            if first_resolved.value.is_option_or_result() {
-                let ty = if let Type::LocalGeneric(generic_id) = &second_resolved.value {
+            if first_type.is_option_or_result() {
+                let ty = if let Type::LocalGeneric(generic_id) = second_type {
                     self.resolve_generic_type(*generic_id).1.value
                 } else {
-                    second_resolved.value.clone()
+                    second_type.clone()
                 };
 
-                let new_second_type = if let Type::Option(_) = &first_resolved.value {
+                let new_second_type = if let Type::Option(_) = &first_type {
                     if let Type::Option(_) = &ty {
                         ty
                     } else {
                         Type::Option(Arc::new(ty))
                     }
-                } else if let Type::Result { value: _, error } = &first_resolved.value {
+                } else if let Type::Result { value: _, error } = &first_type {
                     if let Type::Result { value: _, error: _ } = &ty {
                         ty
                     } else {
@@ -198,17 +215,17 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 };
 
                 self.unify_type(
-                    &first_resolved.value,
-                    &first_resolved.span,
+                    first_type,
+                    first_span,
                     &new_second_type,
-                    &second_resolved.span
+                    second_span
                 )
             } else {
                 self.unify_type(
-                    &first_resolved.value,
-                    &first_resolved.span,
-                    &second_resolved.value,
-                    &second_resolved.span
+                    first_type,
+                    first_span,
+                    second_type,
+                    second_span
                 )
             }
         }
@@ -226,11 +243,12 @@ impl<'allocator> TypeEnvironment<'allocator> {
         let mut return_expr_resolved = self.resolve_entity_type(return_expr_entity_id.value);
         return_expr_resolved.span = return_expr_entity_id.span.clone();
 
-        self.unify_type(
+        self.unify_type_with_implicit_convert(
             &return_type.value,
             &return_type.span,
             &return_expr_resolved.value,
-            &return_expr_resolved.span
+            &return_expr_resolved.span,
+            false
         )
     }
 

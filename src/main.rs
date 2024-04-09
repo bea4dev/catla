@@ -24,7 +24,17 @@ class TestClass<T> {
 }
 
 let a = new TestClass { field: 100 }
-let b = a.test().field
+let b = ok(a.test().field)
+
+function <T> some(value: T) -> T? {
+    return value
+}
+
+function <T> ok(value: T) -> T! {
+    return value
+}
+
+function <T, E> error(error: E) -> T!<E> {}
 ";
 let source1 = 
 "

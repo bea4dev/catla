@@ -1,15 +1,15 @@
-use std::{alloc::Allocator, borrow::Borrow, mem, ops::{DerefMut, Range}, sync::{Arc, Mutex}};
+use std::{alloc::Allocator, ops::Range, sync::Arc};
 
 use ariadne::{Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST};
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::get_module_name_from_new_expression, type_info::{FunctionType, GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
+use super::{import_module_collector::get_module_name_from_new_expression, type_info::{GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
 
 
 
@@ -136,11 +136,25 @@ impl<'allocator> TypeEnvironment<'allocator> {
         second_resolved.span = second_entity_id.span.clone();
 
         if first_is_expr {
-            if second_resolved.value.is_option_or_result() && !first_resolved.value.is_option_or_result() {
+            if second_resolved.value.is_option_or_result() {
+                let ty = if let Type::LocalGeneric(generic_id) = &first_resolved.value {
+                    self.resolve_generic_type(*generic_id).1.value
+                } else {
+                    first_resolved.value.clone()
+                };
+
                 let new_first_type = if let Type::Option(_) = &second_resolved.value {
-                    Type::Option(Arc::new(first_resolved.value))
+                    if let Type::Option(_) = &ty {
+                        ty
+                    } else {
+                        Type::Option(Arc::new(ty))
+                    }
                 } else if let Type::Result { value: _, error } = &second_resolved.value {
-                    Type::Result { value: Arc::new(first_resolved.value), error: error.clone() }
+                    if let Type::Result { value: _, error: _ } = &ty {
+                        ty
+                    } else {
+                        Type::Result { value: Arc::new(ty), error: error.clone() }
+                    }
                 } else {
                     unreachable!()
                 };
@@ -160,11 +174,25 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 )
             }
         } else {
-            if first_resolved.value.is_option_or_result() && !second_resolved.value.is_option_or_result() {
+            if first_resolved.value.is_option_or_result() {
+                let ty = if let Type::LocalGeneric(generic_id) = &second_resolved.value {
+                    self.resolve_generic_type(*generic_id).1.value
+                } else {
+                    second_resolved.value.clone()
+                };
+
                 let new_second_type = if let Type::Option(_) = &first_resolved.value {
-                    Type::Option(Arc::new(second_resolved.value))
+                    if let Type::Option(_) = &ty {
+                        ty
+                    } else {
+                        Type::Option(Arc::new(ty))
+                    }
                 } else if let Type::Result { value: _, error } = &first_resolved.value {
-                    Type::Result { value: Arc::new(second_resolved.value), error: error.clone() }
+                    if let Type::Result { value: _, error: _ } = &ty {
+                        ty
+                    } else {
+                        Type::Result { value: Arc::new(ty), error: error.clone() }
+                    }
                 } else {
                     unreachable!()
                 };
@@ -653,7 +681,7 @@ pub(crate) fn type_inference_program<'allocator>(
             StatementAST::FunctionDefine(function_define) => {
                 let function_type = module_entity_type_map.get(&EntityID::from(function_define)).unwrap();
 
-                if let Type::Function { function_info, generics } = function_type {
+                if let Type::Function { function_info, generics: _ } = function_type {
                     let mut type_environment = TypeEnvironment::new_with_return_type(
                         Either::Right(function_info.return_type.clone()),
                         allocator
@@ -1638,8 +1666,21 @@ fn type_inference_primary_left<'allocator>(
                             DefineKind::Generics => false
                         };
 
-                        if link {
-                            if resolved.define_info.define_kind != DefineKind::Variable {
+                        match resolved.define_info.define_kind {
+                            DefineKind::Variable | DefineKind::FunctionArgument | DefineKind::ClosureArgument => {
+                                if link {
+                                    type_environment.set_entity_id_equals(
+                                        resolved.define_info.entity_id,
+                                        EntityID::from(&simple.0)
+                                    );
+                                } else {
+                                    type_environment.set_entity_type(
+                                        EntityID::from(&simple.0),
+                                        Spanned::new(Type::Unknown, identifier.span.clone())
+                                    );
+                                }
+                            },
+                            _ => {
                                 let ty = if let Some(user_type) = user_type_map.get(identifier.value) {
                                     user_type.clone()
                                 } else if let Some(element_type) = module_element_type_map.get(identifier.value) {
@@ -1652,17 +1693,12 @@ fn type_inference_primary_left<'allocator>(
                                     resolved.define_info.entity_id,
                                     Spanned::new(ty, resolved.define_info.span.clone())
                                 );
-                            }
 
-                            type_environment.set_entity_id_equals(
-                                resolved.define_info.entity_id,
-                                EntityID::from(&simple.0)
-                            );
-                        } else {
-                            type_environment.set_entity_type(
-                                EntityID::from(&simple.0),
-                                Spanned::new(Type::Unknown, identifier.span.clone())
-                            );
+                                type_environment.set_entity_id_equals(
+                                    resolved.define_info.entity_id,
+                                    EntityID::from(&simple.0)
+                                );
+                            }
                         }
                     } else {
                         let text = identifier.value;

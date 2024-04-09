@@ -16,9 +16,9 @@ fn main() {
 let a = if true { 100 } else { null }
 let b: int? = 100
 
-let c = test(1)
+let c: int? = test(null)
 
-function <T> test(i: T) -> T { return i }
+function <T> test(i: T?) -> T? { return i }
 ";
 let source1 = 
 "

@@ -91,13 +91,14 @@ impl<'allocator> NameEnvironment<'allocator> {
                         let mut current_entity_id = parent;
                         loop {
                             let name_environment = &environments[current_entity_id];
-                            if let Some(separator) = name_environment.separator {
-                                separators.push(Spanned::new(separator, name_environment.span.clone()));
-                            }
 
                             match name_environment.name_define_info_map.borrow().get(name) {
                                 Some(define_info) => return Some(FoundDefineInfo { define_info: define_info.clone(), separators }),
                                 _ => {
+                                    if let Some(separator) = name_environment.separator {
+                                        separators.push(Spanned::new(separator, name_environment.span.clone()));
+                                    }
+
                                     let parent = match name_environment.parent {
                                         Some(parent) => parent,
                                         _ => return None,
@@ -268,6 +269,8 @@ pub(crate) fn name_resolve_program<'allocator>(
                 }
 
                 for argument in function_define.args.arguments.iter() {
+                    name_resolve_type_tag(&argument.type_tag, current_environment_id, name_environments, resolved_map, errors, warnings, allocator);
+
                     let entity_id = EntityID::from(argument);
                     let define_info = DefineWithName { entity_id, span: argument.span.clone(), define_kind: DefineKind::FunctionArgument };
                     let name = String::from_str_in(argument.name.value, allocator);

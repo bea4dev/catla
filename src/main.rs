@@ -24,13 +24,17 @@ class TestClass<T> {
 }
 
 let a = new TestClass { field: 100 }
-let b = ok(a.test().field)
+let b = a.test().field
+
+let c = if true { 100 } else { error(0) }
+
+let d = if true { ok(100) } else { error(0) }
 
 function <T> some(value: T) -> T? {
     return value
 }
 
-function <T> ok(value: T) -> T! {
+function <T, E> ok(value: T) -> T!<E> {
     return value
 }
 

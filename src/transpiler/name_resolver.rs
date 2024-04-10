@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::Range};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
-use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeInfo, TypeTag}};
+use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag}};
 use either::Either::{Left, Right};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -748,6 +748,14 @@ fn name_resolve_type_info<'allocator>(
 
     if let Some(generics) = &ast.generics {
         name_resolve_generics(generics, environment_id, name_environments, resolved_map, errors, warnings, allocator);
+    }
+
+    for attribute in ast.type_attributes.iter() {
+        if let TypeAttributeEnum::Result(error_type_generics) = &attribute.value {
+            if let Some(generics) = error_type_generics {
+                name_resolve_generics(generics, environment_id, name_environments, resolved_map, errors, warnings, allocator);
+            }
+        }
     }
 }
 

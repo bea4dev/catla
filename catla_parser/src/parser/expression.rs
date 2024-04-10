@@ -348,6 +348,8 @@ fn parse_primary_right<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
 fn parse_simple_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<SimplePrimary<'allocator, 'input>> {
     return match cursor.current().get_kind() {
         TokenKind::ParenthesisLeft => {
+            let span = Span::start(cursor);
+
             cursor.next();
 
             let expression = parse_expression(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
@@ -359,7 +361,7 @@ fn parse_simple_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
                 Vec::new_in(cursor.allocator)
             };
 
-            Some(SimplePrimary::Expression { expression, error_tokens })
+            Some(SimplePrimary::Expression { expression, error_tokens, span: span.elapsed(cursor) })
         },
         TokenKind::Literal => Some(SimplePrimary::Identifier(parse_literal(cursor).unwrap())),
         TokenKind::Null    => Some(SimplePrimary::NullKeyword(cursor.next().unwrap().span.clone())),

@@ -29,6 +29,8 @@ let b = a.test().field
 let c = if true { 100 } else { error(0) }
 
 let d = if true { ok(100) } else { error(0) }
+let e = d!:{ 100 }
+let f = error(0)!:{ 100 }
 
 function <T> some(value: T) -> T? {
     return value

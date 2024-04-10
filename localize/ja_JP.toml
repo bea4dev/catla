@@ -41,6 +41,10 @@ closure_argument = "クロージャーの引数名"
 user_type = "型名"
 generics = "ジェネリクス要素名"
 
+[expected_type]
+option = "オプション型(?)"
+result = "リザルト型(!)"
+
 [error.0001]
 message = "文が区切られていません"
 label_0 = "文を区切るには改行または';'を使用してください"
@@ -183,5 +187,9 @@ label_0 = "この型は %0 です"
 note = "関数型でないと呼び出すことができません"
 [error.0040]
 message = "引数の数が定義されたものと一致しません"
-label_0 = "ここでは%specified個指定されていますが必要なのは%defined個です"
-label_1 = "引数は%defined個定義されています"
+label_0 = "ここでは %specified 個指定されていますが必要なのは %defined 個です"
+label_1 = "引数は %defined 個定義されています"
+[error.0041]
+message = "マッピング演算子の適用対象の型が正しくありません"
+label_0 = "この適用対象の型は %found です"
+label_1 = "この演算子を適用できるのは %expected のみです"

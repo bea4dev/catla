@@ -418,6 +418,25 @@ pub enum PrimaryLeftExpr<'allocator, 'input> {
     LoopExpression(LoopExpression<'allocator, 'input>)
 }
 
+impl PrimaryLeftExpr<'_, '_> {
+    pub fn get_span(&self) -> Range<usize> {
+        match self {
+            PrimaryLeftExpr::Simple((simple_primary, function_call)) => {
+                if let Some(function_call) = function_call {
+                    let span_start = simple_primary.get_span().start;
+                    let span_end = function_call.span.end;
+                    span_start..span_end
+                } else {
+                    simple_primary.get_span()
+                }
+            },
+            PrimaryLeftExpr::NewExpression(new_expression) => new_expression.span.clone(),
+            PrimaryLeftExpr::IfExpression(if_expression) => if_expression.span.clone(),
+            PrimaryLeftExpr::LoopExpression(loop_expression) => loop_expression.span.clone()
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopExpression<'allocator, 'input> {
     pub block: BlockResult<'allocator, 'input>,
@@ -457,11 +476,29 @@ pub enum PrimarySeparatorKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimplePrimary<'allocator, 'input> {
-    Expression{ expression: ExpressionResult<'allocator, 'input>, error_tokens: Vec<Token<'input>, &'allocator Bump> },
+    Expression{
+        expression: ExpressionResult<'allocator, 'input>,
+        error_tokens: Vec<Token<'input>, &'allocator Bump>,
+        span: Range<usize>
+    },
     Identifier(Literal<'input>),
     NullKeyword(Range<usize>),
     TrueKeyword(Range<usize>),
     FalseKeyword(Range<usize>)
+}
+
+impl SimplePrimary<'_, '_> {
+    pub fn get_span(&self) -> Range<usize> {
+        match self {
+            SimplePrimary::Expression { expression: _, error_tokens: _, span } => {
+                span.clone()
+            },
+            SimplePrimary::Identifier(literal) => literal.span.clone(),
+            SimplePrimary::NullKeyword(span) => span.clone(),
+            SimplePrimary::TrueKeyword(span) => span.clone(),
+            SimplePrimary::FalseKeyword(span) => span.clone()
+        }
+    }
 }
 
 pub type MappingOperator<'allocator, 'input> = Spanned<MappingOperatorKind<'allocator, 'input>>;

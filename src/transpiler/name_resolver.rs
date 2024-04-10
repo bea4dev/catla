@@ -572,7 +572,7 @@ fn name_resolve_primary_left<'allocator>(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expression { expression, error_tokens: _ } => {
+                SimplePrimary::Expression { expression, error_tokens: _, span: _ } => {
                     if let Ok(expression) = expression {
                         name_resolve_expression(&expression, environment_id, name_environments, resolved_map, errors, warnings, allocator);
                     }

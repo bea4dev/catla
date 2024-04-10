@@ -1,6 +1,6 @@
 use std::{alloc::Allocator, ops::Range, sync::Arc};
 
-use ariadne::{Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
+use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
 use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST};
 use either::Either;
@@ -15,6 +15,7 @@ use super::{import_module_collector::get_module_name_from_new_expression, type_i
 
 const IF_CONDITION_TYPE_ERROR: usize = 0038;
 const FUNCTION_CALL_TYPE_ERROR: usize = 0039;
+const MAPPING_OPERATOR_TYPE_ERROR: usize = 0041;
 
 
 pub(crate) struct TypeEnvironment<'allocator> {
@@ -1594,7 +1595,7 @@ fn type_inference_primary<'allocator>(
         context
     );
 
-    let mut previous = EntityID::from(&ast.left);
+    let mut previous = Spanned::new(EntityID::from(&ast.left), ast.left.span.clone());
     for primary_right in ast.chain.iter() {
         type_inference_primary_right(
             primary_right,
@@ -1614,11 +1615,11 @@ fn type_inference_primary<'allocator>(
             warnings,
             context
         );
-        previous = EntityID::from(primary_right);
+        previous = Spanned::new(EntityID::from(primary_right), primary_right.span.clone());
     }
 
     type_environment.set_entity_id_equals(
-        previous,
+        previous.value,
         EntityID::from(ast)
     );
 }
@@ -1644,7 +1645,7 @@ fn type_inference_primary_left<'allocator>(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expression { expression, error_tokens: _ } => {
+                SimplePrimary::Expression { expression, error_tokens: _, span: _ } => {
                     if let Ok(expression) = expression {
                         type_inference_expression(
                             &expression,
@@ -2061,7 +2062,7 @@ fn type_inference_primary_left<'allocator>(
     if let Some(mapping_operator) = &ast.mapping_operator {
         type_inference_mapping_operator(
             mapping_operator,
-            EntityID::from(&ast.first_expr),
+            Spanned::new(EntityID::from(&ast.first_expr), ast.first_expr.get_span()),
             user_type_map,
             import_element_map,
             name_resolved_map,
@@ -2245,7 +2246,7 @@ fn type_inference_blocks<'allocator>(
 
 fn type_inference_primary_right<'allocator>(
     ast: &PrimaryRight,
-    previous_primary: EntityID,
+    previous_primary: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -2262,7 +2263,7 @@ fn type_inference_primary_right<'allocator>(
     context: &TranspileModuleContext
 ) {
     let second_expr_id = if let Some(second_expr) = &ast.second_expr {
-        let user_type = type_environment.resolve_entity_type(previous_primary);
+        let user_type = type_environment.resolve_entity_type(previous_primary.value);
         let literal_entity_id = EntityID::from(&second_expr.0);
         let element_type = match user_type.value.get_element_type_with_local_generic(second_expr.0.value) {
             Some(element_type) => element_type,
@@ -2302,9 +2303,12 @@ fn type_inference_primary_right<'allocator>(
                 context
             );
 
-            EntityID::from(function_call)
+            let span_start = second_expr.0.span.start;
+            let span_end = function_call.span.end;
+
+            Spanned::new(EntityID::from(function_call), span_start..span_end)
         } else {
-            literal_entity_id
+            Spanned::new(literal_entity_id, second_expr.0.span.clone())
         }
     } else {
         previous_primary
@@ -2336,7 +2340,7 @@ fn type_inference_primary_right<'allocator>(
         );
     } else {
         type_environment.set_entity_id_equals(
-            second_expr_id,
+            second_expr_id.value,
             EntityID::from(ast)
         );
     }
@@ -2344,7 +2348,7 @@ fn type_inference_primary_right<'allocator>(
 
 fn type_inference_mapping_operator<'allocator>(
     ast: &MappingOperator,
-    previous_entity_id: EntityID,
+    previous_entity_id: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -2361,12 +2365,45 @@ fn type_inference_mapping_operator<'allocator>(
     context: &TranspileModuleContext
 ) {
     let block = match &ast.value {
-        MappingOperatorKind::NullElvisBlock(block) => block,
-        MappingOperatorKind::ResultElvisBlock(block) => block,
-        _ => return
+        MappingOperatorKind::NullElvisBlock(block) => block.value.as_ref(),
+        MappingOperatorKind::ResultElvisBlock(block) => block.value.as_ref(),
+        _ => None
     };
 
-    if let Some(block) = &block.value {
+    let previous_type = type_environment.resolve_entity_type(previous_entity_id.value);
+
+    let check_result = match &ast.value {
+        MappingOperatorKind::NullPropagation
+         | MappingOperatorKind::NullUnwrap
+         | MappingOperatorKind::NullElvisBlock(_) => {
+            if let Type::Option(value_type) = &previous_type.value {
+                Ok(value_type.as_ref().clone())
+            } else {
+                Err(ExpectedTypeKind::Option)
+            }
+        },
+        
+        MappingOperatorKind::ResultPropagation
+         | MappingOperatorKind::ResultUnwrap
+         | MappingOperatorKind::ResultElvisBlock(_) => {
+            if let Type::Result { value, error } = &previous_type.value {
+                Ok(value.as_ref().clone())
+            } else {
+                Err(ExpectedTypeKind::Result)
+            }
+        }
+    };
+
+    if let Err(expected) = &check_result {
+        let error = UnexpectedTypeError {
+            error_code: MAPPING_OPERATOR_TYPE_ERROR,
+            found_type: Spanned::new(previous_type.value.clone(), previous_entity_id.span.clone()),
+            expected_kind: Spanned::new(*expected, ast.span.clone())
+        };
+        type_environment.add_lazy_type_error_report(error);
+    }
+
+    if let Some(block) = &block {
         type_inference_program(
             block.program,
             user_type_map,
@@ -2385,6 +2422,36 @@ fn type_inference_mapping_operator<'allocator>(
             warnings,
             context
         );
+
+        if let Ok(value_type) = check_result {
+            let span = previous_entity_id.span.start..ast.span.end;
+            type_environment.set_entity_type(
+                EntityID::from(&ast.value),
+                Spanned::new(value_type, span.clone())
+            );
+
+            let result = type_environment.unify_with_implicit_convert(
+                Spanned::new(EntityID::from(&ast.value), span),
+                Spanned::new(EntityID::from(block.program), block.program.span.clone()),
+                false
+            );
+
+            add_error(result, type_environment);
+        }
+    } else {
+        let span = previous_entity_id.span.start..ast.span.end;
+
+        if let Ok(value_type) = check_result {
+            type_environment.set_entity_type(
+                EntityID::from(&ast.value),
+                Spanned::new(value_type, span)
+            );
+        } else {
+            type_environment.set_entity_type(
+                EntityID::from(&ast.value),
+                Spanned::new(previous_type.value, span)
+            );
+        }
     }
 }
 
@@ -2802,7 +2869,7 @@ impl TranspileReport for ArgumentCountMismatchError {
             .with_message(message);
 
         builder.add_label(
-            Label::new((module_name, self.specified_span.clone()))
+            Label::new((module_name.clone(), self.specified_span.clone()))
                 .with_color(Color::Red)
                 .with_message(
                     key.get_massage(text, ErrorMessageType::Label(0))
@@ -2812,12 +2879,105 @@ impl TranspileReport for ArgumentCountMismatchError {
         );
 
         builder.add_label(
-            Label::new((&self.defined_module, self.defined_span.clone()))
+            Label::new((self.defined_module.clone(), self.defined_span.clone()))
                 .with_color(Color::Yellow)
                 .with_message(
                     key.get_massage(text, ErrorMessageType::Label(1))
                         .replace("%defined", self.defined_count.to_string().fg(Color::Green).to_string().as_str())
                         .replace("%specified", self.specified_count.to_string().fg(Color::Yellow).to_string().as_str())
+                )
+        );
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            builder.set_note(note);
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+        let defined_module_context = context.context.get_module_context(&self.defined_module).unwrap();
+
+        let source_list = vec![
+            (module_name.clone(), context.source_code.code.as_str()),
+            (self.defined_module.clone(), defined_module_context.source_code.code.as_str())
+        ];
+
+        builder.finish().print(sources(source_list)).unwrap();
+    }
+}
+
+
+
+struct UnexpectedTypeError {
+    error_code: usize,
+    found_type: Spanned<Type>,
+    expected_kind: Spanned<ExpectedTypeKind>
+}
+
+impl LazyTypeReport for UnexpectedTypeError {
+    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+        let report = UnexpectedTypeErrorReport {
+            error_code: self.error_code,
+            found_type: self.found_type.clone().map(|ty| { type_environment.get_type_display_string(&ty) }),
+            expected_kind: self.expected_kind.clone()
+        };
+        Either::Left(TranspileError::new(report))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ExpectedTypeKind {
+    Option,
+    Result
+}
+
+impl ExpectedTypeKind {
+    fn get_key(&self) -> String {
+        format!("expected_type.{}", match self {
+            ExpectedTypeKind::Option => "option",
+            ExpectedTypeKind::Result => "result"
+        })
+    }
+}
+
+struct UnexpectedTypeErrorReport {
+    error_code: usize,
+    found_type: Spanned<String>,
+    expected_kind: Spanned<ExpectedTypeKind>
+}
+
+impl TranspileReport for UnexpectedTypeErrorReport {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let key = ErrorMessageKey::new(self.error_code);
+
+        let message = key.get_massage(text, ErrorMessageType::Message);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.found_type.span.start)
+            .with_code(self.error_code)
+            .with_message(message);
+
+        let expected_text = text.get_text(self.expected_kind.value.get_key());
+
+        builder.add_label(
+            Label::new((module_name, self.found_type.span.clone()))
+                .with_color(Color::Red)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(0))
+                        .replace("%found", self.found_type.value.clone().fg(Color::Red).to_string().as_str())
+                        .replace("%expected", expected_text.as_str().fg(Color::Green).to_string().as_str())
+                )
+        );
+
+        builder.add_label(
+            Label::new((module_name, self.expected_kind.span.clone()))
+                .with_color(Color::Yellow)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(1))
+                        .replace("%found", self.found_type.value.clone().fg(Color::Red).to_string().as_str())
+                        .replace("%expected", expected_text.as_str().fg(Color::Green).to_string().as_str())
                 )
         );
 

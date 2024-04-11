@@ -167,9 +167,12 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     } else {
                         Type::Option(Arc::new(ty))
                     }
-                } else if let Type::Result { value: _, error } = second_type {
+                } else if let Type::Result { value, error } = second_type {
                     if let Type::Result { value: _, error: _ } = &ty {
                         ty
+                    } else if let Type::Unit = &ty {
+                        // TODO - replace with std error type
+                        Type::Result { value: value.clone(), error: Arc::new(ty) }
                     } else {
                         Type::Result { value: Arc::new(ty), error: error.clone() }
                     }
@@ -205,9 +208,12 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     } else {
                         Type::Option(Arc::new(ty))
                     }
-                } else if let Type::Result { value: _, error } = &first_type {
+                } else if let Type::Result { value, error } = &first_type {
                     if let Type::Result { value: _, error: _ } = &ty {
                         ty
+                    } else if let Type::Unit = &ty {
+                        // TODO - replace with std error type
+                        Type::Result { value: value.clone(), error: Arc::new(ty) }
                     } else {
                         Type::Result { value: Arc::new(ty), error: error.clone() }
                     }

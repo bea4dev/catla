@@ -32,6 +32,8 @@ let d = if true { ok(100) } else { error(0) }
 let e = d!:{ 100 }
 let f = error(0)!:{ 100 }
 
+let g = if true { 100 } else {  }
+
 function <T> some(value: T) -> T? {
     return value
 }

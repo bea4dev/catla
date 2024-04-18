@@ -69,6 +69,12 @@ impl TranspileReport for TranspileWarning {
 pub struct SourceCode {
     pub code: String,
     pub module_name: String,
+    pub resource_type: ResourceType
+}
+
+pub enum ResourceType {
+    SourceCode,
+    Package
 }
 
 

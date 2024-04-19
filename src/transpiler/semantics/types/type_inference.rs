@@ -9,7 +9,7 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::get_module_name_from_new_expression, type_info::{GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{GenericType, LocalGenericID, Type}, user_type_element_collector::get_type};
 
 
 
@@ -1628,33 +1628,24 @@ fn type_inference_primary<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
-    let mut mappings = Vec::new_in(allocator);
-
-    type_inference_primary_left(
-        &ast.left,
-        user_type_map,
-        import_element_map,
+    let module_name_result = get_module_name_from_primary(
+        ast,
         name_resolved_map,
-        module_user_type_map,
-        module_element_type_map,
-        module_element_type_maps,
-        generics_map,
-        module_entity_type_map,
-        force_be_expression,
-        type_environment,
-        implicit_convert_map,
-        &mut mappings,
-        allocator,
-        errors,
-        warnings,
+        import_element_map,
         context
     );
 
-    let mut previous = Spanned::new(EntityID::from(&ast.left), ast.left.span.clone());
-    for primary_right in ast.chain.iter() {
-        type_inference_primary_right(
-            primary_right,
-            previous,
+    if let Some((module_name, count)) = module_name_result {
+        if count < ast.chain.len() {
+            let user_type_map = module_user_type_map.get(&module_name).unwrap();
+            let element_type_map = module_element_type_maps.get(&module_name).unwrap();
+            
+        }
+    } else {
+        let mut mappings = Vec::new_in(allocator);
+
+        type_inference_primary_left(
+            &ast.left,
             user_type_map,
             import_element_map,
             name_resolved_map,
@@ -1663,6 +1654,7 @@ fn type_inference_primary<'allocator>(
             module_element_type_maps,
             generics_map,
             module_entity_type_map,
+            force_be_expression,
             type_environment,
             implicit_convert_map,
             &mut mappings,
@@ -1671,7 +1663,30 @@ fn type_inference_primary<'allocator>(
             warnings,
             context
         );
-        previous = Spanned::new(EntityID::from(primary_right), primary_right.span.clone());
+    
+        let mut previous = Spanned::new(EntityID::from(&ast.left), ast.left.span.clone());
+        for primary_right in ast.chain.iter() {
+            type_inference_primary_right(
+                primary_right,
+                previous,
+                user_type_map,
+                import_element_map,
+                name_resolved_map,
+                module_user_type_map,
+                module_element_type_map,
+                module_element_type_maps,
+                generics_map,
+                module_entity_type_map,
+                type_environment,
+                implicit_convert_map,
+                &mut mappings,
+                allocator,
+                errors,
+                warnings,
+                context
+            );
+            previous = Spanned::new(EntityID::from(primary_right), primary_right.span.clone());
+        }
     }
 
     type_environment.set_entity_id_equals(

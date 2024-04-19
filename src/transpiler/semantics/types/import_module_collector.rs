@@ -304,59 +304,79 @@ fn collect_import_module_primary(
     context: &TranspileModuleContext
 ) {
     collect_import_module_primary_left(&ast.left, import_element_map, name_resolved_map, errors,warnings, context);
-    let mut has_double_colon = false;
     for primary_right in ast.chain.iter() {
-        if primary_right.separator.value == PrimarySeparatorKind::DoubleColon {
-            has_double_colon = true;
-        }
         collect_import_module_primary_right(primary_right, import_element_map, name_resolved_map, errors,warnings, context);
     }
 
-    if ast.left.mapping_operator.is_none() && has_double_colon {
+    let module_name = get_module_name_from_primary(
+        ast,
+        name_resolved_map,
+        import_element_map,
+        context
+    ).map(|(module_name, _)| { module_name });
+
+    if let Some(module_name) = module_name {
+        import_element_map.insert(EntityID::from(ast), module_name);
+    }
+}
+
+pub(crate) fn get_module_name_from_primary(
+    ast: &Primary,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    import_element_map: &FxHashMap<EntityID, String>,
+    context: &TranspileModuleContext
+) -> Option<(String, usize)> {
+    if ast.left.mapping_operator.is_none() {
         if let PrimaryLeftExpr::Simple(simple) = &ast.left.first_expr {
             if simple.1.is_none() {
                 if let SimplePrimary::Identifier(literal) = &simple.0 {
                     let mut module_name = if let Some(resolved) = name_resolved_map.get(&EntityID::from(literal)) {
                         let import_entity_id = resolved.define_info.entity_id;
-                        import_element_map.get(&import_entity_id).unwrap().clone()
+                        import_element_map.get(&import_entity_id).cloned().unwrap_or_else(|| { literal.value.to_string() })
                     } else {
                         literal.value.to_string()
                     };
-                    let mut last_name = "";
 
-                    for i in 0..ast.chain.len() - 1 {
+                    if !context.context.source_code_provider.exists_source_code_or_package(&module_name) {
+                        return None;
+                    }
+
+                    let mut count = 0;
+                    for i in 0..ast.chain.len().checked_sub(1).unwrap_or_default() {
                         let right_primary = &ast.chain[i];
 
                         if right_primary.separator.value != PrimarySeparatorKind::DoubleColon {
+                            if i == 0 {
+                                return None;
+                            }
                             break;
                         }
+
                         if let Some(expr) = &right_primary.second_expr {
                             if expr.1.is_some() {
                                 break;
                             }
                             module_name += "::";
                             module_name += expr.0.value;
-                            last_name = expr.0.value;
+                            
+                            if !context.context.source_code_provider.exists_source_code_or_package(&module_name) {
+                                return Some((
+                                    module_name[0..(module_name.len() - expr.0.value.len() - 2)].to_string(),
+                                    count
+                                ));
+                            }
                         } else {
                             break;
                         }
-                    }
 
-                    if context.context.source_code_provider.exists_source_code_or_package(&module_name) {
-                        import_element_map.insert(EntityID::from(ast), module_name);
-                    } else if !last_name.is_empty() {
-                        let start = module_name.len() - (2 + last_name.len()) - 1;
-                        let end = module_name.len() - 1;
-                        module_name.replace_range(start..end, "");
-                        
-                        if context.context.source_code_provider.exists_source_code_or_package(&module_name) {
-                            import_element_map.insert(EntityID::from(ast), module_name);
-                        }
+                        count += 1;
                     }
                 }
             }
         }
     }
+
+    None
 }
 
 fn collect_import_module_primary_left(

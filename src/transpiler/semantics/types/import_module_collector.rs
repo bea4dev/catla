@@ -346,9 +346,6 @@ pub(crate) fn get_module_name_from_primary(
                         let right_primary = &ast.chain[i];
 
                         if right_primary.separator.value != PrimarySeparatorKind::DoubleColon {
-                            if i == 0 {
-                                return None;
-                            }
                             break;
                         }
 
@@ -371,6 +368,8 @@ pub(crate) fn get_module_name_from_primary(
 
                         count += 1;
                     }
+
+                    return Some((module_name, count));
                 }
             }
         }

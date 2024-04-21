@@ -1636,159 +1636,66 @@ fn type_inference_primary<'allocator>(
     );
 
     if let Some((module_name, count)) = module_name_result {
-        if count < ast.chain.len() {
-            let next_primary = &ast.chain[count];
+        if ast.chain.is_empty() {
+            let span = ast.left.span.clone();
+            let next_span = span.end..span.end;
 
-            if next_primary.separator.value != PrimarySeparatorKind::DoubleColon {
-                let span = next_primary.separator.span.clone();
+            let error = SimpleError::new(
+                0043,
+                next_span.clone(),
+                vec![],
+                vec![(span, Color::Yellow), (next_span.clone(), Color::Red)]
+            );
+            let mut error = TranspileError::new(error);
 
-                let error = SimpleError::new(
-                    0042,
-                    span.clone(),
-                    vec![],
-                    vec![(next_primary.span.clone(), Color::Yellow), (span, Color::Red)]
-                );
-                errors.push(TranspileError::new(error));
+            let advice = Advice::Add {
+                add: "::element_name_here".to_string(),
+                position: next_span.end,
+                message_override: Some("error.0043.advice")
+            };
+            error.add_advice(context.module_name.clone(), advice);
 
-                type_environment.set_entity_type(
-                    EntityID::from(ast),
-                    Spanned::new(Type::Unknown, ast.span.clone())
-                );
+            errors.push(error);
 
-                return;
-            }
+            type_environment.set_entity_type(
+                EntityID::from(ast),
+                Spanned::new(Type::Unknown, ast.span.clone())
+            );
 
-            if let Some(second_expr) = &next_primary.second_expr {
-                let import_user_type_map = module_user_type_map.get(&module_name).unwrap();
-                let element_type_map = module_element_type_maps.get(&module_name).unwrap();
+            return;
+        }
 
-                let ty = if let Some(user_type) = import_user_type_map.get(second_expr.0.value) {
-                    user_type.clone()
-                } else if let Some(element_type) = element_type_map.get(second_expr.0.value) {
-                    element_type.clone()
-                } else {
-                    let span = second_expr.0.span.clone();
-                    let first_span_start = ast.left.span.start;
-                    let first_span_end = if count == 0 {
-                        ast.left.span.end
-                    } else {
-                        ast.chain[count - 1].span.end
-                    };
+        let next_primary = &ast.chain[count];
 
-                    let error = SimpleError::new(
-                        0044,
-                        span.clone(),
-                        vec![],
-                        vec![(first_span_start..first_span_end, Color::Yellow), (span, Color::Red)]
-                    );
-                    errors.push(error);
+        if next_primary.separator.value != PrimarySeparatorKind::DoubleColon {
+            let span = next_primary.separator.span.clone();
 
-                    Type::Unknown
-                };
+            let error = SimpleError::new(
+                0042,
+                span.clone(),
+                vec![],
+                vec![(next_primary.span.clone(), Color::Yellow), (span, Color::Red)]
+            );
+            errors.push(TranspileError::new(error));
 
-                type_environment.set_entity_type(
-                    EntityID::from(&second_expr.0),
-                    Spanned::new(ty, second_expr.0.span.clone())
-                );
+            type_environment.set_entity_type(
+                EntityID::from(ast),
+                Spanned::new(Type::Unknown, ast.span.clone())
+            );
 
-                let mut mappings = Vec::new_in(allocator);
+            return;
+        }
 
-                let entity_id = if let Some(function_call) = &second_expr.1 {
-                    type_inference_function_call(
-                        function_call,
-                        EntityID::from(&second_expr.0),
-                        false,
-                        user_type_map,
-                        import_element_map,
-                        name_resolved_map,
-                        module_user_type_map,
-                        module_element_type_map,
-                        module_element_type_maps,
-                        generics_map,
-                        module_entity_type_map,
-                        type_environment,
-                        implicit_convert_map,
-                        allocator,
-                        errors,
-                        warnings,
-                        context
-                    );
+        if let Some(second_expr) = &next_primary.second_expr {
+            let import_user_type_map = module_user_type_map.get(&module_name).unwrap();
+            let element_type_map = module_element_type_maps.get(&module_name).unwrap();
 
-                    Spanned::new(
-                        EntityID::from(function_call),
-                        second_expr.0.span.start..function_call.span.end
-                    )
-                } else {
-                    Spanned::new(
-                        EntityID::from(&second_expr.0),
-                        second_expr.0.span.clone()
-                    )
-                };
-
-                let mut previous = if let Some(mapping_operator) = &next_primary.mapping_operator {
-                    type_inference_mapping_operator(
-                        mapping_operator,
-                        entity_id,
-                        user_type_map,
-                        import_element_map,
-                        name_resolved_map,
-                        module_user_type_map,
-                        module_element_type_map,
-                        module_element_type_maps,
-                        generics_map,
-                        module_entity_type_map,
-                        type_environment,
-                        implicit_convert_map,
-                        &mut mappings,
-                        allocator,
-                        errors,
-                        warnings,
-                        context
-                    );
-
-                    Spanned::new(
-                        EntityID::from(&mapping_operator.value),
-                        second_expr.0.span.start..mapping_operator.span.end
-                    )
-                } else {
-                    entity_id
-                };
-
-                for i in (count + 1)..ast.chain.len() {
-                    let primary_right = &ast.chain[i];
-
-                    type_inference_primary_right(
-                        primary_right,
-                        previous,
-                        user_type_map,
-                        import_element_map,
-                        name_resolved_map,
-                        module_user_type_map,
-                        module_element_type_map,
-                        module_element_type_maps,
-                        generics_map,
-                        module_entity_type_map,
-                        type_environment,
-                        implicit_convert_map,
-                        &mut mappings,
-                        allocator,
-                        errors,
-                        warnings,
-                        context
-                    );
-
-                    previous = Spanned::new(
-                        EntityID::from(primary_right),
-                        primary_right.span.clone()
-                    );
-
-                    type_environment.set_entity_id_equals(
-                        previous.value,
-                        EntityID::from(ast)
-                    );
-                }
+            let ty = if let Some(user_type) = import_user_type_map.get(second_expr.0.value) {
+                user_type.clone()
+            } else if let Some(element_type) = element_type_map.get(second_expr.0.value) {
+                element_type.clone()
             } else {
-                let span = next_primary.span.clone();
+                let span = second_expr.0.span.clone();
                 let first_span_start = ast.left.span.start;
                 let first_span_end = if count == 0 {
                     ast.left.span.end
@@ -1797,27 +1704,147 @@ fn type_inference_primary<'allocator>(
                 };
 
                 let error = SimpleError::new(
-                    0043,
+                    0044,
                     span.clone(),
                     vec![],
                     vec![(first_span_start..first_span_end, Color::Yellow), (span, Color::Red)]
                 );
-                let mut error = TranspileError::new(error);
-
-                let advice = Advice::Add {
-                    add: "element_name_here".to_string(),
-                    position: next_primary.separator.span.end,
-                    message_override: Some("error.0043.advice")
-                };
-                error.add_advice(context.module_name.clone(), advice);
-
                 errors.push(error);
 
-                type_environment.set_entity_type(
-                    EntityID::from(ast),
-                    Spanned::new(Type::Unknown, ast.span.clone())
+                Type::Unknown
+            };
+
+            type_environment.set_entity_type(
+                EntityID::from(&second_expr.0),
+                Spanned::new(ty, second_expr.0.span.clone())
+            );
+
+            let mut mappings = Vec::new_in(allocator);
+
+            let entity_id = if let Some(function_call) = &second_expr.1 {
+                type_inference_function_call(
+                    function_call,
+                    EntityID::from(&second_expr.0),
+                    false,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    generics_map,
+                    module_entity_type_map,
+                    type_environment,
+                    implicit_convert_map,
+                    allocator,
+                    errors,
+                    warnings,
+                    context
+                );
+
+                Spanned::new(
+                    EntityID::from(function_call),
+                    second_expr.0.span.start..function_call.span.end
+                )
+            } else {
+                Spanned::new(
+                    EntityID::from(&second_expr.0),
+                    second_expr.0.span.clone()
+                )
+            };
+
+            let mut previous = if let Some(mapping_operator) = &next_primary.mapping_operator {
+                type_inference_mapping_operator(
+                    mapping_operator,
+                    entity_id,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    generics_map,
+                    module_entity_type_map,
+                    type_environment,
+                    implicit_convert_map,
+                    &mut mappings,
+                    allocator,
+                    errors,
+                    warnings,
+                    context
+                );
+
+                Spanned::new(
+                    EntityID::from(&mapping_operator.value),
+                    second_expr.0.span.start..mapping_operator.span.end
+                )
+            } else {
+                entity_id
+            };
+
+            for i in (count + 1)..ast.chain.len() {
+                let primary_right = &ast.chain[i];
+
+                type_inference_primary_right(
+                    primary_right,
+                    previous,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    generics_map,
+                    module_entity_type_map,
+                    type_environment,
+                    implicit_convert_map,
+                    &mut mappings,
+                    allocator,
+                    errors,
+                    warnings,
+                    context
+                );
+
+                previous = Spanned::new(
+                    EntityID::from(primary_right),
+                    primary_right.span.clone()
                 );
             }
+
+            type_environment.set_entity_id_equals(
+                previous.value,
+                EntityID::from(ast)
+            );
+        } else {
+            let span = next_primary.span.clone();
+            let first_span_start = ast.left.span.start;
+            let first_span_end = if count == 0 {
+                ast.left.span.end
+            } else {
+                ast.chain[count - 1].span.end
+            };
+
+            let error = SimpleError::new(
+                0043,
+                span.clone(),
+                vec![],
+                vec![(first_span_start..first_span_end, Color::Yellow), (span, Color::Red)]
+            );
+            let mut error = TranspileError::new(error);
+
+            let advice = Advice::Add {
+                add: "element_name_here".to_string(),
+                position: next_primary.separator.span.end,
+                message_override: Some("error.0043.advice")
+            };
+            error.add_advice(context.module_name.clone(), advice);
+
+            errors.push(error);
+
+            type_environment.set_entity_type(
+                EntityID::from(ast),
+                Spanned::new(Type::Unknown, ast.span.clone())
+            );
         }
     } else {
         let mut mappings = Vec::new_in(allocator);
@@ -2724,6 +2751,11 @@ fn type_inference_mapping_operator<'allocator>(
             );
 
             add_error(result, type_environment);
+        } else {
+            type_environment.set_entity_type(
+                EntityID::from(&ast.value),
+                Spanned::new(Type::Unknown, ast.span.clone())
+            );
         }
     } else {
         let span = previous_entity_id.span.start..ast.span.end;

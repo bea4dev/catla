@@ -662,7 +662,7 @@ impl<'allocator, 'input> TokenCursor<'allocator, 'input> {
     }
 
     fn peek_prev(&self) -> Option<&Token<'input>> {
-        return self.tokens.get(self.current_position - 1);
+        return self.tokens.get(self.current_position.overflowing_sub(1).0);
     }
 
 }

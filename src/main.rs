@@ -13,6 +13,8 @@ fn main() {
 
     let source = 
 "
+import test::test_module2
+
 class TestClass<T> {
     let field: T?
 
@@ -32,6 +34,8 @@ let d = if true { ok(100) } else { error(0) }
 let e = d!:{ 100 }
 let f = error(0)!:{ 100 }
 
+let g = test_module2::test?:{ 0 }
+
 function <T> some(value: T) -> T? {
     return value
 }
@@ -44,7 +48,7 @@ function <T, E> error(error: E) -> T!<E> {}
 ";
 let source1 = 
 "
-
+static let test: int? = null
 ";
 
     let settings = TranspileSettings {

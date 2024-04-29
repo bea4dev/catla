@@ -1,6 +1,4 @@
 use bnf_rules::bnf_rules_macro::bnf_rules;
-use bnf_rules::bnf_rules_parser::lexer::{*};
-use bnf_rules::bnf_rules_parser::parser::{*};
 use proc_macro_regex::regex;
 
 // This is an LR(1) parser generator, used for maintain quality.

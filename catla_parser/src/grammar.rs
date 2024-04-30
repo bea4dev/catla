@@ -4,14 +4,14 @@ use proc_macro_regex::regex;
 // This is an LR(1) parser generator, used for maintain quality.
 // If the specified grammar is ambiguous, compilation is aborted with conflict.
 // Usage : https://github.com/bea4dev/bnf_rules
-bnf_rules!(
+bnf_rules!{
     source              ::= program
 
     program             ::= [ statement ] { end_of_statement [ statement ] }
     statement           ::= assignment | exchange_statement | import_statement |
-                            define_with_attr | drop_statement | expression
+                            define_with_attr | drop_statement | expression | impl_interface
 
-    define_with_attr    ::= statement_attribute ( function_define | data_struct_define | variable_define )
+    define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define )
 
     function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments [ function_type_tag ] [ line_feed ] block
     function_arguments  ::= "(" [ line_feed ] [ function_argument [ line_feed ] ] { "," [ line_feed ] [ function_argument ] } ")"
@@ -21,8 +21,12 @@ bnf_rules!(
 
     statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" }
 
-    data_struct_define  ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] [ super_type_info ] block
+    user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] [ super_type_info ] block
     super_type_info     ::= ":" [ line_feed ] type_info [ line_feed ] { "," [ type_info [ line_feed ] ] }
+    
+    impl_interface      ::= "implements" generics_define user_type "for" user_type block
+
+    user_type           ::= literal { "::" [ line_feed ] literal }
     
     generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
     generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]
@@ -64,7 +68,7 @@ bnf_rules!(
 
     function_call       ::= [ ":" generics_info ] "(" [ [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
 
-    new_expression      ::= "new" [ "acyclic" ] literal { "::" [ line_feed ] literal } field_assign
+    new_expression      ::= "new" [ "acyclic" ] user_type field_assign
     field_assign        ::= "{" [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] } "}"
 
     return_expression   ::= "return" [ expression ]
@@ -78,7 +82,7 @@ bnf_rules!(
     literal             ::= fn (literal_tokenizer) // r"\w+"
     end_of_statement    ::= line_feed | ";"
     line_feed           ::= fn (line_feed_tokenizer) // r"\n+"
-);
+}
 
 regex!(pub number_literal_regex r"^\d+(\.\d+)?$");
 

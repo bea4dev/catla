@@ -21,12 +21,11 @@ bnf_rules!{
 
     statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" }
 
-    user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] [ super_type_info ] block
-    super_type_info     ::= ":" [ line_feed ] type_info [ line_feed ] { "," [ type_info [ line_feed ] ] }
+    user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] block
     
-    impl_interface      ::= "implements" generics_define user_type "for" user_type block
+    impl_interface      ::= "implements" [ generics_define ] user_type "for" user_type block
 
-    user_type           ::= literal { "::" [ line_feed ] literal }
+    user_type           ::= literal { "::" [ line_feed ] literal } [ generics_info ]
     
     generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
     generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]

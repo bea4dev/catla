@@ -57,7 +57,8 @@ impl_ast!{
     GenericsDefine<'_, '_>,
     GenericsElement<'_, '_>,
     UserTypeDefine<'_, '_>,
-    SuperTypeInfo<'_, '_>,
+    Implements<'_, '_>,
+    UserType<'_, '_>,
     Import<'_, '_>,
     ImportElements<'_, '_>,
     DropStatement<'_, '_>,
@@ -118,6 +119,7 @@ pub enum StatementAST<'allocator, 'input> {
     VariableDefine(VariableDefine<'allocator, 'input>),
     FunctionDefine(FunctionDefine<'allocator, 'input>),
     UserTypeDefine(UserTypeDefine<'allocator, 'input>),
+    Implements(Implements<'allocator, 'input>),
     DropStatement(DropStatement<'allocator, 'input>),
     Expression(Expression<'allocator, 'input>)
 }
@@ -195,7 +197,6 @@ pub struct UserTypeDefine<'allocator, 'input> {
     pub kind: UserTypeKind,
     pub name: LiteralResult<'allocator, 'input>,
     pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
-    pub super_type_info: Option<SuperTypeInfo<'allocator, 'input>>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub block: BlockRecovered<'allocator, 'input>,
     pub span: Range<usize>
@@ -211,9 +212,19 @@ pub enum DataStructKindEnum {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SuperTypeInfo<'allocator, 'input> {
-    pub type_infos: Vec<TypeInfo<'allocator, 'input>, &'allocator Bump>,
-    pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
+pub struct Implements<'allocator, 'input> {
+    pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
+    pub interface: UserType<'allocator, 'input>,
+    pub target_user_type: UserType<'allocator, 'input>,
+    pub block: BlockRecovered<'allocator, 'input>,
+    pub span: Range<usize>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserType<'allocator, 'input> {
+    pub path: Vec<Literal<'input>, &'allocator Bump>,
+    pub unexpected_token: ParseResult<'allocator, 'input, ()>,
+    pub generics: Option<Generics<'allocator, 'input>>,
     pub span: Range<usize>
 }
 
@@ -528,7 +539,7 @@ pub type CallArgumentsResult<'allocator, 'input> = ParseResult<'allocator, 'inpu
 pub struct NewExpression<'allocator, 'input> {
     pub new_keyword_span: Range<usize>,
     pub acyclic_keyword_span: Option<Range<usize>>,
-    pub path: Vec<Literal<'input>, &'allocator Bump>,
+    pub user_type: ParseResult<'allocator, 'input, UserType<'allocator, 'input>>,
     pub field_assigns: FieldAssignsResult<'allocator, 'input>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub span: Range<usize>

@@ -1,3 +1,5 @@
+use self::types::parse_generics;
+
 use super::{*, types::{parse_type_tag, parse_type_info}};
 use expression::{*};
 
@@ -219,7 +221,7 @@ fn parse_statement_with_attributes<'allocator, 'input>(cursor: &mut TokenCursor<
         return Some(Ok(StatementAST::FunctionDefine(define)));
     }
 
-    if let Some(define) = parse_data_struct_define(cursor, &statement_attributes) {
+    if let Some(define) = parse_user_type_define(cursor, &statement_attributes) {
         return Some(Ok(StatementAST::UserTypeDefine(define)));
     }
 
@@ -515,7 +517,7 @@ pub fn parse_generics_define_element<'allocator, 'input>(cursor: &mut TokenCurso
     return Some(GenericsElement { name, bounds, span: span.elapsed(cursor) });
 }
 
-fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<UserTypeDefine<'allocator, 'input>> {
+fn parse_user_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<UserTypeDefine<'allocator, 'input>> {
     let span = Span::start(cursor);
     
     let kind_token = cursor.next();
@@ -540,60 +542,54 @@ fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
         error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::Colon, TokenKind::BraceLeft]));
     }
 
-    let super_type_info = parse_super_type_info(cursor);
-    if super_type_info.is_none() {
-        error_tokens.merged_extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft]));
-    }
-
     let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
     
-    return Some(UserTypeDefine { attributes: statement_attributes.clone(), kind, name, generics_define, super_type_info, error_tokens, block, span: span.elapsed(cursor) });
+    return Some(UserTypeDefine { attributes: statement_attributes.clone(), kind, name, generics_define, error_tokens, block, span: span.elapsed(cursor) });
 }
 
-fn parse_super_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<SuperTypeInfo<'allocator, 'input>> {
+fn parse_implements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Implements<'allocator, 'input>> {
     let span = Span::start(cursor);
 
-    if cursor.next().get_kind() != TokenKind::Colon {
+    if cursor.next().get_kind() != TokenKind::Implements {
         cursor.prev();
         return None;
     }
-    
-    let mut type_infos = Vec::new_in(cursor.allocator);
-    let mut error_tokens = Vec::new_in(cursor.allocator);
 
-    loop {
-        skip(cursor, &[TokenKind::LineFeed]);
+    let generics_define = parse_generics_define(cursor);
 
-        let type_info = match parse_type_info(cursor) {
-            Some(type_info) => type_info,
-            _ => {
-                let dropped_tokens = read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::BraceLeft]);
-                error_tokens.extend(dropped_tokens);
-                
-                match cursor.peek_prev().get_kind() {
-                    TokenKind::Comma => continue,
-                    TokenKind::BraceLeft => {
-                        cursor.prev();
-                        break;
-                    },
-                    _ => break
-                }
-            }
-        };
+    let interface = parse_user_type(cursor);
+}
 
-        type_infos.push(type_info);
+pub(crate) fn parse_user_type<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<UserType<'allocator, 'input>> {
+    let span = Span::start(cursor);
 
-        let comma_or_brace = cursor.next().get_kind();
-        match comma_or_brace {
-            TokenKind::BraceLeft => {
-                cursor.prev();
-                break;
-            },
-            _ => continue
-        }
+    let mut path = Vec::new_in(cursor.allocator);
+
+    match parse_literal(cursor) {
+        Some(literal) => path.push(literal),
+        _ => return None
     }
 
-    return Some(SuperTypeInfo { type_infos, error_tokens, span: span.elapsed(cursor) });
+    let unexpected_token = loop {
+        if cursor.current().get_kind() != TokenKind::DoubleColon {
+            break Ok(());
+        }
+        cursor.next();
+
+        match parse_literal(cursor) {
+            Some(literal) => path.push(literal),
+            _ => break Err(unexpected_token_error(&cursor.allocator, cursor.current()))
+        }
+    };
+
+    let generics = parse_generics(cursor);
+
+    Some(UserType {
+        path,
+        unexpected_token,
+        generics,
+        span: span.elapsed(cursor)
+    })
 }
 
 fn parse_drop_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<DropStatement<'allocator, 'input>> {

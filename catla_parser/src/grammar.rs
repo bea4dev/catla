@@ -23,9 +23,7 @@ bnf_rules!{
 
     user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] block
     
-    impl_interface      ::= "implements" [ generics_define ] user_type "for" user_type block
-
-    user_type           ::= literal { "::" [ line_feed ] literal } [ generics_info ]
+    impl_interface      ::= "implements" [ generics_define ] type_info "for" type_info block
     
     generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
     generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]
@@ -53,7 +51,7 @@ bnf_rules!{
     factor              ::= "-" [ line_feed ] primary | primary
     primary             ::= primary_left { primary_right }
     primary_left        ::= ( simple_primary [ function_call ] | new_expression | if_expression | loop_expression ) [ mapping_operator ]
-    primary_right       ::= ( "." | "::" ) /* [ line_feed ] */ [ literal [ function_call ] ] [ mapping_operator ]
+    primary_right       ::= ( "." | "::" ) [ line_feed ] ( literal [ function_call ] | mapping_operator )
     simple_primary      ::= "(" expression ")" | literal | "null" | "true" | "false"
     mapping_operator    ::= "?" | "?" "!" | "!" | "!" "!" | ( "?" | "!" ) ":" block
 
@@ -67,14 +65,14 @@ bnf_rules!{
 
     function_call       ::= [ ":" generics_info ] "(" [ [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
 
-    new_expression      ::= "new" [ "acyclic" ] user_type field_assign
+    new_expression      ::= "new" [ "acyclic" ] literal { "::" [ line_feed ] literal } field_assign
     field_assign        ::= "{" [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] } "}"
 
     return_expression   ::= "return" [ expression ]
 
     type_tag            ::= ":" type_info
     function_type_tag   ::= "->" type_info
-    type_info           ::= literal { "::" literal } [ generics_info ] { type_attribute }
+    type_info           ::= literal { "::" [ line_feed ] literal } [ generics_info ] { type_attribute }
     type_attribute      ::= "?" | ( "!" [ generics_info ] )
     generics_info       ::= "<" [ line_feed ] [ type_info [ line_feed ] ] { "," [ line_feed ] [ type_info [ line_feed ] ] } ">"
 

@@ -58,7 +58,6 @@ impl_ast!{
     GenericsElement<'_, '_>,
     UserTypeDefine<'_, '_>,
     Implements<'_, '_>,
-    UserType<'_, '_>,
     Import<'_, '_>,
     ImportElements<'_, '_>,
     DropStatement<'_, '_>,
@@ -214,17 +213,9 @@ pub enum DataStructKindEnum {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Implements<'allocator, 'input> {
     pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
-    pub interface: UserType<'allocator, 'input>,
-    pub target_user_type: UserType<'allocator, 'input>,
+    pub interface: TypeInfoResult<'allocator, 'input>,
+    pub target_user_type: TypeInfoResult<'allocator, 'input>,
     pub block: BlockRecovered<'allocator, 'input>,
-    pub span: Range<usize>
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UserType<'allocator, 'input> {
-    pub path: Vec<Literal<'input>, &'allocator Bump>,
-    pub unexpected_token: ParseResult<'allocator, 'input, ()>,
-    pub generics: Option<Generics<'allocator, 'input>>,
     pub span: Range<usize>
 }
 
@@ -539,7 +530,7 @@ pub type CallArgumentsResult<'allocator, 'input> = ParseResult<'allocator, 'inpu
 pub struct NewExpression<'allocator, 'input> {
     pub new_keyword_span: Range<usize>,
     pub acyclic_keyword_span: Option<Range<usize>>,
-    pub user_type: ParseResult<'allocator, 'input, UserType<'allocator, 'input>>,
+    pub path: Vec<Literal<'input>, &'allocator Bump>,
     pub field_assigns: FieldAssignsResult<'allocator, 'input>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub span: Range<usize>
@@ -839,28 +830,5 @@ trait GetTokenKind {
 impl<'input> GetTokenKind for Option<&Token<'input>> {
     fn get_kind(&self) -> TokenKind {
         return self.map_or(TokenKind::None, |token| { token.kind });
-    }
-}
-
-
-trait MergedExtend {
-    fn merged_extend(&mut self, other: Self);
-}
-
-impl<'allocator, 'input> MergedExtend for Vec<Token<'input>, &'allocator Bump> {
-    fn merged_extend(&mut self, other: Self) {
-        let cancel = if let Some(last) = other.last() {
-            if let Some(self_last) = self.last() {
-                last == self_last
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        if !cancel {
-            self.extend(other)
-        }
     }
 }

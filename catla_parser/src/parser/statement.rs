@@ -1,4 +1,4 @@
-use self::types::parse_generics;
+use self::types::parse_type_info_result;
 
 use super::{*, types::{parse_type_tag, parse_type_info}};
 use expression::{*};
@@ -19,6 +19,9 @@ pub fn parse_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
             Ok(define) => Ok(define),
             Err(attributes) => Ok(StatementAST::StatementAttributes(attributes))
         }
+    }
+    if let Some(implements) = parse_implements(cursor) {
+        return Ok(StatementAST::Implements(implements));
     }
     if let Some(drop_statement) = parse_drop_statement(cursor) {
         return Ok(StatementAST::DropStatement(drop_statement));
@@ -557,37 +560,22 @@ fn parse_implements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'in
 
     let generics_define = parse_generics_define(cursor);
 
-    let interface = parse_user_type(cursor);
-}
+    let interface = parse_type_info_result(cursor);
 
-pub(crate) fn parse_user_type<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<UserType<'allocator, 'input>> {
-    let span = Span::start(cursor);
-
-    let mut path = Vec::new_in(cursor.allocator);
-
-    match parse_literal(cursor) {
-        Some(literal) => path.push(literal),
-        _ => return None
-    }
-
-    let unexpected_token = loop {
-        if cursor.current().get_kind() != TokenKind::DoubleColon {
-            break Ok(());
-        }
+    let target_user_type = if cursor.current().get_kind() == TokenKind::For {
         cursor.next();
-
-        match parse_literal(cursor) {
-            Some(literal) => path.push(literal),
-            _ => break Err(unexpected_token_error(&cursor.allocator, cursor.current()))
-        }
+        parse_type_info_result(cursor)
+    } else {
+        Err(unexpected_token_error(&cursor.allocator, cursor.current()))
     };
 
-    let generics = parse_generics(cursor);
+    let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
 
-    Some(UserType {
-        path,
-        unexpected_token,
-        generics,
+    Some(Implements {
+        generics_define,
+        interface,
+        target_user_type,
+        block,
         span: span.elapsed(cursor)
     })
 }

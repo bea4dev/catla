@@ -1,5 +1,3 @@
-use self::statement::parse_user_type;
-
 use super::{*, types::parse_generics, statement::{parse_block, parse_function_argument}};
 
 
@@ -450,13 +448,28 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
         None
     };
 
-    let user_type = parse_user_type(cursor).ok_or_else(|| { unexpected_token_error(&cursor.allocator, cursor.current()) });
-
-    skip(cursor, &[TokenKind::LineFeed]);
-
+    let mut path = Vec::new_in(cursor.allocator);
     let mut error_tokens = Vec::new_in(cursor.allocator);
-    if cursor.current().get_kind() != TokenKind::BraceLeft {
-        error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]));
+    match parse_literal(cursor) {
+        Some(literal) => path.push(literal),
+        _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
+    }
+
+    if error_tokens.is_empty() {
+        loop {
+            match cursor.current().get_kind() {
+                TokenKind::DoubleColon => {
+                    cursor.next();
+
+                    match parse_literal(cursor) {
+                        Some(literal) => path.push(literal),
+                        _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
+                    };
+                },
+                TokenKind::BraceLeft => break,
+                _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
+            }
+        }
     }
     
     let brace_left_token = cursor.current();
@@ -534,7 +547,7 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
         Err(unexpected_token_error(cursor.allocator, brace_left_token))
     };
 
-    return Some(NewExpression { new_keyword_span, acyclic_keyword_span, user_type, error_tokens, field_assigns, span: span.elapsed(cursor) });
+    return Some(NewExpression { new_keyword_span, acyclic_keyword_span, path, error_tokens, field_assigns, span: span.elapsed(cursor) });
 }
 
 fn parse_mapping_operator<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<MappingOperator<'allocator, 'input>> {

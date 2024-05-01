@@ -12,10 +12,12 @@ fn test() {
 
     let source = 
 "
-new TestClass {
+new test::TestClass {
     field0: 100,
     field1: 200
 }
+
+implements <T: TestInterface> TestInterface<T> for test::TestClass<T> {}
 ";
 
     let allocator = Bump::new();

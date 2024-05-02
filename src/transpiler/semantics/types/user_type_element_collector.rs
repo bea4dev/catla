@@ -227,10 +227,11 @@ pub(crate) fn collect_module_element_types_program(
                                     let generic_type_new = &generic_types[i];
 
                                     let mut bounds_old = generic_type_old.bounds.lock().unwrap();
-                                    let mut bounds_new = generic_type_new.bounds.lock().unwrap();
+                                    let bounds_new = generic_type_new.bounds.lock().unwrap();
+                                    let mut bounds_new = bounds_new.clone();
 
                                     if generic_type_old.define_entity_id == generic_type_new.define_entity_id {
-                                        mem::swap(bounds_old.deref_mut(), bounds_new.deref_mut());
+                                        mem::swap(bounds_old.deref_mut(), &mut bounds_new);
                                     }
                                 }
                             }

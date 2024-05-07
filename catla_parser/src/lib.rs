@@ -17,6 +17,8 @@ new test::TestClass {
     field1: 200
 }
 
+class TestClass<T: ToString>: test::Interface<T> {}
+
 implements <T: TestInterface> TestInterface<T> for test::TestClass<T> {}
 ";
 

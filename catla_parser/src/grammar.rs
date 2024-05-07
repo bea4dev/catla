@@ -21,7 +21,8 @@ bnf_rules!{
 
     statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" }
 
-    user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] block
+    user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] [ super_type_info ] block
+    super_type_info     ::= ":" [ line_feed ] type_info [ line_feed ] { "," [ type_info [ line_feed ] ] }
     
     impl_interface      ::= "implements" [ generics_define ] type_info "for" type_info block
     

@@ -430,6 +430,20 @@ pub(crate) fn name_resolve_program<'allocator>(
                     );
                 }
 
+                if let Some(super_type_info) = &data_struct_define.super_type_info {
+                    for type_info in super_type_info.type_infos.iter() {
+                        name_resolve_type_info(
+                            type_info,
+                            entity_id,
+                            name_environments,
+                            resolved_map,
+                            errors,
+                            warnings,
+                            allocator
+                        );
+                    }
+                }
+
                 if let Some(block) = &data_struct_define.block.value {
                     name_resolve_block(
                         block,

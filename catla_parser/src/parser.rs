@@ -196,6 +196,7 @@ pub struct UserTypeDefine<'allocator, 'input> {
     pub kind: UserTypeKind,
     pub name: LiteralResult<'allocator, 'input>,
     pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
+    pub super_type_info: Option<SuperTypeInfo<'allocator, 'input>>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub block: BlockRecovered<'allocator, 'input>,
     pub span: Range<usize>
@@ -208,6 +209,13 @@ pub enum DataStructKindEnum {
     Class,
     Struct,
     Interface
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuperTypeInfo<'allocator, 'input> {
+    pub type_infos: Vec<TypeInfo<'allocator, 'input>, &'allocator Bump>,
+    pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
+    pub span: Range<usize>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -830,5 +838,28 @@ trait GetTokenKind {
 impl<'input> GetTokenKind for Option<&Token<'input>> {
     fn get_kind(&self) -> TokenKind {
         return self.map_or(TokenKind::None, |token| { token.kind });
+    }
+}
+
+
+trait MergedExtend {
+    fn merged_extend(&mut self, other: Self);
+}
+
+impl<'allocator, 'input> MergedExtend for Vec<Token<'input>, &'allocator Bump> {
+    fn merged_extend(&mut self, other: Self) {
+        let cancel = if let Some(last) = other.last() {
+            if let Some(self_last) = self.last() {
+                last == self_last
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if !cancel {
+            self.extend(other)
+        }
     }
 }

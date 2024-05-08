@@ -177,6 +177,44 @@ pub fn collect_parse_error_program(
                     context
                 );
             },
+            StatementAST::Implements(implements) => {
+                if let Some(generics_define) = &implements.generics_define {
+                    collect_parse_error_generics_define(
+                        generics_define,
+                        errors,
+                        warnings,
+                        context
+                    );
+                }
+
+                collect_parse_error_with_parse_result(
+                    &implements.interface,
+                    collect_parse_error_type_info,
+                    Expected::TypeInfo,
+                    0045,
+                    errors,
+                    warnings,
+                    context
+                );
+                collect_parse_error_with_parse_result(
+                    &implements.target_user_type,
+                    collect_parse_error_type_info,
+                    Expected::TypeInfo,
+                    0045,
+                    errors,
+                    warnings,
+                    context
+                );
+                collect_parse_error_with_recovered(
+                    &implements.block,
+                    collect_parse_error_block,
+                    Expected::Block,
+                    0045,
+                    errors,
+                    warnings,
+                    context
+                );
+            },
             StatementAST::DropStatement(drop_statement) => {
                 collect_parse_error_with_parse_result(
                     &drop_statement.expression,

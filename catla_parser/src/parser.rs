@@ -57,7 +57,7 @@ impl_ast!{
     GenericsDefine<'_, '_>,
     GenericsElement<'_, '_>,
     UserTypeDefine<'_, '_>,
-    SuperTypeInfo<'_, '_>,
+    Implements<'_, '_>,
     Import<'_, '_>,
     ImportElements<'_, '_>,
     DropStatement<'_, '_>,
@@ -118,6 +118,7 @@ pub enum StatementAST<'allocator, 'input> {
     VariableDefine(VariableDefine<'allocator, 'input>),
     FunctionDefine(FunctionDefine<'allocator, 'input>),
     UserTypeDefine(UserTypeDefine<'allocator, 'input>),
+    Implements(Implements<'allocator, 'input>),
     DropStatement(DropStatement<'allocator, 'input>),
     Expression(Expression<'allocator, 'input>)
 }
@@ -214,6 +215,15 @@ pub enum DataStructKindEnum {
 pub struct SuperTypeInfo<'allocator, 'input> {
     pub type_infos: Vec<TypeInfo<'allocator, 'input>, &'allocator Bump>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
+    pub span: Range<usize>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Implements<'allocator, 'input> {
+    pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
+    pub interface: TypeInfoResult<'allocator, 'input>,
+    pub target_user_type: TypeInfoResult<'allocator, 'input>,
+    pub block: BlockRecovered<'allocator, 'input>,
     pub span: Range<usize>
 }
 

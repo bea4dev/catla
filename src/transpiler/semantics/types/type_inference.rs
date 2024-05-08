@@ -1965,7 +1965,7 @@ fn type_inference_primary_left<'allocator>(
                                 true
                             },
                             DefineKind::Variable | DefineKind::FunctionArgument | DefineKind::ClosureArgument => {
-                                if resolved.has_separator(&[EnvironmentSeparatorKind::DataStruct, EnvironmentSeparatorKind::Function]) {
+                                if resolved.has_separator(&[EnvironmentSeparatorKind::UserTypeDefine, EnvironmentSeparatorKind::Function]) {
                                     errors.push(OutOfEnvironmentVariable::new(identifier.span.clone(), resolved));
                                     false
                                 } else {
@@ -3059,7 +3059,7 @@ impl OutOfEnvironmentVariable {
         for separator in resolved.separators.iter() {
             let across = match separator.value {
                 EnvironmentSeparatorKind::Function => false,
-                EnvironmentSeparatorKind::DataStruct => false,
+                EnvironmentSeparatorKind::UserTypeDefine => false,
                 EnvironmentSeparatorKind::Closure => true
             };
 

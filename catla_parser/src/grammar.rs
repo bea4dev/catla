@@ -1,19 +1,17 @@
 use bnf_rules::bnf_rules_macro::bnf_rules;
-use bnf_rules::bnf_rules_parser::lexer::{*};
-use bnf_rules::bnf_rules_parser::parser::{*};
 use proc_macro_regex::regex;
 
 // This is an LR(1) parser generator, used for maintain quality.
 // If the specified grammar is ambiguous, compilation is aborted with conflict.
 // Usage : https://github.com/bea4dev/bnf_rules
-bnf_rules!(
+bnf_rules!{
     source              ::= program
 
     program             ::= [ statement ] { end_of_statement [ statement ] }
     statement           ::= assignment | exchange_statement | import_statement |
-                            define_with_attr | drop_statement | expression
+                            define_with_attr | drop_statement | expression | impl_interface
 
-    define_with_attr    ::= statement_attribute ( function_define | data_struct_define | variable_define )
+    define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define )
 
     function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments [ function_type_tag ] [ line_feed ] block
     function_arguments  ::= "(" [ line_feed ] [ function_argument [ line_feed ] ] { "," [ line_feed ] [ function_argument ] } ")"
@@ -23,8 +21,10 @@ bnf_rules!(
 
     statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" }
 
-    data_struct_define  ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] [ super_type_info ] block
+    user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] [ super_type_info ] block
     super_type_info     ::= ":" [ line_feed ] type_info [ line_feed ] { "," [ type_info [ line_feed ] ] }
+    
+    impl_interface      ::= "implements" [ generics_define ] type_info "for" type_info block
     
     generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
     generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]
@@ -52,7 +52,7 @@ bnf_rules!(
     factor              ::= "-" [ line_feed ] primary | primary
     primary             ::= primary_left { primary_right }
     primary_left        ::= ( simple_primary [ function_call ] | new_expression | if_expression | loop_expression ) [ mapping_operator ]
-    primary_right       ::= ( "." | "::" ) /* [ line_feed ] */ [ literal [ function_call ] ] [ mapping_operator ]
+    primary_right       ::= ( "." | "::" ) [ line_feed ] ( literal [ function_call ] | mapping_operator )
     simple_primary      ::= "(" expression ")" | literal | "null" | "true" | "false"
     mapping_operator    ::= "?" | "?" "!" | "!" | "!" "!" | ( "?" | "!" ) ":" block
 
@@ -73,14 +73,14 @@ bnf_rules!(
 
     type_tag            ::= ":" type_info
     function_type_tag   ::= "->" type_info
-    type_info           ::= literal { "::" literal } [ generics_info ] { type_attribute }
+    type_info           ::= literal { "::" [ line_feed ] literal } [ generics_info ] { type_attribute }
     type_attribute      ::= "?" | ( "!" [ generics_info ] )
     generics_info       ::= "<" [ line_feed ] [ type_info [ line_feed ] ] { "," [ line_feed ] [ type_info [ line_feed ] ] } ">"
 
     literal             ::= fn (literal_tokenizer) // r"\w+"
     end_of_statement    ::= line_feed | ";"
     line_feed           ::= fn (line_feed_tokenizer) // r"\n+"
-);
+}
 
 regex!(pub number_literal_regex r"^\d+(\.\d+)?$");
 

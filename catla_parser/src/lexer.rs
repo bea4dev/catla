@@ -21,6 +21,8 @@ pub enum TokenKind {
     Class,
     Struct,
     Interface,
+    Implements,
+    For,
     Import,
     DoubleColon,
     Comma,
@@ -65,13 +67,13 @@ pub enum TokenKind {
     None
 }
 
-enum Tokenizer<'input> {
+enum Tokenizer {
     Keyword(TokenKind, &'static str),
-    Functional(fn(current_input: &'input str) -> (usize, TokenKind))
+    Functional(TokenKind, fn(current_input: &str) -> usize)
 }
 
-impl<'input> Tokenizer<'input> {
-    fn tokenize(&self, current_input: &'input str) -> (usize, TokenKind) {
+impl Tokenizer {
+    fn tokenize(&self, current_input: &str) -> (TokenKind, usize) {
         return match self {
             Tokenizer::Keyword(kind, keyword) => {
                 let mut input_chars = current_input.chars();
@@ -84,92 +86,89 @@ impl<'input> Tokenizer<'input> {
                     };
                     let current_char = match input_chars.next(){
                         Some(c) => c,
-                        _ => return (0, kind.clone()) // reject
+                        _ => return (kind.clone(), 0) // reject
                     };
                     if current_char != keyword_char {
-                        return (0, kind.clone()) // reject
+                        return (kind.clone(), 0) // reject
                     }
 
                     current_byte_length += current_char.len_utf8();
                 }
-                (current_byte_length, kind.clone()) // accept
+                (kind.clone(), current_byte_length) // accept
             },
-            Tokenizer::Functional(tokenizer) => {
-                tokenizer(current_input)
-            },
+            Tokenizer::Functional(kind, tokenizer) => {
+                (kind.clone(), tokenizer(current_input))
+            }
         }
     }
 }
 
-const NUMBER_OF_TOKENIZERS: usize = 60;
+static TOKENIZERS: &[Tokenizer] = &[
+    Tokenizer::Keyword(TokenKind::Function, "function"),
+    Tokenizer::Keyword(TokenKind::Static, "static"),
+    Tokenizer::Keyword(TokenKind::Private, "private"),
+    Tokenizer::Keyword(TokenKind::Suspend, "suspend"),
+    Tokenizer::Keyword(TokenKind::Native, "native"),
+    Tokenizer::Keyword(TokenKind::Acyclic, "acyclic"),
+    Tokenizer::Keyword(TokenKind::Open, "open"),
+    Tokenizer::Keyword(TokenKind::New, "new"),
+    Tokenizer::Keyword(TokenKind::Drop, "drop"),
+    Tokenizer::Keyword(TokenKind::Mutex, "mutex"),
+    Tokenizer::Keyword(TokenKind::ParenthesisLeft, "("),
+    Tokenizer::Keyword(TokenKind::ParenthesisRight, ")"),
+    Tokenizer::Keyword(TokenKind::BraceLeft, "{"),
+    Tokenizer::Keyword(TokenKind::BraceRight, "}"),
+    Tokenizer::Keyword(TokenKind::BracketLeft, "["),
+    Tokenizer::Keyword(TokenKind::BracketRight, "]"),
+    Tokenizer::Keyword(TokenKind::Class, "class"),
+    Tokenizer::Keyword(TokenKind::Struct, "struct"),
+    Tokenizer::Keyword(TokenKind::Interface, "interface"),
+    Tokenizer::Keyword(TokenKind::Implements, "implements"),
+    Tokenizer::Keyword(TokenKind::For, "for"),
+    Tokenizer::Keyword(TokenKind::Import, "import"),
+    Tokenizer::Keyword(TokenKind::DoubleColon, "::"),
+    Tokenizer::Keyword(TokenKind::Comma, ","),
+    Tokenizer::Keyword(TokenKind::Loop, "loop"),
+    Tokenizer::Keyword(TokenKind::Var, "var"),
+    Tokenizer::Keyword(TokenKind::Let, "let"),
+    Tokenizer::Keyword(TokenKind::Equal, "="),
+    Tokenizer::Keyword(TokenKind::Exchange, "<=>"),
+    Tokenizer::Keyword(TokenKind::Or, "or"),
+    Tokenizer::Keyword(TokenKind::And, "and"),
+    Tokenizer::Keyword(TokenKind::EqEqual, "=="),
+    Tokenizer::Keyword(TokenKind::NotEqual, "=/"),
+    Tokenizer::Keyword(TokenKind::GreaterThan, ">"),
+    Tokenizer::Keyword(TokenKind::GreaterOrEq, ">="),
+    Tokenizer::Keyword(TokenKind::LessThan, "<"),
+    Tokenizer::Keyword(TokenKind::LessOrEq, "<="),
+    Tokenizer::Keyword(TokenKind::Plus, "+"),
+    Tokenizer::Keyword(TokenKind::Minus, "-"),
+    Tokenizer::Keyword(TokenKind::Star, "*"),
+    Tokenizer::Keyword(TokenKind::Slash, "/"),
+    Tokenizer::Keyword(TokenKind::VerticalBar, "|"),
+    Tokenizer::Keyword(TokenKind::Dot, "."),
+    Tokenizer::Keyword(TokenKind::Null, "null"),
+    Tokenizer::Keyword(TokenKind::InterrogationMark, "?"),
+    Tokenizer::Keyword(TokenKind::ExclamationMark, "!"),
+    Tokenizer::Keyword(TokenKind::InterrogationElvis, "?:"),
+    Tokenizer::Keyword(TokenKind::ExclamationElvis, "!:"),
+    Tokenizer::Keyword(TokenKind::Colon, ":"),
+    Tokenizer::Keyword(TokenKind::If, "if"),
+    Tokenizer::Keyword(TokenKind::Else, "else"),
+    Tokenizer::Keyword(TokenKind::Return, "return"),
+    Tokenizer::Keyword(TokenKind::True, "true"),
+    Tokenizer::Keyword(TokenKind::False, "false"),
+    Tokenizer::Keyword(TokenKind::FatArrow, "=>"),
+    Tokenizer::Keyword(TokenKind::ThinArrow, "->"),
+    Tokenizer::Functional(TokenKind::Literal, literal_tokenizer),
+    Tokenizer::Keyword(TokenKind::Semicolon, ";"),
+    Tokenizer::Keyword(TokenKind::LineFeed, "\r"),
+    Tokenizer::Keyword(TokenKind::LineFeed, "\n"),
+    Tokenizer::Keyword(TokenKind::LineFeed, "\r\n"),
+    Tokenizer::Functional(TokenKind::Whitespace, whitespace_tokenizer)
+];
 
-#[inline(always)]
-fn tokenizers<'input>() -> [Tokenizer<'input>; NUMBER_OF_TOKENIZERS] {
-    [
-        Tokenizer::Keyword(TokenKind::Function, "function"),
-        Tokenizer::Keyword(TokenKind::Static, "static"),
-        Tokenizer::Keyword(TokenKind::Private, "private"),
-        Tokenizer::Keyword(TokenKind::Suspend, "suspend"),
-        Tokenizer::Keyword(TokenKind::Native, "native"),
-        Tokenizer::Keyword(TokenKind::Acyclic, "acyclic"),
-        Tokenizer::Keyword(TokenKind::Open, "open"),
-        Tokenizer::Keyword(TokenKind::New, "new"),
-        Tokenizer::Keyword(TokenKind::Drop, "drop"),
-        Tokenizer::Keyword(TokenKind::Mutex, "mutex"),
-        Tokenizer::Keyword(TokenKind::ParenthesisLeft, "("),
-        Tokenizer::Keyword(TokenKind::ParenthesisRight, ")"),
-        Tokenizer::Keyword(TokenKind::BraceLeft, "{"),
-        Tokenizer::Keyword(TokenKind::BraceRight, "}"),
-        Tokenizer::Keyword(TokenKind::BracketLeft, "["),
-        Tokenizer::Keyword(TokenKind::BracketRight, "]"),
-        Tokenizer::Keyword(TokenKind::Class, "class"),
-        Tokenizer::Keyword(TokenKind::Struct, "struct"),
-        Tokenizer::Keyword(TokenKind::Interface, "interface"),
-        Tokenizer::Keyword(TokenKind::Import, "import"),
-        Tokenizer::Keyword(TokenKind::DoubleColon, "::"),
-        Tokenizer::Keyword(TokenKind::Comma, ","),
-        Tokenizer::Keyword(TokenKind::Loop, "loop"),
-        Tokenizer::Keyword(TokenKind::Var, "var"),
-        Tokenizer::Keyword(TokenKind::Let, "let"),
-        Tokenizer::Keyword(TokenKind::Equal, "="),
-        Tokenizer::Keyword(TokenKind::Exchange, "<=>"),
-        Tokenizer::Keyword(TokenKind::Or, "or"),
-        Tokenizer::Keyword(TokenKind::And, "and"),
-        Tokenizer::Keyword(TokenKind::EqEqual, "=="),
-        Tokenizer::Keyword(TokenKind::NotEqual, "=/"),
-        Tokenizer::Keyword(TokenKind::GreaterThan, ">"),
-        Tokenizer::Keyword(TokenKind::GreaterOrEq, ">="),
-        Tokenizer::Keyword(TokenKind::LessThan, "<"),
-        Tokenizer::Keyword(TokenKind::LessOrEq, "<="),
-        Tokenizer::Keyword(TokenKind::Plus, "+"),
-        Tokenizer::Keyword(TokenKind::Minus, "-"),
-        Tokenizer::Keyword(TokenKind::Star, "*"),
-        Tokenizer::Keyword(TokenKind::Slash, "/"),
-        Tokenizer::Keyword(TokenKind::VerticalBar, "|"),
-        Tokenizer::Keyword(TokenKind::Dot, "."),
-        Tokenizer::Keyword(TokenKind::Null, "null"),
-        Tokenizer::Keyword(TokenKind::InterrogationMark, "?"),
-        Tokenizer::Keyword(TokenKind::ExclamationMark, "!"),
-        Tokenizer::Keyword(TokenKind::InterrogationElvis, "?:"),
-        Tokenizer::Keyword(TokenKind::ExclamationElvis, "!:"),
-        Tokenizer::Keyword(TokenKind::Colon, ":"),
-        Tokenizer::Keyword(TokenKind::If, "if"),
-        Tokenizer::Keyword(TokenKind::Else, "else"),
-        Tokenizer::Keyword(TokenKind::Return, "return"),
-        Tokenizer::Keyword(TokenKind::True, "true"),
-        Tokenizer::Keyword(TokenKind::False, "false"),
-        Tokenizer::Keyword(TokenKind::FatArrow, "=>"),
-        Tokenizer::Keyword(TokenKind::ThinArrow, "->"),
-        Tokenizer::Functional(literal_tokenizer),
-        Tokenizer::Keyword(TokenKind::Semicolon, ";"),
-        Tokenizer::Keyword(TokenKind::LineFeed, "\r"),
-        Tokenizer::Keyword(TokenKind::LineFeed, "\n"),
-        Tokenizer::Keyword(TokenKind::LineFeed, "\r\n"),
-        Tokenizer::Functional(whitespace_tokenizer)
-    ]
-}
-
-fn literal_tokenizer(current_input: &str) -> (usize, TokenKind) {
+fn literal_tokenizer(current_input: &str) -> usize {
     let mut input_chars = current_input.chars();
     let mut current_byte_length = 0;
     let mut is_all_char_numeric = true;
@@ -206,10 +205,10 @@ fn literal_tokenizer(current_input: &str) -> (usize, TokenKind) {
         current_byte_length += current_char.len_utf8();
     }
 
-    return (current_byte_length, TokenKind::Literal);
+    current_byte_length
 }
 
-fn whitespace_tokenizer(current_input: &str) -> (usize, TokenKind) {
+fn whitespace_tokenizer(current_input: &str) -> usize {
     let mut input_chars = current_input.chars();
     let mut current_byte_length = 0;
     loop {
@@ -223,7 +222,7 @@ fn whitespace_tokenizer(current_input: &str) -> (usize, TokenKind) {
         current_byte_length += current_char.len_utf8();
     }
 
-    return (current_byte_length, TokenKind::Whitespace);
+    current_byte_length
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -235,16 +234,14 @@ pub struct Token<'input> {
 
 pub struct Lexer<'input> {
     source: &'input str,
-    current_byte_position: usize,
-    tokenizers: [Tokenizer<'input>; NUMBER_OF_TOKENIZERS]
+    current_byte_position: usize
 }
 
 impl<'input> Lexer<'input> {
     pub fn new(source: &'input str) -> Lexer<'input> {
         return Self {
             source,
-            current_byte_position: 0,
-            tokenizers: tokenizers(),
+            current_byte_position: 0
         }
     }
 }
@@ -262,10 +259,10 @@ impl<'input> Iterator for Lexer<'input> {
 
             let mut current_max_length = 0;
             let mut current_token_kind = TokenKind::Whitespace;
-            for tokenizer in self.tokenizers.iter() {
+            for tokenizer in TOKENIZERS.iter() {
                 let result = tokenizer.tokenize(current_input);
-                let byte_length = result.0;
-                let token_kind = result.1;
+                let token_kind = result.0;
+                let byte_length = result.1;
                 
                 if byte_length > current_max_length {
                     current_max_length = byte_length;

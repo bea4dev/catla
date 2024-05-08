@@ -1,3 +1,5 @@
+use self::types::parse_type_info_result;
+
 use super::{*, types::{parse_type_tag, parse_type_info}};
 use expression::{*};
 
@@ -17,6 +19,9 @@ pub fn parse_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
             Ok(define) => Ok(define),
             Err(attributes) => Ok(StatementAST::StatementAttributes(attributes))
         }
+    }
+    if let Some(implements) = parse_implements(cursor) {
+        return Ok(StatementAST::Implements(implements));
     }
     if let Some(drop_statement) = parse_drop_statement(cursor) {
         return Ok(StatementAST::DropStatement(drop_statement));
@@ -219,7 +224,7 @@ fn parse_statement_with_attributes<'allocator, 'input>(cursor: &mut TokenCursor<
         return Some(Ok(StatementAST::FunctionDefine(define)));
     }
 
-    if let Some(define) = parse_data_struct_define(cursor, &statement_attributes) {
+    if let Some(define) = parse_user_type_define(cursor, &statement_attributes) {
         return Some(Ok(StatementAST::UserTypeDefine(define)));
     }
 
@@ -515,7 +520,7 @@ pub fn parse_generics_define_element<'allocator, 'input>(cursor: &mut TokenCurso
     return Some(GenericsElement { name, bounds, span: span.elapsed(cursor) });
 }
 
-fn parse_data_struct_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<UserTypeDefine<'allocator, 'input>> {
+fn parse_user_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<UserTypeDefine<'allocator, 'input>> {
     let span = Span::start(cursor);
     
     let kind_token = cursor.next();
@@ -594,6 +599,36 @@ fn parse_super_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
     }
 
     return Some(SuperTypeInfo { type_infos, error_tokens, span: span.elapsed(cursor) });
+}
+
+fn parse_implements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Implements<'allocator, 'input>> {
+    let span = Span::start(cursor);
+
+    if cursor.next().get_kind() != TokenKind::Implements {
+        cursor.prev();
+        return None;
+    }
+
+    let generics_define = parse_generics_define(cursor);
+
+    let interface = parse_type_info_result(cursor);
+
+    let target_user_type = if cursor.current().get_kind() == TokenKind::For {
+        cursor.next();
+        parse_type_info_result(cursor)
+    } else {
+        Err(unexpected_token_error(&cursor.allocator, cursor.current()))
+    };
+
+    let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
+
+    Some(Implements {
+        generics_define,
+        interface,
+        target_user_type,
+        block,
+        span: span.elapsed(cursor)
+    })
 }
 
 fn parse_drop_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<DropStatement<'allocator, 'input>> {

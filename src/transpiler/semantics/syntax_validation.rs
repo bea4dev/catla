@@ -25,7 +25,7 @@ pub(crate) fn validate_syntax_program(
         };
         
         if let Some(data_struct_span) = &data_struct_environment_span {
-            let is_valid_and_span = match statement {
+            let (is_valid, span) = match statement {
                 StatementAST::Assignment(assignment) => (false, assignment.span.clone()),
                 StatementAST::Exchange(exchange) => (false, exchange.span.clone()),
                 StatementAST::Import(import) => (true, import.span.clone()),
@@ -37,14 +37,19 @@ pub(crate) fn validate_syntax_program(
                 StatementAST::VariableDefine(variable_define) => (true, variable_define.span.clone()),
                 StatementAST::FunctionDefine(function_define) => (true, function_define.span.clone()),
                 StatementAST::UserTypeDefine(data_struct_define) => (true, data_struct_define.span.clone()),
+                StatementAST::Implements(implements) => (true, implements.span.clone()),
                 StatementAST::DropStatement(drop_statement) => (false, drop_statement.span.clone()),
                 StatementAST::Expression(expression) => (false, get_expression_span(expression)),
             };
 
-            if !is_valid_and_span.0 {
-                let span = is_valid_and_span.1;
+            if !is_valid {
                 let labels = vec![(span.clone(), Color::Red), (data_struct_span.clone(), Color::Yellow)];
-                let mut error = SimpleError::new(ERROR_STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT, span.clone(), vec![], labels);
+                let mut error = SimpleError::new(
+                    ERROR_STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT,
+                    span.clone(),
+                    vec![],
+                    labels
+                );
                 
                 let remove_advice = Advice::Remove { span: span.clone() };
                 let data_struct_define_column = get_column(context.source_code.code.as_str(), data_struct_span.start);
@@ -67,7 +72,12 @@ pub(crate) fn validate_syntax_program(
             StatementAST::Assignment(assignment) => {
                 if !is_valid_format_for_assignment(assignment.left_expr) {
                     let span = get_expression_span(assignment.left_expr);
-                    errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![], vec![(span, Color::Red)]));
+                    errors.push(SimpleError::new(
+                        ERROR_INVALID_ASSIGNMENT_FORMAT,
+                        span.clone(),
+                        vec![],
+                        vec![(span, Color::Red)]
+                    ));
                 }
                 validate_syntax_expression(assignment.left_expr, context, errors, warnings);
                 if let Ok(right_expr) = assignment.right_expr {
@@ -77,13 +87,23 @@ pub(crate) fn validate_syntax_program(
             StatementAST::Exchange(exchange) => {
                 if !is_valid_format_for_assignment(exchange.left_expr) {
                     let span = get_expression_span(exchange.left_expr);
-                    errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![], vec![(span, Color::Red)]));
+                    errors.push(SimpleError::new(
+                        ERROR_INVALID_ASSIGNMENT_FORMAT,
+                        span.clone(),
+                        vec![],
+                        vec![(span, Color::Red)]
+                    ));
                 }
                 validate_syntax_expression(exchange.left_expr, context,errors, warnings);
                 if let Ok(right_expr) = exchange.right_expr {
                     if !is_valid_format_for_assignment(right_expr) {
                         let span = get_expression_span(right_expr);
-                        errors.push(SimpleError::new(ERROR_INVALID_ASSIGNMENT_FORMAT, span.clone(), vec![], vec![(span, Color::Red)]));
+                        errors.push(SimpleError::new(
+                            ERROR_INVALID_ASSIGNMENT_FORMAT,
+                            span.clone(),
+                            vec![],
+                            vec![(span, Color::Red)]
+                        ));
                     }
                     validate_syntax_expression(right_expr, context,errors, warnings);
                 }
@@ -97,12 +117,35 @@ pub(crate) fn validate_syntax_program(
             },
             StatementAST::FunctionDefine(function_define) => {
                 if let Some(block) = &function_define.block.value {
-                    validate_syntax_program(block.program, context, None, errors, warnings);
+                    validate_syntax_program(
+                        block.program,
+                        context,
+                        None,
+                        errors,
+                        warnings
+                    );
                 }
             },
             StatementAST::UserTypeDefine(data_struct_define) => {
                 if let Some(block) = &data_struct_define.block.value {
-                    validate_syntax_program(block.program, context, Some(data_struct_define.span.clone()), errors, warnings);
+                    validate_syntax_program(
+                        block.program,
+                        context,
+                        Some(data_struct_define.span.clone()),
+                        errors,
+                        warnings
+                    );
+                }
+            },
+            StatementAST::Implements(implements) => {
+                if let Some(block) = &implements.block.value {
+                    validate_syntax_program(
+                        block.program,
+                        context,
+                        Some(implements.span.clone()),
+                        errors,
+                        warnings
+                    );
                 }
             },
             StatementAST::DropStatement(drop_statement) => {
@@ -140,8 +183,14 @@ fn validate_syntax_expression(
                         validate_syntax_expression(&expression, context,errors, warnings);
                     },
                     Right(block) => {
-                        validate_syntax_program(block.program, context, None, errors, warnings);
-                    },
+                        validate_syntax_program(
+                            block.program,
+                            context,
+                            None,
+                            errors,
+                            warnings
+                        );
+                    }
                 }
             }
         },

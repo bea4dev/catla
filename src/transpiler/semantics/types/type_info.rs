@@ -210,3 +210,10 @@ pub struct FunctionDefineInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalGenericID(pub usize);
+
+
+pub struct ImplementsInfo {
+    pub generics: Vec<Arc<GenericType>>,
+    pub interface: Type,
+    pub concrete: Type
+}

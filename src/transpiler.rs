@@ -7,7 +7,7 @@ use fxhash::FxHashMap;
 
 use crate::transpiler::semantics::types::{import_module_collector::collect_import_module_program, type_inference::{type_inference_program, TypeEnvironment}, user_type_element_collector::collect_module_element_types_program};
 
-use self::{advice::{Advice, AdviceReport}, component::ComponentContainer, context::{try_create_module_context, TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::type_define_collector::collect_user_type_program}};
+use self::{advice::{Advice, AdviceReport}, component::ComponentContainer, context::{try_create_module_context, TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::{type_define_collector::collect_user_type_program, type_info::ImplementsInfoSet}}};
 
 pub mod component;
 pub mod name_resolver;
@@ -158,6 +158,7 @@ async fn transpile_module(
     let mut module_element_type_map = FxHashMap::default();
     let mut generics_map = FxHashMap::default();
     let mut module_entity_type_map = FxHashMap::default();
+    let mut implements_infos = ImplementsInfoSet::new();
     collect_module_element_types_program(
         ast,
         &user_type_map,
@@ -167,22 +168,30 @@ async fn transpile_module(
         &mut module_element_type_map,
         &mut generics_map,
         &mut module_entity_type_map,
+        &mut implements_infos,
         &mut errors,
         &mut warnings,
         None,
         &module_context
     );
 
-    let module_element_type_map = Arc::new(module_element_type_map);
+    let module_type_info = Arc::new(module_element_type_map);
+    let implements_infos = Arc::new(implements_infos);
     //dbg!(&module_element_type_map);
-    module_context.module_element_type_future.complete(module_element_type_map.clone()).await;
+    module_context.module_element_type_future.complete(module_type_info.clone()).await;
+    module_context.module_type_implements_infos.complete(implements_infos.clone()).await;
 
     let mut module_element_type_maps = FxHashMap::default();
+    let mut merged_implements_infos = ImplementsInfoSet::new();
+    merged_implements_infos.merge(&implements_infos);
+
     for module_name in import_element_map.values() {
         let module_context = context.get_module_context(module_name).unwrap();
         let module_element_type_map = module_context.module_element_type_future.get().await;
+        let module_type_implements_infos = module_context.module_type_implements_infos.get().await;
 
         module_element_type_maps.insert(module_name.clone(), module_element_type_map);
+        merged_implements_infos.merge(&module_type_implements_infos);
     }
 
     let mut implicit_convert_map = FxHashMap::default();
@@ -193,10 +202,11 @@ async fn transpile_module(
         &import_element_map,
         &name_resolved_map,
         &module_user_type_map,
-        &module_element_type_map,
+        &module_type_info,
         &module_element_type_maps,
         &generics_map,
         &module_entity_type_map,
+        &merged_implements_infos,
         false,
         &mut type_environment,
         &mut implicit_convert_map,

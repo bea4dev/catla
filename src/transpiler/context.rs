@@ -5,7 +5,7 @@ use tokio::runtime::{Builder, Runtime};
 
 use crate::{localize::localizer::LocalizedText, transpiler::error::TranspileReport};
 
-use super::{future::SharedManualFuture, resource::SourceCodeProvider, semantics::types::type_info::Type, SourceCode, TranspileError, TranspileWarning};
+use super::{future::SharedManualFuture, resource::SourceCodeProvider, semantics::types::type_info::{ImplementsInfoSet, Type}, SourceCode, TranspileError, TranspileWarning};
 
 
 pub struct TranspileContext {
@@ -87,7 +87,8 @@ pub fn try_create_module_context(context: &Arc<TranspileContext>, module_name: &
         module_name: module_name.clone(),
         context: context.clone(),
         user_type_future: SharedManualFuture::new(),
-        module_element_type_future: SharedManualFuture::new()
+        module_element_type_future: SharedManualFuture::new(),
+        module_type_implements_infos: SharedManualFuture::new()
     });
     module_context_map.insert(module_name.clone(), module_context.clone());
     
@@ -106,5 +107,6 @@ pub struct TranspileModuleContext {
     pub module_name: String,
     pub context: Arc<TranspileContext>,
     pub user_type_future: SharedManualFuture<FxHashMap<String, Type>>,
-    pub module_element_type_future: SharedManualFuture<FxHashMap<String, Type>>
+    pub module_element_type_future: SharedManualFuture<FxHashMap<String, Type>>,
+    pub module_type_implements_infos: SharedManualFuture<ImplementsInfoSet>
 }

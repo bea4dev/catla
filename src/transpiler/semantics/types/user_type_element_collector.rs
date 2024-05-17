@@ -1,4 +1,4 @@
-use std::{mem, ops::DerefMut, sync::{Arc, Mutex}};
+use std::{mem, ops::DerefMut, sync::Arc};
 
 use ariadne::Color;
 use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
@@ -7,7 +7,7 @@ use fxhash::FxHashMap;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::type_info::{FunctionDefineInfo, FunctionType, GenericType, Type};
+use super::type_info::{FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, Type};
 
 
 pub(crate) fn collect_module_element_types_program(
@@ -19,6 +19,7 @@ pub(crate) fn collect_module_element_types_program(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     current_user_type_name: Option<&str>,
@@ -82,6 +83,7 @@ pub(crate) fn collect_module_element_types_program(
                         module_element_type_map,
                         generics_map,
                         module_entity_type_map,
+                        implements_infos,
                         errors,
                         warnings,
                         Some(*user_type_name),
@@ -112,6 +114,7 @@ pub(crate) fn collect_module_element_types_program(
                     module_element_type_map,
                     generics_map,
                     module_entity_type_map,
+                    implements_infos,
                     errors,
                     warnings,
                     context
@@ -126,6 +129,7 @@ pub(crate) fn collect_module_element_types_program(
                         module_element_type_map,
                         generics_map,
                         module_entity_type_map,
+                        implements_infos,
                         errors,
                         warnings,
                         context
@@ -142,6 +146,7 @@ pub(crate) fn collect_module_element_types_program(
                     module_element_type_map,
                     generics_map,
                     module_entity_type_map,
+                    implements_infos,
                     errors,
                     warnings,
                     context
@@ -156,6 +161,7 @@ pub(crate) fn collect_module_element_types_program(
                         module_element_type_map,
                         generics_map,
                         module_entity_type_map,
+                        implements_infos,
                         errors,
                         warnings,
                         context
@@ -173,6 +179,7 @@ pub(crate) fn collect_module_element_types_program(
                         module_element_type_map,
                         generics_map,
                         module_entity_type_map,
+                        implements_infos,
                         errors,
                         warnings,
                         None,
@@ -194,6 +201,7 @@ pub(crate) fn collect_module_element_types_program(
                         module_element_type_map,
                         generics_map,
                         module_entity_type_map,
+                        implements_infos,
                         errors,
                         warnings,
                         None,
@@ -238,6 +246,49 @@ pub(crate) fn collect_module_element_types_program(
                         }
                     }
 
+                    if let Some(super_type_info) = &data_struct_define.super_type_info {
+                        let concrete = user_type_map.get(name.value).unwrap().clone();
+                        let generics = data_struct_define.generics_define.as_ref()
+                            .map(|define| {
+                                get_generic_type(
+                                    define,
+                                    user_type_map,
+                                    import_element_map,
+                                    name_resolved_map,
+                                    module_user_type_map,
+                                    module_element_type_map,
+                                    generics_map,
+                                    errors,
+                                    warnings,
+                                    context
+                                )
+                            })
+                            .unwrap_or_else(|| { vec![] });
+                        let generics = Arc::new(generics);
+
+                        for type_info in super_type_info.type_infos.iter() {
+                            let interface = get_type(
+                                type_info,
+                                user_type_map,
+                                import_element_map,
+                                name_resolved_map,
+                                module_user_type_map,
+                                module_element_type_map,
+                                generics_map,
+                                errors,
+                                warnings,
+                                context
+                            );
+
+                            let implements_info = ImplementsInfo {
+                                generics: generics.clone(),
+                                interface,
+                                concrete: concrete.clone()
+                            };
+                            implements_infos.add(implements_info);
+                        }
+                    }
+
                     if let Some(block) = &data_struct_define.block.value {
                         collect_module_element_types_program(
                             block.program,
@@ -247,12 +298,85 @@ pub(crate) fn collect_module_element_types_program(
                             module_element_type_map,
                             generics_map,
                             module_entity_type_map,
+                            implements_infos,
                             errors,
                             warnings,
                             Some(name.value),
                             context
                         );
                     }
+                }
+            },
+            StatementAST::Implements(implements) => {
+                if let Ok(interface) = &implements.interface {
+                    if let Ok(target_type) = &implements.target_user_type {
+                        let generics = implements.generics_define.as_ref().map(|define| {
+                            get_generic_type(
+                                &define,
+                                user_type_map,
+                                import_element_map,
+                                name_resolved_map,
+                                module_user_type_map,
+                                module_element_type_map,
+                                generics_map,
+                                errors,
+                                warnings,
+                                context
+                            )
+                        }).unwrap_or_else(|| { vec![] });
+                        let generics = Arc::new(generics);
+
+                        let interface = get_type(
+                            interface,
+                            user_type_map,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            generics_map,
+                            errors,
+                            warnings,
+                            context
+                        );
+
+                        let concrete = get_type(
+                            target_type,
+                            user_type_map,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            generics_map,
+                            errors,
+                            warnings,
+                            context
+                        );
+
+                        let implements_info = ImplementsInfo {
+                            generics,
+                            interface,
+                            concrete,
+                        };
+                        implements_infos.add(implements_info);
+                    }
+                }
+
+                if let Some(block) = &implements.block.value {
+                    collect_module_element_types_program(
+                        block.program,
+                        user_type_map,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        generics_map,
+                        module_entity_type_map,
+                        implements_infos,
+                        errors,
+                        warnings,
+                        current_user_type_name,
+                        context
+                    );
                 }
             },
             StatementAST::DropStatement(drop_statement) => {
@@ -266,6 +390,7 @@ pub(crate) fn collect_module_element_types_program(
                         module_element_type_map,
                         generics_map,
                         module_entity_type_map,
+                        implements_infos,
                         errors,
                         warnings,
                         context
@@ -282,6 +407,7 @@ pub(crate) fn collect_module_element_types_program(
                     module_element_type_map,
                     generics_map,
                     module_entity_type_map,
+                    implements_infos,
                     errors,
                     warnings,
                     context
@@ -352,6 +478,7 @@ pub(crate) fn collect_module_element_types_program(
                             module_element_type_map,
                             generics_map,
                             module_entity_type_map,
+                            implements_infos,
                             errors,
                             warnings,
                             context
@@ -373,6 +500,7 @@ fn get_function_type_and_name<'allocator>(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     current_user_type_name: Option<&str>,
@@ -457,6 +585,7 @@ fn get_function_type_and_name<'allocator>(
             module_element_type_map,
             generics_map,
             module_entity_type_map,
+            implements_infos,
             errors,
             warnings,
             current_user_type_name,
@@ -509,6 +638,7 @@ fn collect_module_element_types_expression(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -524,6 +654,7 @@ fn collect_module_element_types_expression(
                 module_element_type_map,
                 generics_map,
                 module_entity_type_map,
+                implements_infos,
                 errors,
                 warnings,
                 context
@@ -539,6 +670,7 @@ fn collect_module_element_types_expression(
                         module_element_type_map,
                         generics_map,
                         module_entity_type_map,
+                        implements_infos,
                         errors,
                         warnings,
                         context
@@ -557,6 +689,7 @@ fn collect_module_element_types_expression(
                     module_element_type_map,
                     generics_map,
                     module_entity_type_map,
+                    implements_infos,
                     errors,
                     warnings,
                     context
@@ -576,6 +709,7 @@ fn collect_module_element_types_expression(
                             module_element_type_map,
                             generics_map,
                             module_entity_type_map,
+                            implements_infos,
                             errors,
                             warnings,
                             context
@@ -591,6 +725,7 @@ fn collect_module_element_types_expression(
                             module_element_type_map,
                             generics_map,
                             module_entity_type_map,
+                            implements_infos,
                             errors,
                             warnings,
                             None,
@@ -612,6 +747,7 @@ fn collect_module_element_types_and_expression(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -625,6 +761,7 @@ fn collect_module_element_types_and_expression(
         module_element_type_map,
         generics_map,
         module_entity_type_map,
+        implements_infos,
         errors,
         warnings,
         context
@@ -640,6 +777,7 @@ fn collect_module_element_types_and_expression(
                 module_element_type_map,
                 generics_map,
                 module_entity_type_map,
+                implements_infos,
                 errors,
                 warnings,
                 context
@@ -657,6 +795,7 @@ fn collect_module_element_types_eqne_expression(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -670,6 +809,7 @@ fn collect_module_element_types_eqne_expression(
         module_element_type_map,
         generics_map,
         module_entity_type_map,
+        implements_infos,
         errors,
         warnings,
         context
@@ -685,6 +825,7 @@ fn collect_module_element_types_eqne_expression(
                 module_element_type_map,
                 generics_map,
                 module_entity_type_map,
+                implements_infos,
                 errors,
                 warnings,
                 context
@@ -702,6 +843,7 @@ fn collect_module_element_types_compare_expression(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -715,6 +857,7 @@ fn collect_module_element_types_compare_expression(
         module_element_type_map,
         generics_map,
         module_entity_type_map,
+        implements_infos,
         errors,
         warnings,
         context
@@ -730,6 +873,7 @@ fn collect_module_element_types_compare_expression(
                 module_element_type_map,
                 generics_map,
                 module_entity_type_map,
+                implements_infos,
                 errors,
                 warnings,
                 context
@@ -747,6 +891,7 @@ fn collect_module_element_types_add_or_sub_expression(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -760,6 +905,7 @@ fn collect_module_element_types_add_or_sub_expression(
         module_element_type_map,
         generics_map,
         module_entity_type_map,
+        implements_infos,
         errors,
         warnings,
         context
@@ -775,6 +921,7 @@ fn collect_module_element_types_add_or_sub_expression(
                 module_element_type_map,
                 generics_map,
                 module_entity_type_map,
+                implements_infos,
                 errors,
                 warnings,
                 context
@@ -792,6 +939,7 @@ fn collect_module_element_types_mul_or_div_expression(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -805,6 +953,7 @@ fn collect_module_element_types_mul_or_div_expression(
         module_element_type_map,
         generics_map,
         module_entity_type_map,
+        implements_infos,
         errors,
         warnings,
         context
@@ -820,6 +969,7 @@ fn collect_module_element_types_mul_or_div_expression(
                 module_element_type_map,
                 generics_map,
                 module_entity_type_map,
+                implements_infos,
                 errors,
                 warnings,
                 context
@@ -837,6 +987,7 @@ fn collect_module_element_types_factor(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -851,6 +1002,7 @@ fn collect_module_element_types_factor(
             module_element_type_map,
             generics_map,
             module_entity_type_map,
+            implements_infos,
             errors,
             warnings,
             context
@@ -867,6 +1019,7 @@ fn collect_module_element_types_primary(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -880,6 +1033,7 @@ fn collect_module_element_types_primary(
         module_element_type_map,
         generics_map,
         module_entity_type_map,
+        implements_infos,
         errors,
         warnings,
         context
@@ -894,6 +1048,7 @@ fn collect_module_element_types_primary(
             module_element_type_map,
             generics_map,
             module_entity_type_map,
+            implements_infos,
             errors,
             warnings,
             context
@@ -910,6 +1065,7 @@ fn collect_module_element_types_primary_left(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -928,6 +1084,7 @@ fn collect_module_element_types_primary_left(
                             module_element_type_map,
                             generics_map,
                             module_entity_type_map,
+                            implements_infos,
                             errors,
                             warnings,
                             context
@@ -947,6 +1104,7 @@ fn collect_module_element_types_primary_left(
                     module_element_type_map,
                     generics_map,
                     module_entity_type_map,
+                    implements_infos,
                     errors,
                     warnings,
                     context
@@ -966,6 +1124,7 @@ fn collect_module_element_types_primary_left(
                             module_element_type_map,
                             generics_map,
                             module_entity_type_map,
+                            implements_infos,
                             errors,
                             warnings,
                             context
@@ -986,6 +1145,7 @@ fn collect_module_element_types_primary_left(
                     module_element_type_map,
                     generics_map,
                     module_entity_type_map,
+                    implements_infos,
                     errors,
                     warnings,
                     context
@@ -1001,6 +1161,7 @@ fn collect_module_element_types_primary_left(
                     module_element_type_map,
                     generics_map,
                     module_entity_type_map,
+                    implements_infos,
                     errors,
                     warnings,
                     None,
@@ -1022,6 +1183,7 @@ fn collect_module_element_types_primary_left(
                                     module_element_type_map,
                                     generics_map,
                                     module_entity_type_map,
+                                    implements_infos,
                                     errors,
                                     warnings,
                                     context
@@ -1037,6 +1199,7 @@ fn collect_module_element_types_primary_left(
                                     module_element_type_map,
                                     generics_map,
                                     module_entity_type_map,
+                                    implements_infos,
                                     errors,
                                     warnings,
                                     None,
@@ -1054,6 +1217,7 @@ fn collect_module_element_types_primary_left(
                                 module_element_type_map,
                                 generics_map,
                                 module_entity_type_map,
+                                implements_infos,
                                 errors,
                                 warnings,
                                 None,
@@ -1075,6 +1239,7 @@ fn collect_module_element_types_primary_left(
                     module_element_type_map,
                     generics_map,
                     module_entity_type_map,
+                    implements_infos,
                     errors,
                     warnings,
                     None,
@@ -1094,6 +1259,7 @@ fn collect_module_element_types_primary_left(
             module_element_type_map,
             generics_map,
             module_entity_type_map,
+            implements_infos,
             errors,
             warnings,
             context
@@ -1110,6 +1276,7 @@ fn collect_module_element_types_primary_right(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -1125,6 +1292,7 @@ fn collect_module_element_types_primary_right(
                 module_element_type_map,
                 generics_map,
                 module_entity_type_map,
+                implements_infos,
                 errors,
                 warnings,
                 context
@@ -1142,6 +1310,7 @@ fn collect_module_element_types_primary_right(
             module_element_type_map,
             generics_map,
             module_entity_type_map,
+            implements_infos,
             errors,
             warnings,
             context
@@ -1158,6 +1327,7 @@ fn collect_module_element_types_mapping_operator(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -1178,6 +1348,7 @@ fn collect_module_element_types_mapping_operator(
             module_element_type_map,
             generics_map,
             module_entity_type_map,
+            implements_infos,
             errors,
             warnings,
             None,
@@ -1195,6 +1366,7 @@ fn collect_module_element_types_function_call(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -1210,6 +1382,7 @@ fn collect_module_element_types_function_call(
                 module_element_type_map,
                 generics_map,
                 module_entity_type_map,
+                implements_infos,
                 errors,
                 warnings,
                 context
@@ -1426,13 +1599,13 @@ fn get_generic_type<'allocator>(
                 context
             );
             // TODO - check sanity of bound types
-            bounds.push(ty);
+            bounds.push(Spanned::new(ty, bound.span.clone()));
         }
 
         let generic = Arc::new(GenericType {
             define_entity_id: entity_id,
             name: element.name.value.to_string(),
-            bounds: Mutex::new(bounds),
+            bounds: FreezableMutex::new(bounds),
         });
 
         generics_map.insert(entity_id, generic.clone());

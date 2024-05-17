@@ -1,9 +1,12 @@
-use std::{collections::HashMap, ops::Range, sync::{Arc, Mutex}};
+use std::{collections::HashMap, mem::swap, ops::Range, sync::{Arc, Mutex, MutexGuard, PoisonError}};
 
 use catla_parser::parser::{DataStructKindEnum, Spanned};
 use derivative::Derivative;
+use either::Either;
 
 use crate::transpiler::component::EntityID;
+
+use super::type_inference::TypeEnvironment;
 
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,10 +179,50 @@ impl PartialEq for DataStructInfo {
 impl Eq for DataStructInfo {}
 
 #[derive(Debug)]
+pub struct FreezableMutex<T: Default> {
+    mutex: Mutex<Either<T, Arc<T>>>
+}
+
+impl<T: Default> FreezableMutex<T> {
+    
+    pub fn new(value: T) -> Self {
+        Self {
+            mutex: Mutex::new(Either::Left(value))
+        }
+    }
+
+    pub fn lock(&self) -> Result<MutexGuard<Either<T, Arc<T>>>, PoisonError<MutexGuard<Either<T, Arc<T>>>>> {
+        self.mutex.lock()
+    }
+
+    pub fn freeze_and_get(&self) -> Arc<T> {
+        let mut lock = self.mutex.lock().unwrap();
+
+        if lock.is_left() {
+            let arc = if let Either::Left(value) = lock.as_mut() {
+                let mut temp = T::default();
+                swap(value, &mut temp);
+                Arc::new(temp)
+            } else {
+                unreachable!()
+            };
+
+            *lock = Either::Right(arc.clone());
+
+            arc
+        } else {
+            lock.as_mut().right().unwrap().clone()
+        }
+    }
+
+}
+
+
+#[derive(Debug)]
 pub struct GenericType {
     pub(crate) define_entity_id: EntityID,
     pub name: String,
-    pub bounds: Mutex<Vec<Type>>
+    pub bounds: FreezableMutex<Vec<Spanned<Type>>>
 }
 
 impl PartialEq for GenericType {
@@ -212,8 +255,141 @@ pub struct FunctionDefineInfo {
 pub struct LocalGenericID(pub usize);
 
 
+#[derive(Debug, Clone)]
 pub struct ImplementsInfo {
-    pub generics: Vec<Arc<GenericType>>,
+    pub generics: Arc<Vec<Arc<GenericType>>>,
     pub interface: Type,
     pub concrete: Type
+}
+
+impl ImplementsInfo {
+    
+    fn contains_target_type(
+        self_type: &Type,
+        ty: &Type,
+        lacked_bounds: &mut Vec<Spanned<Type>>,
+        collect_lacked_bounds: bool
+    ) -> bool {
+        match self_type {
+            Type::Int8 => ty == &Type::Int8,
+            Type::Int16 => ty == &Type::Int16,
+            Type::Int32 => ty == &Type::Int32,
+            Type::Int64 => ty == &Type::Int64,
+            Type::Uint8 => ty == &Type::Uint8,
+            Type::Uint16 => ty == &Type::Uint16,
+            Type::Uint32 => ty == &Type::Uint32,
+            Type::Uint64 => ty == &Type::Uint64,
+            Type::Float32 => ty == &Type::Float32,
+            Type::Float64 => ty == &Type::Float64,
+            Type::Bool => ty == &Type::Bool,
+            Type::Unit => ty == &Type::Unit,
+            Type::UserType { user_type_info: self_user_type_info, generics: self_generics } => {
+                if let Type::UserType { user_type_info, generics } = ty {
+                    if self_user_type_info != user_type_info {
+                        return false;
+                    }
+
+                    
+                } else {
+                    false
+                }
+            },
+            Type::Function { function_info, generics } => todo!(),
+            Type::Generic(_) => todo!(),
+            Type::LocalGeneric(_) => todo!(),
+            Type::Option(_) => todo!(),
+            Type::Result { value, error } => todo!(),
+            Type::Unknown => todo!(),
+        }
+    }
+
+    fn contains_target_generic_types(
+        self_generics: &Vec<Arc<GenericType>>,
+        generics: &Vec<Arc<GenericType>>,
+        lacked_bounds: &mut Vec<Spanned<Type>>,
+        collect_lacked_bounds: bool
+    ) -> bool {
+        if self_generics.len() != generics.len() {
+            return false;
+        }
+
+        let mut contains = true;
+        for i in 0..self_generics.len() {
+            let self_generic = self_generics[i].as_ref();
+            let generic = generics[i].as_ref();
+
+            if !ImplementsInfo::contains_target_generic_type(
+                self_generic,
+                generic,
+                lacked_bounds,
+                collect_lacked_bounds
+            ) {
+                contains = false;
+            }
+        }
+
+        contains
+    }
+
+    fn contains_target_generic_type(
+        self_generic: &GenericType,
+        generic: &GenericType,
+        lacked_bounds: &mut Vec<Spanned<Type>>,
+        collect_lacked_bounds: bool
+    ) -> bool {
+        let mut is_satisfy = true;
+
+        for self_bound in self_generic.bounds.freeze_and_get().iter() {
+            for bound in generic.bounds.freeze_and_get().iter() {
+                if !ImplementsInfo::contains_target_type(
+                    &self_bound.value,
+                    &bound.value,
+                    lacked_bounds,
+                    collect_lacked_bounds
+                ) {
+                    is_satisfy = false;
+                    if collect_lacked_bounds {
+                        lacked_bounds.push(self_bound.clone());
+                    }
+                }
+            }
+        }
+
+        is_satisfy
+    }
+
+}
+
+
+pub struct ImplementsInfoSet {
+    implements_infos: Vec<ImplementsInfo>
+}
+
+
+impl ImplementsInfoSet {
+    
+    pub fn new() -> Self {
+        Self {
+            implements_infos: vec![]
+        }
+    }
+
+    pub fn add(&mut self, implements_info: ImplementsInfo) {
+        self.implements_infos.push(implements_info);
+    }
+
+    pub fn merge(&mut self, other: &ImplementsInfoSet) {
+        self.implements_infos.extend(other.implements_infos.clone());
+    }
+
+    pub fn is_satisfied(&self, ty: &Type, generic_type: &GenericType) -> Result<(), Vec<Spanned<Type>>> {
+        
+    }
+
+    pub fn is_implemented(&self, ty: &Type, interface: &Type) -> bool {
+        self.implements_infos.iter().any(|implements| {
+            
+        })
+    }
+
 }

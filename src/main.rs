@@ -15,7 +15,7 @@ fn main() {
 "
 import test::test_module2
 
-class TestClass<T> {
+class TestClass<T>: TestInterface {
     let field: T?
 
     function test() -> TestClass<T> {
@@ -23,6 +23,13 @@ class TestClass<T> {
             field: null
         }
     }
+}
+
+implements<T: TestInterface> TestInterface for TestClass<T> {}
+implements TestInterface for int {}
+
+interface TestInterface {
+    
 }
 
 let a = new TestClass { field: 100 }
@@ -45,6 +52,11 @@ function <T, E> ok(value: T) -> T!<E> {
 }
 
 function <T, E> error(error: E) -> T!<E> {}
+
+
+test_generic(a)
+
+function <T: TestInterface> test_generic(value: T) {}
 ";
 let source1 = 
 "

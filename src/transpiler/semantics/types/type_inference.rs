@@ -16,6 +16,7 @@ use super::{import_module_collector::{get_module_name_from_new_expression, get_m
 const IF_CONDITION_TYPE_ERROR: usize = 0038;
 const FUNCTION_CALL_TYPE_ERROR: usize = 0039;
 const MAPPING_OPERATOR_TYPE_ERROR: usize = 0041;
+const BOUNDS_NOT_SATISFIED_ERROR: usize = 0046;
 
 
 pub(crate) struct TypeEnvironment<'allocator> {
@@ -616,10 +617,13 @@ impl<'allocator> TypeEnvironment<'allocator> {
     pub(crate) fn collect_info(
         &self,
         implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
+        implements_infos: &ImplementsInfoSet,
         errors: &mut Vec<TranspileError>,
         warnings: &mut Vec<TranspileWarning>
     ) {
         implicit_convert_map.extend(&self.implicit_convert_map);
+
+        self.type_check_bounds(implements_infos, errors);
 
         for report in self.lazy_type_reports.iter() {
             match report.build_report(self) {
@@ -629,7 +633,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
     }
 
-    pub(crate) fn type_check_bounds(&self, implements_infos: &ImplementsInfoSet, errors: &mut Vec<TranspileError>) {
+    fn type_check_bounds(&self, implements_infos: &ImplementsInfoSet, errors: &mut Vec<TranspileError>) {
         for (generic_id, generic_define) in self.generic_bounds_checks.iter() {
             let type_resolved = self.resolve_generic_type(generic_id.value).1;
             let result = implements_infos.is_satisfied(
@@ -639,9 +643,17 @@ impl<'allocator> TypeEnvironment<'allocator> {
             );
 
             if let Err(bounds) = result {
-                let error = TranspileError::new(BoundsNotSatisfied {
-                    type_span: generic_id.span.clone(),
-                    not_satisfied: bounds
+                let type_name = type_resolved.map(|ty| { self.get_type_display_string(&ty) });
+                let bounds_module_name = bounds.first().unwrap().module_name.clone();
+                let not_satisfied_bounds = bounds.into_iter().map(|bound| {
+                    Spanned::new(self.get_type_display_string(&bound.ty), bound.span.clone())
+                }).collect();
+
+                let error = TranspileError::new(BoundsNotSatisfiedError {
+                    span: generic_id.span.clone(),
+                    type_name,
+                    bounds_module_name,
+                    not_satisfied_bounds
                 });
                 errors.push(error);
             }
@@ -826,7 +838,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         );
                     }
 
-                    type_environment.collect_info(implicit_convert_map, errors, warnings);
+                    type_environment.collect_info(implicit_convert_map, implements_infos, errors, warnings);
                 }
             },
             StatementAST::UserTypeDefine(data_struct_define) => {
@@ -852,7 +864,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         context
                     );
 
-                    type_environment.collect_info(implicit_convert_map, errors, warnings);
+                    type_environment.collect_info(implicit_convert_map, implements_infos, errors, warnings);
                 }
             },
             StatementAST::DropStatement(drop_statement) => {
@@ -3402,53 +3414,82 @@ impl TranspileReport for UnexpectedTypeErrorReport {
 }
 
 
-struct BoundsNotSatisfied {
-    type_span: Range<usize>,
-    not_satisfied: Vec<Arc<Bound>>
+struct BoundsNotSatisfiedError {
+    span: Range<usize>,
+    type_name: Spanned<String>,
+    bounds_module_name: String,
+    not_satisfied_bounds: Vec<Spanned<String>>
 }
 
-impl TranspileReport for BoundsNotSatisfied {
+impl TranspileReport for BoundsNotSatisfiedError {
     fn print(&self, context: &TranspileModuleContext) {
         let module_name = &context.module_name;
         let text = &context.context.localized_text;
-        let key = ErrorMessageKey::new(self.error_code);
+        let key = ErrorMessageKey::new(BOUNDS_NOT_SATISFIED_ERROR);
 
         let message = key.get_massage(text, ErrorMessageType::Message);
 
-        let mut builder = Report::build(ReportKind::Error, module_name, self.found_type.span.start)
-            .with_code(self.error_code)
+        let mut builder = Report::build(ReportKind::Error, module_name, self.span.start)
+            .with_code(BOUNDS_NOT_SATISFIED_ERROR)
             .with_message(message);
 
-        let expected_text = text.get_text(self.expected_kind.value.get_key());
+        let type_text = self.type_name.value.clone().fg(Color::Red).to_string();
+
+        let bounds_text = self.not_satisfied_bounds.iter()
+            .map(|bound| { bound.value.clone().fg(Color::Yellow).to_string() })
+            .collect::<Vec<String>>()
+            .join(", ");
 
         builder.add_label(
-            Label::new((module_name, self.found_type.span.clone()))
+            Label::new((module_name.clone(), self.span.clone()))
                 .with_color(Color::Red)
                 .with_message(
                     key.get_massage(text, ErrorMessageType::Label(0))
-                        .replace("%found", self.found_type.value.clone().fg(Color::Red).to_string().as_str())
-                        .replace("%expected", expected_text.as_str().fg(Color::Green).to_string().as_str())
+                        .replace("%type", &type_text)
+                        .replace("%bounds", &bounds_text)
                 )
         );
 
         builder.add_label(
-            Label::new((module_name, self.expected_kind.span.clone()))
+            Label::new((module_name.clone(), self.type_name.span.clone()))
                 .with_color(Color::Yellow)
                 .with_message(
                     key.get_massage(text, ErrorMessageType::Label(1))
-                        .replace("%found", self.found_type.value.clone().fg(Color::Red).to_string().as_str())
-                        .replace("%expected", expected_text.as_str().fg(Color::Green).to_string().as_str())
+                        .replace("%type", &type_text)
                 )
         );
 
+        for bound in self.not_satisfied_bounds.iter() {
+            let bound_text = bound.value.clone().fg(Color::Yellow).to_string();
+
+            builder.add_label(
+                Label::new((self.bounds_module_name.clone(), bound.span.clone()))
+                    .with_color(Color::Yellow)
+                    .with_message(
+                        key.get_massage(text, ErrorMessageType::Label(2))
+                            .replace("%bound", &bound_text)
+                    )
+            );
+        }
+
         if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            let note = note.replace("%type", &type_text).replace("%bounds", &bounds_text);
             builder.set_note(note);
         }
 
         if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            let help = help.replace("%type", &type_text).replace("%bounds", &bounds_text);
             builder.set_help(help);
         }
 
-        builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+
+        let bounds_module_context = context.context.get_module_context(&self.bounds_module_name).unwrap();
+
+        let source_list = vec![
+            (module_name.clone(), context.source_code.code.as_str()),
+            (self.bounds_module_name.clone(), bounds_module_context.source_code.code.as_str())
+        ];
+
+        builder.finish().print(sources(source_list)).unwrap();
     }
 }

@@ -7,7 +7,7 @@ use fxhash::FxHashMap;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::type_info::{FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, Type};
+use super::type_info::{Bound, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, Type};
 
 
 pub(crate) fn collect_module_element_types_program(
@@ -1599,7 +1599,11 @@ fn get_generic_type<'allocator>(
                 context
             );
             // TODO - check sanity of bound types
-            bounds.push(Spanned::new(ty, bound.span.clone()));
+            bounds.push(Arc::new(Bound {
+                module_name: context.module_name.clone(),
+                span: bound.span.clone(),
+                ty
+            }));
         }
 
         let generic = Arc::new(GenericType {

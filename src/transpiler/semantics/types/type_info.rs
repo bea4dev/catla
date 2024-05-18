@@ -222,7 +222,7 @@ impl<T: Default> FreezableMutex<T> {
 pub struct GenericType {
     pub(crate) define_entity_id: EntityID,
     pub name: String,
-    pub bounds: FreezableMutex<Vec<Spanned<Type>>>
+    pub bounds: FreezableMutex<Vec<Arc<Bound>>>
 }
 
 impl PartialEq for GenericType {
@@ -231,6 +231,13 @@ impl PartialEq for GenericType {
     }
 }
 impl Eq for GenericType {}
+
+#[derive(Debug)]
+pub struct Bound {
+    pub module_name: String,
+    pub span: Range<usize>,
+    pub ty: Type
+}
 
 #[derive(Derivative)]
 #[derivative(Debug, PartialEq, Eq)]
@@ -267,9 +274,20 @@ impl ImplementsInfo {
     fn contains_target_type(
         self_type: &Type,
         ty: &Type,
-        lacked_bounds: &mut Vec<Spanned<Type>>,
-        collect_lacked_bounds: bool
+        implements_infos: &ImplementsInfoSet,
+        type_environment: &TypeEnvironment
     ) -> bool {
+        if let Type::LocalGeneric(generic_id) = ty {
+            let (_, ty) = type_environment.resolve_generic_type(*generic_id);
+
+            return ImplementsInfo::contains_target_type(
+                self_type,
+                &ty.value,
+                implements_infos,
+                type_environment
+            );
+        }
+
         match self_type {
             Type::Int8 => ty == &Type::Int8,
             Type::Int16 => ty == &Type::Int16,
@@ -288,74 +306,127 @@ impl ImplementsInfo {
                     if self_user_type_info != user_type_info {
                         return false;
                     }
-
                     
+                    if self_generics.len() != generics.len() {
+                        return false;
+                    }
+                    
+                    for i in 0..self_generics.len() {
+                        let self_generic = &self_generics[i];
+                        let generic = &generics[i];
+            
+                        if !ImplementsInfo::contains_target_type(
+                            self_generic,
+                            generic,
+                            implements_infos,
+                            type_environment
+                        ) {
+                            return false;
+                        }
+                    }
+
+                    true
                 } else {
                     false
                 }
             },
-            Type::Function { function_info, generics } => todo!(),
-            Type::Generic(_) => todo!(),
-            Type::LocalGeneric(_) => todo!(),
-            Type::Option(_) => todo!(),
-            Type::Result { value, error } => todo!(),
-            Type::Unknown => todo!(),
-        }
-    }
+            Type::Function { function_info: self_function_info, generics: _ } => {
+                if let Type::Function { function_info, generics: _ } = ty {
+                    if !ImplementsInfo::contains_target_type(
+                        &self_function_info.return_type.value,
+                        &function_info.return_type.value,
+                        implements_infos,
+                        type_environment
+                    ) {
+                        return false;
+                    }
+                    
+                    if self_function_info.argument_types.len() != function_info.argument_types.len() {
+                        return false;
+                    }
 
-    fn contains_target_generic_types(
-        self_generics: &Vec<Arc<GenericType>>,
-        generics: &Vec<Arc<GenericType>>,
-        lacked_bounds: &mut Vec<Spanned<Type>>,
-        collect_lacked_bounds: bool
-    ) -> bool {
-        if self_generics.len() != generics.len() {
-            return false;
-        }
+                    for i in 0..self_function_info.argument_types.len() {
+                        let self_argument_type = &self_function_info.argument_types[i];
+                        let argument_type = &function_info.argument_types[i];
 
-        let mut contains = true;
-        for i in 0..self_generics.len() {
-            let self_generic = self_generics[i].as_ref();
-            let generic = generics[i].as_ref();
+                        if !ImplementsInfo::contains_target_type(
+                            self_argument_type,
+                            argument_type,
+                            implements_infos,
+                            type_environment
+                        ) {
+                            return false;
+                        }
+                    }
+                    
+                    true
+                } else {
+                    false
+                }
+            },
+            Type::Generic(self_generic_type) => {
+                if let Type::Generic(generic_type) = ty {
+                    for self_bound in self_generic_type.bounds.freeze_and_get().iter() {
+                        let mut is_satisfied = false;
+                        for bound in generic_type.bounds.freeze_and_get().iter() {
+                            if ImplementsInfo::contains_target_type(
+                                &self_bound.ty,
+                                &bound.ty,
+                                implements_infos,
+                                type_environment
+                            ) {
+                                is_satisfied = true;
+                                break;
+                            }
+                        }
 
-            if !ImplementsInfo::contains_target_generic_type(
-                self_generic,
-                generic,
-                lacked_bounds,
-                collect_lacked_bounds
-            ) {
-                contains = false;
-            }
-        }
-
-        contains
-    }
-
-    fn contains_target_generic_type(
-        self_generic: &GenericType,
-        generic: &GenericType,
-        lacked_bounds: &mut Vec<Spanned<Type>>,
-        collect_lacked_bounds: bool
-    ) -> bool {
-        let mut is_satisfy = true;
-
-        for self_bound in self_generic.bounds.freeze_and_get().iter() {
-            for bound in generic.bounds.freeze_and_get().iter() {
-                if !ImplementsInfo::contains_target_type(
-                    &self_bound.value,
-                    &bound.value,
-                    lacked_bounds,
-                    collect_lacked_bounds
-                ) {
-                    is_satisfy = false;
-                    if collect_lacked_bounds {
-                        lacked_bounds.push(self_bound.clone());
+                        if !is_satisfied {
+                            return false;
+                        }
+                    }
+                    
+                    return true;
+                }
+                
+                for bound in self_generic_type.bounds.freeze_and_get().iter() {
+                    if !implements_infos.is_implemented(ty, &bound.ty, type_environment) {
+                        return false;
                     }
                 }
-            }
+                true
+            },
+            Type::LocalGeneric(_) => unreachable!(),
+            Type::Option(self_value_type) => {
+                if let Type::Option(value_type) = ty {
+                    ImplementsInfo::contains_target_type(
+                        &self_value_type,
+                        &value_type,
+                        implements_infos,
+                        type_environment
+                    )
+                } else {
+                    false
+                }
+            },
+            Type::Result { value: self_value, error: self_error } => {
+                if let Type::Result { value, error } = ty {
+                    ImplementsInfo::contains_target_type(
+                        &self_value,
+                        &value,
+                        implements_infos,
+                        type_environment
+                    ) && ImplementsInfo::contains_target_type(
+                        &self_error,
+                        &error,
+                        implements_infos,
+                        type_environment
+                    )
+                } else {
+                    false
+                }
+            },
+            Type::Unknown => false
         }
-
-        is_satisfy
     }
 
 }
@@ -382,14 +453,43 @@ impl ImplementsInfoSet {
         self.implements_infos.extend(other.implements_infos.clone());
     }
 
-    pub fn is_satisfied(&self, ty: &Type, generic_type: &GenericType) -> Result<(), Vec<Spanned<Type>>> {
-        
+    pub fn is_implemented(&self, ty: &Type, interface: &Type, type_environment: &TypeEnvironment) -> bool {
+        for implements_info in self.implements_infos.iter() {
+            if ImplementsInfo::contains_target_type(
+                &implements_info.concrete,
+                ty,
+                self,
+                type_environment
+            ) && (ImplementsInfo::contains_target_type(
+                &implements_info.interface,
+                interface,
+                self,
+                type_environment
+            ) || ImplementsInfo::contains_target_type(
+                interface,
+                &implements_info.interface,
+                self,
+                type_environment
+            )) {
+                return true;
+            }
+        }
+        false
     }
 
-    pub fn is_implemented(&self, ty: &Type, interface: &Type) -> bool {
-        self.implements_infos.iter().any(|implements| {
-            
-        })
+    pub fn is_satisfied(&self, ty: &Type, generic_type: &GenericType, type_environment: &TypeEnvironment) -> Result<(), Vec<Arc<Bound>>> {
+        let mut not_satisfied_types = Vec::new();
+        for bound in generic_type.bounds.freeze_and_get().iter() {
+            if !self.is_implemented(ty, &bound.ty, type_environment) {
+                not_satisfied_types.push(bound.clone())
+            }
+        }
+        
+        if not_satisfied_types.is_empty() {
+            Ok(())
+        } else {
+            Err(not_satisfied_types)
+        }
     }
 
 }

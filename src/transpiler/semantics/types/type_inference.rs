@@ -21,7 +21,7 @@ const MAPPING_OPERATOR_TYPE_ERROR: usize = 0041;
 pub(crate) struct TypeEnvironment<'allocator> {
     entity_type_map: HashMap<EntityID, Either<EntityID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_type_map: HashMap<LocalGenericID, Either<LocalGenericID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
-    generic_bounds_map: HashMap<LocalGenericID, Arc<GenericType>, DefaultHashBuilder, &'allocator Bump>,
+    generic_bounds_checks: Vec<(LocalGenericID, Arc<GenericType>), &'allocator Bump>,
     implicit_convert_map: HashMap<EntityID, ImplicitConvertKind, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, Spanned<Type>>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
@@ -41,7 +41,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         Self {
             entity_type_map: HashMap::new_in(allocator),
             generic_type_map: HashMap::new_in(allocator),
-            generic_bounds_map: HashMap::new_in(allocator),
+            generic_bounds_checks: Vec::new_in(allocator),
             implicit_convert_map: HashMap::new_in(allocator),
             return_type,
             lazy_type_reports: Vec::new_in(allocator),
@@ -49,7 +49,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
     }
 
-    pub fn new_local_generic_id(&mut self, type_span: Range<usize>) -> LocalGenericID {
+    pub fn new_local_generic_id(&mut self, type_span: Range<usize>, generic_type: Option<Arc<GenericType>>) -> LocalGenericID {
         self.current_generics_id += 1;
         let generic_id = LocalGenericID(self.current_generics_id);
         
@@ -57,6 +57,10 @@ impl<'allocator> TypeEnvironment<'allocator> {
             generic_id,
             Either::Right(Spanned::new(Type::Unknown, type_span))
         );
+        
+        if let Some(generic_type) = generic_type {
+            self.generic_bounds_checks.push((generic_id, generic_type));
+        }
         
         generic_id
     }
@@ -622,6 +626,12 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 Either::Left(error) => errors.push(error),
                 Either::Right(warning) => warnings.push(warning),
             }
+        }
+    }
+
+    pub(crate) fn type_check_bounds(&self) {
+        for (generic_id, generic_define) in self.generic_bounds_checks.iter() {
+            let type_resolved = self.resolve_generic_type(*generic_id).1;
         }
     }
 
@@ -2074,7 +2084,7 @@ fn type_inference_primary_left<'allocator>(
                     }
                 },
                 SimplePrimary::NullKeyword(null_keyword_span) => {
-                    let generic_id = type_environment.new_local_generic_id(null_keyword_span.clone());
+                    let generic_id = type_environment.new_local_generic_id(null_keyword_span.clone(), None);
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
                         Spanned::new(Type::Option(Arc::new(Type::LocalGeneric(generic_id))), null_keyword_span.clone())
@@ -2178,8 +2188,11 @@ fn type_inference_primary_left<'allocator>(
             if let Type::UserType { user_type_info, generics: _ } = user_type {
                 let number_of_generics = user_type_info.generics_define.len();
                 let mut generics = Vec::with_capacity(number_of_generics);
-                for _ in 0..number_of_generics {
-                    let local_generic_id = type_environment.new_local_generic_id(new_expression.span.clone());
+                for generic_define in user_type_info.generics_define.iter() {
+                    let local_generic_id = type_environment.new_local_generic_id(
+                        new_expression.span.clone(),
+                        Some(generic_define.clone())
+                    );
                     generics.push(Type::LocalGeneric(local_generic_id));
                 }
                 let user_type = Type::UserType { user_type_info, generics: Arc::new(generics) };
@@ -2859,8 +2872,11 @@ fn type_inference_function_call<'allocator>(
         
         let number_of_generics = function_info.generics_define.len();
         let mut generics = Vec::with_capacity(number_of_generics);
-        for _ in 0..number_of_generics {
-            let generic_id = type_environment.new_local_generic_id(ast.span.clone());
+        for generics_define in function_info.generics_define.iter() {
+            let generic_id = type_environment.new_local_generic_id(
+                ast.span.clone(),
+                Some(generics_define.clone())
+            );
             generics.push(Type::LocalGeneric(generic_id));
         }
 

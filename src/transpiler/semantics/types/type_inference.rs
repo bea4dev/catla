@@ -9,7 +9,7 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{GenericType, ImplementsInfoSet, LocalGenericID, Type}, user_type_element_collector::get_type};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfoSet, LocalGenericID, Type}, user_type_element_collector::get_type};
 
 
 
@@ -21,7 +21,7 @@ const MAPPING_OPERATOR_TYPE_ERROR: usize = 0041;
 pub(crate) struct TypeEnvironment<'allocator> {
     entity_type_map: HashMap<EntityID, Either<EntityID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_type_map: HashMap<LocalGenericID, Either<LocalGenericID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
-    generic_bounds_checks: Vec<(LocalGenericID, Arc<GenericType>), &'allocator Bump>,
+    generic_bounds_checks: Vec<(Spanned<LocalGenericID>, Arc<GenericType>), &'allocator Bump>,
     implicit_convert_map: HashMap<EntityID, ImplicitConvertKind, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, Spanned<Type>>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
@@ -55,11 +55,11 @@ impl<'allocator> TypeEnvironment<'allocator> {
         
         self.generic_type_map.insert(
             generic_id,
-            Either::Right(Spanned::new(Type::Unknown, type_span))
+            Either::Right(Spanned::new(Type::Unknown, type_span.clone()))
         );
         
         if let Some(generic_type) = generic_type {
-            self.generic_bounds_checks.push((generic_id, generic_type));
+            self.generic_bounds_checks.push((Spanned::new(generic_id, type_span), generic_type));
         }
         
         generic_id
@@ -629,9 +629,22 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
     }
 
-    pub(crate) fn type_check_bounds(&self) {
+    pub(crate) fn type_check_bounds(&self, implements_infos: &ImplementsInfoSet, errors: &mut Vec<TranspileError>) {
         for (generic_id, generic_define) in self.generic_bounds_checks.iter() {
-            let type_resolved = self.resolve_generic_type(*generic_id).1;
+            let type_resolved = self.resolve_generic_type(generic_id.value).1;
+            let result = implements_infos.is_satisfied(
+                &type_resolved.value,
+                &generic_define,
+                self
+            );
+
+            if let Err(bounds) = result {
+                let error = TranspileError::new(BoundsNotSatisfied {
+                    type_span: generic_id.span.clone(),
+                    not_satisfied: bounds
+                });
+                errors.push(error);
+            }
         }
     }
 
@@ -3343,6 +3356,58 @@ struct UnexpectedTypeErrorReport {
 }
 
 impl TranspileReport for UnexpectedTypeErrorReport {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let key = ErrorMessageKey::new(self.error_code);
+
+        let message = key.get_massage(text, ErrorMessageType::Message);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.found_type.span.start)
+            .with_code(self.error_code)
+            .with_message(message);
+
+        let expected_text = text.get_text(self.expected_kind.value.get_key());
+
+        builder.add_label(
+            Label::new((module_name, self.found_type.span.clone()))
+                .with_color(Color::Red)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(0))
+                        .replace("%found", self.found_type.value.clone().fg(Color::Red).to_string().as_str())
+                        .replace("%expected", expected_text.as_str().fg(Color::Green).to_string().as_str())
+                )
+        );
+
+        builder.add_label(
+            Label::new((module_name, self.expected_kind.span.clone()))
+                .with_color(Color::Yellow)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(1))
+                        .replace("%found", self.found_type.value.clone().fg(Color::Red).to_string().as_str())
+                        .replace("%expected", expected_text.as_str().fg(Color::Green).to_string().as_str())
+                )
+        );
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            builder.set_note(note);
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+        builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+    }
+}
+
+
+struct BoundsNotSatisfied {
+    type_span: Range<usize>,
+    not_satisfied: Vec<Arc<Bound>>
+}
+
+impl TranspileReport for BoundsNotSatisfied {
     fn print(&self, context: &TranspileModuleContext) {
         let module_name = &context.module_name;
         let text = &context.context.localized_text;

@@ -397,7 +397,13 @@ fn collect_import_module_primary_left(
                 _ => {}
             }
 
-            if let Some(function_call) = &simple.1 {
+            if let Some(generics) = &simple.1 {
+                if let Ok(generics) = generics {
+                    collect_import_module_generics(generics, import_element_map, name_resolved_map, errors, warnings, context);
+                }
+            }
+
+            if let Some(function_call) = &simple.2 {
                 collect_import_module_function_call(function_call, import_element_map, name_resolved_map, errors,warnings, context);
             }
         },
@@ -500,7 +506,13 @@ fn collect_import_module_primary_right(
     context: &TranspileModuleContext
 ) {
     if let Some(second_expr) = &ast.second_expr {
-        if let Some(function_call) = &second_expr.1 {
+        if let Some(generics) = &second_expr.1 {
+            if let Ok(generics) = generics {
+                collect_import_module_generics(generics, import_element_map, name_resolved_map, errors, warnings, context);
+            }
+        }
+
+        if let Some(function_call) = &second_expr.2 {
             collect_import_module_function_call(function_call, import_element_map, name_resolved_map, errors,warnings, context);
         }
     }
@@ -540,11 +552,6 @@ fn collect_import_module_function_call(
     if let Ok(arg_exprs) = &ast.arg_exprs {
         for arg_expr in arg_exprs.iter() {
             collect_import_module_expression(&arg_expr, import_element_map, name_resolved_map, errors,warnings, context);
-        }
-    }
-    if let Some(generics) = &ast.generics {
-        if let Ok(generics) = generics {
-            collect_import_module_generics(generics, import_element_map, name_resolved_map, errors, warnings, context);
         }
     }
 }

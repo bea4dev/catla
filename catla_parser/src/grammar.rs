@@ -51,8 +51,8 @@ bnf_rules!{
     mul_or_div_expr     ::= factor { ( "*" | "/" ) [ line_feed ] factor }
     factor              ::= "-" [ line_feed ] primary | primary
     primary             ::= primary_left { primary_right }
-    primary_left        ::= ( simple_primary [ function_call ] | new_expression | if_expression | loop_expression ) [ mapping_operator ]
-    primary_right       ::= ( "." | "::" ) [ line_feed ] ( literal [ function_call ] | mapping_operator )
+    primary_left        ::= ( simple_primary [ ":" generics_info ] [ function_call ] | new_expression | if_expression | loop_expression ) [ mapping_operator ]
+    primary_right       ::= ( "." | "::" ) [ line_feed ] ( literal [ ":" generics_info ] [ function_call ] | mapping_operator )
     simple_primary      ::= "(" expression ")" | literal | "null" | "true" | "false"
     mapping_operator    ::= "?" | "?" "!" | "!" | "!" "!" | ( "?" | "!" ) ":" block
 
@@ -64,7 +64,7 @@ bnf_rules!{
     closure             ::= ( closure_args | literal ) "=>" ( expression | block )
     closure_args        ::= "|" [ [ line_feed ] function_argument [ line_feed ] ] { "," [ line_feed ] [ function_argument [ line_feed ] ] } "|"
 
-    function_call       ::= [ ":" generics_info ] "(" [ [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
+    function_call       ::= "(" [ [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
 
     new_expression      ::= "new" [ "acyclic" ] literal { "::" [ line_feed ] literal } field_assign
     field_assign        ::= "{" [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] } "}"

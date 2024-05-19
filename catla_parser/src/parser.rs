@@ -422,7 +422,7 @@ pub struct PrimaryLeft<'allocator, 'input> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrimaryLeftExpr<'allocator, 'input> {
-    Simple((SimplePrimary<'allocator, 'input>, Option<FunctionCall<'allocator, 'input>>)),
+    Simple((SimplePrimary<'allocator, 'input>, Option<GenericsResult<'allocator, 'input>>, Option<FunctionCall<'allocator, 'input>>)),
     NewExpression(NewExpression<'allocator, 'input>),
     IfExpression(IfExpression<'allocator, 'input>),
     LoopExpression(LoopExpression<'allocator, 'input>)
@@ -431,13 +431,23 @@ pub enum PrimaryLeftExpr<'allocator, 'input> {
 impl PrimaryLeftExpr<'_, '_> {
     pub fn get_span(&self) -> Range<usize> {
         match self {
-            PrimaryLeftExpr::Simple((simple_primary, function_call)) => {
+            PrimaryLeftExpr::Simple((simple_primary, generics, function_call)) => {
                 if let Some(function_call) = function_call {
                     let span_start = simple_primary.get_span().start;
                     let span_end = function_call.span.end;
                     span_start..span_end
                 } else {
-                    simple_primary.get_span()
+                    if let Some(generics) = generics {
+                        if let Ok(generics) = generics {
+                            let span_start = simple_primary.get_span().start;
+                            let span_end = generics.span.end;
+                            span_start..span_end
+                        } else {
+                            simple_primary.get_span()
+                        }
+                    } else {
+                        simple_primary.get_span()
+                    }
                 }
             },
             PrimaryLeftExpr::NewExpression(new_expression) => new_expression.span.clone(),
@@ -471,7 +481,7 @@ pub struct IfStatement<'allocator, 'input> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrimaryRight<'allocator, 'input> {
     pub separator: PrimarySeparator,
-    pub second_expr: Option<(Literal<'input>, Option<FunctionCall<'allocator, 'input>>)>,
+    pub second_expr: Option<(Literal<'input>, Option<GenericsResult<'allocator, 'input>>, Option<FunctionCall<'allocator, 'input>>)>,
     pub mapping_operator: Option<MappingOperator<'allocator, 'input>>,
     pub span: Range<usize>
 }
@@ -525,7 +535,6 @@ pub enum MappingOperatorKind<'allocator, 'input> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionCall<'allocator, 'input> {
-    pub generics: Option<GenericsResult<'allocator, 'input>>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub arg_exprs: CallArgumentsResult<'allocator, 'input>,
     pub span: Range<usize>

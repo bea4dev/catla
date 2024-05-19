@@ -6,7 +6,7 @@ use hashbrown::{HashMap, hash_map::DefaultHashBuilder};
 
 
 #[derive(Clone, Copy)]
-pub(crate) struct EntityID {
+pub struct EntityID {
     ptr: usize
 }
 

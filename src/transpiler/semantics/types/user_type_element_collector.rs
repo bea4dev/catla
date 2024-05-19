@@ -248,23 +248,11 @@ pub(crate) fn collect_module_element_types_program(
 
                     if let Some(super_type_info) = &data_struct_define.super_type_info {
                         let concrete = user_type_map.get(name.value).unwrap().clone();
-                        let generics = data_struct_define.generics_define.as_ref()
-                            .map(|define| {
-                                get_generic_type(
-                                    define,
-                                    user_type_map,
-                                    import_element_map,
-                                    name_resolved_map,
-                                    module_user_type_map,
-                                    module_element_type_map,
-                                    generics_map,
-                                    errors,
-                                    warnings,
-                                    context
-                                )
-                            })
-                            .unwrap_or_else(|| { vec![] });
-                        let generics = Arc::new(generics);
+                        let generics = if let Type::UserType { user_type_info, generics: _ } = &concrete {
+                            Arc::new(user_type_info.generics_define.clone())
+                        } else {
+                            Arc::new(Vec::new())
+                        };
 
                         for type_info in super_type_info.type_infos.iter() {
                             let interface = get_type(
@@ -506,22 +494,25 @@ fn get_function_type_and_name<'allocator>(
     current_user_type_name: Option<&str>,
     context: &TranspileModuleContext
 ) -> Option<(&'allocator str, Type)> {
-    let generics_define = match &ast.generics_define {
+    let (generics_define, generics_define_span) = match &ast.generics_define {
         Some(generics_define) => {
-            get_generic_type(
-                generics_define,
-                user_type_map,
-                import_element_map,
-                name_resolved_map,
-                module_user_type_map,
-                module_element_type_map,
-                generics_map,
-                errors,
-                warnings,
-                context
+            (
+                get_generic_type(
+                    generics_define,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    generics_map,
+                    errors,
+                    warnings,
+                    context
+                ),
+                Some(generics_define.span.clone())
             )
         },
-        _ => Vec::new()
+        _ => (Vec::new(), None)
     };
     
     let return_type = match &ast.type_tag {
@@ -595,6 +586,7 @@ fn get_function_type_and_name<'allocator>(
 
     let define_info = FunctionDefineInfo {
         module_name: context.module_name.clone(),
+        generics_define_span,
         arguments_span: ast.args.span.clone(),
         span: ast.span.clone()
     };
@@ -1094,7 +1086,7 @@ fn collect_module_element_types_primary_left(
                 _ => {}
             }
 
-            if let Some(function_call) = &simple.1 {
+            if let Some(function_call) = &simple.2 {
                 collect_module_element_types_function_call(
                     function_call,
                     user_type_map,
@@ -1282,7 +1274,7 @@ fn collect_module_element_types_primary_right(
     context: &TranspileModuleContext
 ) {
     if let Some(second_expr) = &ast.second_expr {
-        if let Some(function_call) = &second_expr.1 {
+        if let Some(function_call) = &second_expr.2 {
             collect_module_element_types_function_call(
                 function_call,
                 user_type_map,

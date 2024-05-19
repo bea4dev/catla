@@ -222,7 +222,13 @@ fn parse_primary_left<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, '
     let span = Span::start(cursor);
 
     let first_expr = if let Some(simple_primary) = parse_simple_primary(cursor) {
-        PrimaryLeftExpr::Simple((simple_primary, parse_function_call(cursor)))
+        let generics = if cursor.current().get_kind() == TokenKind::Colon {
+            cursor.next();
+            Some(parse_generics(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) }))
+        } else {
+            None
+        };
+        PrimaryLeftExpr::Simple((simple_primary, generics, parse_function_call(cursor)))
     } else if let Some(new_expression) = parse_new_expression(cursor) {
         PrimaryLeftExpr::NewExpression(new_expression)
     } else if let Some(if_expression) = parse_if_expression(cursor) {
@@ -335,7 +341,13 @@ fn parse_primary_right<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
     let second_expr = match parse_literal(cursor) {
         Some(literal) => {
             let function_call = parse_function_call(cursor);
-            Some((literal, function_call))
+            let generics = if cursor.current().get_kind() == TokenKind::Colon {
+                cursor.next();
+                Some(parse_generics(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) }))
+            } else {
+                None
+            };
+            Some((literal, generics, function_call))
         },
         _ => None
     };
@@ -374,28 +386,12 @@ fn parse_simple_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 fn parse_function_call<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<FunctionCall<'allocator, 'input>> {
     let span = Span::start(cursor);
 
-    let generics = if cursor.current().get_kind() == TokenKind::Colon {
-        cursor.next();
-        Some(parse_generics(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) }))
-    } else {
-        None
-    };
-
-    let mut error_tokens = Vec::new_in(cursor.allocator);
-
-    if cursor.current().get_kind() != TokenKind::ParenthesisLeft {
-        if generics.is_none() {
-            return None;
-        }
-
-        error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::ParenthesisLeft]));
-
-        if cursor.current().get_kind() != TokenKind::ParenthesisLeft {
-            return Some(FunctionCall { generics, error_tokens, arg_exprs: Err(ASTParseError::UnexpectedEOF), span: span.elapsed(cursor) });
-        }
+    if cursor.next().get_kind() != TokenKind::ParenthesisLeft {
+        cursor.prev();
+        return None;
     }
 
-    cursor.next();
+    let mut error_tokens = Vec::new_in(cursor.allocator);
 
     let mut arg_exprs = Vec::new_in(cursor.allocator);
     loop {
@@ -427,7 +423,7 @@ fn parse_function_call<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
         }
     }
 
-    return Some(FunctionCall { generics, error_tokens, arg_exprs: Ok(arg_exprs), span: span.elapsed(cursor) });
+    return Some(FunctionCall { error_tokens, arg_exprs: Ok(arg_exprs), span: span.elapsed(cursor) });
 }
 
 fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<NewExpression<'allocator, 'input>> {

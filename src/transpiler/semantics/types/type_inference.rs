@@ -2,7 +2,7 @@ use std::{alloc::Allocator, ops::Range, sync::Arc};
 
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST};
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -17,6 +17,8 @@ const IF_CONDITION_TYPE_ERROR: usize = 0038;
 const FUNCTION_CALL_TYPE_ERROR: usize = 0039;
 const MAPPING_OPERATOR_TYPE_ERROR: usize = 0041;
 const BOUNDS_NOT_SATISFIED_ERROR: usize = 0046;
+const INVALID_SET_GENERICS_TYPE_ERROR: usize = 0047;
+const NUMBER_OF_GENERICS_MISMATCH_ERROR: usize = 0048;
 
 
 pub(crate) struct TypeEnvironment<'allocator> {
@@ -64,6 +66,39 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
         
         generic_id
+    }
+
+    pub fn get_user_or_function_type_with_local_generic_id(&mut self, ty: Spanned<Type>) -> Spanned<Type> {
+        let generics_define = match &ty.value {
+            Type::UserType { user_type_info, generics: _ } => {
+                &user_type_info.generics_define
+            },
+            Type::Function { function_info, generics: _ } => {
+                &function_info.generics_define
+            },
+            _ => return ty.clone()
+        };
+
+        let number_of_generics = generics_define.len();
+        let mut generics = Vec::with_capacity(number_of_generics);
+        for generics_define in generics_define.iter() {
+            let generic_id = self.new_local_generic_id(
+                ty.span.clone(),
+                Some(generics_define.clone())
+            );
+            generics.push(Type::LocalGeneric(generic_id));
+        }
+        let generics = Arc::new(generics);
+
+        match &ty.value {
+            Type::UserType { user_type_info, generics: _ } => {
+                Spanned::new(Type::UserType { user_type_info: user_type_info.clone(), generics }, ty.span)
+            },
+            Type::Function { function_info, generics: _ } => {
+                Spanned::new(Type::Function { function_info: function_info.clone(), generics }, ty.span)
+            },
+            _ => unreachable!()
+        }
     }
 
     pub fn set_entity_type(&mut self, entity_id: EntityID, ty: Spanned<Type>) {
@@ -1784,15 +1819,19 @@ fn type_inference_primary<'allocator>(
 
                 Type::Unknown
             };
+            
+            let ty = type_environment.get_user_or_function_type_with_local_generic_id(
+                Spanned::new(ty, second_expr.0.span.clone())
+            );
 
             type_environment.set_entity_type(
                 EntityID::from(&second_expr.0),
-                Spanned::new(ty, second_expr.0.span.clone())
+                ty
             );
 
             let mut mappings = Vec::new_in(allocator);
 
-            let entity_id = if let Some(function_call) = &second_expr.1 {
+            let entity_id = if let Some(function_call) = &second_expr.2 {
                 type_inference_function_call(
                     function_call,
                     EntityID::from(&second_expr.0),
@@ -2077,9 +2116,13 @@ fn type_inference_primary_left<'allocator>(
                                     Type::Unknown
                                 };
 
+                                let ty = type_environment.get_user_or_function_type_with_local_generic_id(
+                                    Spanned::new(ty, identifier.span.clone())
+                                );
+
                                 type_environment.set_entity_type(
                                     resolved.define_info.entity_id,
-                                    Spanned::new(ty, resolved.define_info.span.clone())
+                                    ty
                                 );
 
                                 type_environment.set_entity_id_equals(
@@ -2129,7 +2172,26 @@ fn type_inference_primary_left<'allocator>(
                 }
             }
 
-            if let Some(function_call) = &simple.1 {
+            if let Some(generics) = &simple.1 {
+                if let Ok(generics) = generics {
+                    type_inference_generics(
+                        generics,
+                        EntityID::from(&simple.0),
+                        user_type_map,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        generics_map,
+                        type_environment,
+                        errors,
+                        warnings,
+                        context
+                    );
+                }
+            }
+
+            if let Some(function_call) = &simple.2 {
                 type_inference_function_call(
                     function_call,
                     EntityID::from(&simple.0),
@@ -2209,22 +2271,23 @@ fn type_inference_primary_left<'allocator>(
                     Type::Unknown
                 }
             };
+            
+            let user_type_span = if new_expression.path.is_empty() {
+                new_expression.span.clone()
+            } else {
+                let span_start = new_expression.path.first().unwrap().span.start;
+                let span_end = new_expression.path.last().unwrap().span.end;
+                span_start..span_end
+            };
 
-            if let Type::UserType { user_type_info, generics: _ } = user_type {
-                let number_of_generics = user_type_info.generics_define.len();
-                let mut generics = Vec::with_capacity(number_of_generics);
-                for generic_define in user_type_info.generics_define.iter() {
-                    let local_generic_id = type_environment.new_local_generic_id(
-                        new_expression.span.clone(),
-                        Some(generic_define.clone())
-                    );
-                    generics.push(Type::LocalGeneric(local_generic_id));
-                }
-                let user_type = Type::UserType { user_type_info, generics: Arc::new(generics) };
+            let user_type = type_environment.get_user_or_function_type_with_local_generic_id(
+                Spanned::new(user_type, user_type_span)
+            );
 
+            if let Type::UserType { user_type_info: _, generics: _ } = &user_type.value {
                 if let Ok(field_assigns) = &new_expression.field_assigns {
                     for field_assign in field_assigns.iter() {
-                        if let Some(element_type) = user_type.get_element_type_with_local_generic(field_assign.name.value) {
+                        if let Some(element_type) = user_type.value.get_element_type_with_local_generic(field_assign.name.value) {
                             type_environment.set_entity_type(
                                 EntityID::from(field_assign),
                                 Spanned::new(element_type, field_assign.name.span.clone())
@@ -2260,7 +2323,7 @@ fn type_inference_primary_left<'allocator>(
                             }
                         } else {
                             let error = NotFoundTypeElementError {
-                                user_type: user_type.clone(),
+                                user_type: user_type.value.clone(),
                                 name: field_assign.name.clone().map(|name| { name.to_string() }),
                             };
                             type_environment.add_lazy_type_error_report(error);
@@ -2270,7 +2333,7 @@ fn type_inference_primary_left<'allocator>(
 
                 type_environment.set_entity_type(
                     EntityID::from(&ast.first_expr),
-                    Spanned::new(user_type, new_expression.span.clone())
+                    Spanned::new(user_type.value, new_expression.span.clone())
                 );
             } else {
                 if !new_expression.path.is_empty() {
@@ -2656,12 +2719,36 @@ fn type_inference_primary_right<'allocator>(
                 Type::Unknown
             }
         };
-        type_environment.set_entity_type(
-            literal_entity_id,
+
+        let element_type = type_environment.get_user_or_function_type_with_local_generic_id(
             Spanned::new(element_type, second_expr.0.span.clone())
         );
 
-        let last_entity_id = if let Some(function_call) = &second_expr.1 {
+        type_environment.set_entity_type(
+            literal_entity_id,
+            element_type
+        );
+
+        if let Some(generics) = &second_expr.1 {
+            if let Ok(generics) = generics {
+                type_inference_generics(
+                    generics,
+                    literal_entity_id,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    generics_map,
+                    type_environment,
+                    errors,
+                    warnings,
+                    context
+                );
+            }
+        }
+
+        let last_entity_id = if let Some(function_call) = &second_expr.2 {
             type_inference_function_call(
                 function_call,
                 literal_entity_id,
@@ -2870,6 +2957,69 @@ fn type_inference_mapping_operator<'allocator>(
     }
 }
 
+fn type_inference_generics<'allocator>(
+    ast: &Generics,
+    previous: EntityID,
+    user_type_map: &FxHashMap<String, Type>,
+    import_element_map: &FxHashMap<EntityID, String>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
+    generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
+    type_environment: &mut TypeEnvironment<'allocator>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    let ty = type_environment.resolve_entity_type(previous);
+    let generics = match &ty.value {
+        Type::UserType { user_type_info: _, generics } => generics,
+        Type::Function { function_info: _, generics } => generics,
+        _ => {
+            let error = InvalidSetGenericsTypeError {
+                ty: ty.clone(),
+                set_span: ast.span.clone()
+            };
+            type_environment.add_lazy_type_error_report(error);
+            return;
+        }
+    };
+
+    if generics.len() != ast.elements.len() {
+        let error = NumberOfGenericsMismatchError {
+            set_span: ast.span.clone(),
+            expected: generics.len(),
+            found: ast.elements.len(),
+            ty
+        };
+        type_environment.add_lazy_type_error_report(error);
+        return;
+    }
+
+    for i in 0..generics.len() {
+        let generic = &generics[i];
+        if let Type::LocalGeneric(generic_id) = generic {
+            let type_info = &ast.elements[i];
+            let ty = get_type(
+                type_info,
+                user_type_map,
+                import_element_map,
+                name_resolved_map,
+                module_user_type_map,
+                module_element_type_map,
+                generics_map,
+                errors,
+                warnings,
+                context
+            );
+            type_environment.set_generic_type(
+                *generic_id,
+                Spanned::new(ty, type_info.span.clone())
+            );
+        }
+    }
+}
+
 fn type_inference_function_call<'allocator>(
     ast: &FunctionCall,
     function: EntityID,
@@ -2892,22 +3042,12 @@ fn type_inference_function_call<'allocator>(
 ) {
     let function_type = type_environment.resolve_entity_type(function);
 
-    if let Type::Function { function_info, generics: _ } = function_type.value {
+    if let Type::Function { function_info, generics } = function_type.value {
         let is_method_call = is_method_call && function_info.is_extension;
-        
-        let number_of_generics = function_info.generics_define.len();
-        let mut generics = Vec::with_capacity(number_of_generics);
-        for generics_define in function_info.generics_define.iter() {
-            let generic_id = type_environment.new_local_generic_id(
-                ast.span.clone(),
-                Some(generics_define.clone())
-            );
-            generics.push(Type::LocalGeneric(generic_id));
-        }
 
         let function_type = Type::Function {
             function_info: function_info.clone(),
-            generics: Arc::new(generics)
+            generics: generics
         };
 
         if let Ok(arg_exprs) = &ast.arg_exprs {
@@ -3488,6 +3628,133 @@ impl TranspileReport for BoundsNotSatisfiedError {
         let source_list = vec![
             (module_name.clone(), context.source_code.code.as_str()),
             (self.bounds_module_name.clone(), bounds_module_context.source_code.code.as_str())
+        ];
+
+        builder.finish().print(sources(source_list)).unwrap();
+    }
+}
+
+
+struct InvalidSetGenericsTypeError {
+    ty: Spanned<Type>,
+    set_span: Range<usize>
+}
+
+impl LazyTypeReport for InvalidSetGenericsTypeError {
+    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+        let type_name = type_environment.get_type_display_string(&self.ty.value)
+            .fg(Color::Red).to_string();
+
+        Either::Left(TranspileError::new(SimpleError::new(
+            INVALID_SET_GENERICS_TYPE_ERROR,
+            self.set_span.clone(),
+            vec![type_name],
+            vec![(self.set_span.clone(), Color::Red), (self.ty.span.clone(), Color::Red)]
+        )))
+    }
+}
+
+
+struct NumberOfGenericsMismatchError {
+    set_span: Range<usize>,
+    expected: usize,
+    found: usize,
+    ty: Spanned<Type>
+}
+
+impl LazyTypeReport for NumberOfGenericsMismatchError {
+    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+        let type_name = type_environment.get_type_display_string(&self.ty.value)
+            .fg(Color::Yellow).to_string();
+
+        let found_text = self.found.to_string().fg(Color::Red).to_string();
+        let expected_text = self.expected.to_string().fg(Color::Yellow).to_string();
+
+        let (define_module_name, define_span) = match &self.ty.value {
+            Type::UserType { user_type_info, generics } => {
+                (
+                    user_type_info.module_name.clone(),
+                    user_type_info.generics_define_span.clone()
+                        .unwrap_or_else(|| { user_type_info.name.span.clone() })
+                )
+            },
+            Type::Function { function_info, generics } => {
+                (
+                    function_info.define_info.module_name.clone(),
+                    function_info.define_info.generics_define_span.clone()
+                        .unwrap_or_else(|| { function_info.define_info.span.clone() })
+                )
+            },
+            _ => unreachable!()
+        };
+
+        Either::Left(TranspileError::new(NumberOfGenericsMismatchErrorReport {
+            set_span: self.set_span.clone(),
+            type_name,
+            found_text,
+            expected_text,
+            define_module_name,
+            define_span
+        }))
+    }
+}
+
+
+struct NumberOfGenericsMismatchErrorReport {
+    set_span: Range<usize>,
+    type_name: String,
+    found_text: String,
+    expected_text: String,
+    define_module_name: String,
+    define_span: Range<usize>
+}
+
+impl TranspileReport for NumberOfGenericsMismatchErrorReport {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let key = ErrorMessageKey::new(NUMBER_OF_GENERICS_MISMATCH_ERROR);
+
+        let message = key.get_massage(text, ErrorMessageType::Message);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.set_span.start)
+            .with_code(NUMBER_OF_GENERICS_MISMATCH_ERROR)
+            .with_message(message);
+
+        builder.add_label(
+            Label::new((module_name.clone(), self.set_span.clone()))
+                .with_color(Color::Red)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(0))
+                        .replace("%found", &self.found_text)
+                        .replace("%expected", &self.expected_text)
+                )
+        );
+
+        builder.add_label(
+            Label::new((self.define_module_name.clone(), self.define_span.clone()))
+                .with_color(Color::Yellow)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(1))
+                        .replace("%type", &self.type_name)
+                        .replace("%expected", &self.expected_text)
+                )
+        );
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            builder.set_note(note);
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+
+        let bounds_module_context = context.context.get_module_context(&self.define_module_name).unwrap();
+
+        let source_list = vec![
+            (module_name.clone(), context.source_code.code.as_str()),
+            (self.define_module_name.clone(), bounds_module_context.source_code.code.as_str())
         ];
 
         builder.finish().print(sources(source_list)).unwrap();

@@ -11,11 +11,13 @@ pub mod localize;
 
 fn main() {
 
+    unsafe { backtrace_on_stack_overflow::enable() };
+
     let source = 
 "
 import test::test_module2
 
-class TestClass<T>: TestInterface {
+class TestClass<T>: TestInterface<float> {
     let field: T?
 
     function test() -> TestClass<T> {
@@ -25,14 +27,7 @@ class TestClass<T>: TestInterface {
     }
 }
 
-implements<T: TestInterface> TestInterface for TestClass<T> {}
-implements TestInterface for int {}
-
-interface TestInterface {
-    
-}
-
-let a = new TestClass { field: 100 }
+let a = new TestClass { field: 100.0 }
 let b = a.test().field
 
 let c = if true { 100 } else { error(0) }
@@ -41,7 +36,6 @@ let d = if true { ok(100) } else { error(0) }
 let e = d!:{ 100 }
 let f = error(0)!:{ 100 }
 
-let g = test_module2::test?:{ 0 }
 
 function <T> some(value: T) -> T? {
     return value
@@ -54,13 +48,21 @@ function <T, E> ok(value: T) -> T!<E> {
 function <T, E> error(error: E) -> T!<E> {}
 
 
-test_generic(a)
 
-function <T: TestInterface> test_generic(value: T) {}
+interface TestInterface<T> {}
+
+interface Default {}
+
+implements Default for float {}
+implements<T: Default> TestInterface<T> for T {}
+
+test_generic:<int, int>()
+test_generic:<float, float>()
+
+function <D: Default, T: TestInterface<D>> test_generic() {}
 ";
 let source1 = 
 "
-static let test: int? = null
 ";
 
     let settings = TranspileSettings {

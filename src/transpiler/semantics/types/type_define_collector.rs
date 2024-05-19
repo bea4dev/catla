@@ -44,6 +44,7 @@ pub(crate) fn collect_user_type_program(
                     let type_name = name.value.clone();
 
                     let mut generics_define = Vec::new();
+                    let mut generics_define_span = None;
                     if let Some(generics) = &data_struct_define.generics_define {
                         for element in generics.elements.iter() {
                             let generic_type = Arc::new(GenericType {
@@ -53,6 +54,7 @@ pub(crate) fn collect_user_type_program(
                             });
                             generics_define.push(generic_type);
                         }
+                        generics_define_span = Some(generics.span.clone());
                     }
 
                     let data_struct_info = DataStructInfo {
@@ -61,6 +63,7 @@ pub(crate) fn collect_user_type_program(
                         define_span: data_struct_define.span.clone(),
                         kind: data_struct_define.kind.value.clone(),
                         generics_define,
+                        generics_define_span,
                         element_types: Mutex::new(HashMap::new()),
                     };
 
@@ -235,7 +238,7 @@ fn collect_user_type_primary_left(
                 _ => {}
             }
 
-            if let Some(function_call) = &simple.1 {
+            if let Some(function_call) = &simple.2 {
                 collect_user_type_function_call(function_call, user_type_map, context);
             }
         },
@@ -293,7 +296,7 @@ fn collect_user_type_primary_right(
     context: &TranspileModuleContext
 ) {
     if let Some(second_expr) = &ast.second_expr {
-        if let Some(function_call) = &second_expr.1 {
+        if let Some(function_call) = &second_expr.2 {
             collect_user_type_function_call(function_call, user_type_map, context);
         }
     }

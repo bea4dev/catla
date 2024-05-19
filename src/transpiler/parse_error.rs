@@ -509,7 +509,18 @@ fn collect_parse_error_primary_left(
                 );
                 collect_error_tokens(error_tokens, Expected::Unnecessary, 0013, errors, context);
             }
-            if let Some(function_call) = &simple_primary.1 {
+            if let Some(generics) = &simple_primary.1 {
+                collect_parse_error_with_parse_result(
+                    generics,
+                    collect_parse_error_generics,
+                    Expected::Generics,
+                    0015,
+                    errors,
+                    warnings,
+                    context
+                );
+            }
+            if let Some(function_call) = &simple_primary.2 {
                 collect_parse_error_function_call(function_call, errors, warnings, context);
             }
         },
@@ -578,17 +589,6 @@ fn collect_parse_error_function_call(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
-    if let Some(generics) = &ast.generics {
-        collect_parse_error_with_parse_result(
-            generics,
-            collect_parse_error_generics,
-            Expected::Generics,
-            0015,
-            errors,
-            warnings,
-            context
-        );
-    }
     collect_error_tokens(&ast.error_tokens, Expected::Unnecessary, 0015, errors, context);
     collect_parse_error_with_parse_result(
         &ast.arg_exprs,
@@ -657,7 +657,18 @@ fn collect_parse_error_primary_right(
     context: &TranspileModuleContext
 ) {
     if let Some(second_expr) = &ast.second_expr {
-        if let Some(function_call) = &second_expr.1 {
+        if let Some(generics) = &second_expr.1 {
+            collect_parse_error_with_parse_result(
+                generics,
+                collect_parse_error_generics,
+                Expected::Generics,
+                0015,
+                errors,
+                warnings,
+                context
+            );
+        }
+        if let Some(function_call) = &second_expr.2 {
             collect_parse_error_function_call(function_call, errors, warnings, context);
         }
     }

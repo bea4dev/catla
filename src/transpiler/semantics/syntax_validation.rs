@@ -321,7 +321,7 @@ fn validate_syntax_primary_left(
                 _ => {}
             }
 
-            if let Some(function_call) = &simple.1 {
+            if let Some(function_call) = &simple.2 {
                 validate_syntax_function_call(function_call, context,errors, warnings);
             }
         },
@@ -362,7 +362,7 @@ fn validate_syntax_primary_right(
     warnings: &mut Vec<TranspileWarning>
 ) {
     if let Some(second_expr) = &ast.second_expr {
-        if let Some(function_call) = &second_expr.1 {
+        if let Some(function_call) = &second_expr.2 {
             validate_syntax_function_call(function_call, context,errors, warnings);
         }
     }

@@ -168,6 +168,7 @@ pub struct DataStructInfo {
     pub define_span: Range<usize>,
     pub kind: DataStructKindEnum,
     pub generics_define: Vec<Arc<GenericType>>,
+    pub generics_define_span: Option<Range<usize>>,
     pub element_types: Mutex<HashMap<String, Type>>
 }
 
@@ -253,6 +254,7 @@ pub struct FunctionType {
 #[derive(Debug, Clone)]
 pub struct FunctionDefineInfo {
     pub module_name: String,
+    pub generics_define_span: Option<Range<usize>>,
     pub arguments_span: Range<usize>,
     pub span: Range<usize>
 }
@@ -307,21 +309,34 @@ impl ImplementsInfo {
                         return false;
                     }
                     
-                    if self_generics.len() != generics.len() {
+                    if self_generics.len() != generics.len() && self_user_type_info.generics_define.len() != generics.len() {
                         return false;
                     }
                     
                     for i in 0..self_generics.len() {
-                        let self_generic = &self_generics[i];
+                        let self_generic = self_generics.get(i);
                         let generic = &generics[i];
             
-                        if !ImplementsInfo::contains_target_type(
-                            self_generic,
-                            generic,
-                            implements_infos,
-                            type_environment
-                        ) {
-                            return false;
+                        if let Some(self_generic) = self_generic {
+                            if !ImplementsInfo::contains_target_type(
+                                self_generic,
+                                generic,
+                                implements_infos,
+                                type_environment
+                            ) {
+                                return false;
+                            }
+                        } else {
+                            let self_generic = Type::Generic(self_user_type_info.generics_define[i].clone());
+
+                            if !ImplementsInfo::contains_target_type(
+                                &self_generic,
+                                generic,
+                                implements_infos,
+                                type_environment
+                            ) {
+                                return false;
+                            }
                         }
                     }
 
@@ -453,14 +468,9 @@ impl ImplementsInfoSet {
         self.implements_infos.extend(other.implements_infos.clone());
     }
 
-    pub fn is_implemented(&self, ty: &Type, interface: &Type, type_environment: &TypeEnvironment) -> bool {
+    pub(crate) fn is_implemented(&self, ty: &Type, interface: &Type, type_environment: &TypeEnvironment) -> bool {
         for implements_info in self.implements_infos.iter() {
-            if ImplementsInfo::contains_target_type(
-                &implements_info.concrete,
-                ty,
-                self,
-                type_environment
-            ) && (ImplementsInfo::contains_target_type(
+            if (ImplementsInfo::contains_target_type(
                 &implements_info.interface,
                 interface,
                 self,
@@ -470,14 +480,19 @@ impl ImplementsInfoSet {
                 &implements_info.interface,
                 self,
                 type_environment
-            )) {
+            )) && ImplementsInfo::contains_target_type(
+                &implements_info.concrete,
+                ty,
+                self,
+                type_environment
+            ) {
                 return true;
             }
         }
         false
     }
 
-    pub fn is_satisfied(&self, ty: &Type, generic_type: &GenericType, type_environment: &TypeEnvironment) -> Result<(), Vec<Arc<Bound>>> {
+    pub(crate) fn is_satisfied(&self, ty: &Type, generic_type: &GenericType, type_environment: &TypeEnvironment) -> Result<(), Vec<Arc<Bound>>> {
         let mut not_satisfied_types = Vec::new();
         for bound in generic_type.bounds.freeze_and_get().iter() {
             if !self.is_implemented(ty, &bound.ty, type_environment) {

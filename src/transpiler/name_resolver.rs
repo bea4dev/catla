@@ -998,7 +998,20 @@ fn name_resolve_primary_left<'allocator>(
                 },
                 _ => {}
             }
-            if let Some(function_call) = &simple.1 {
+            if let Some(generics) = &simple.1 {
+                if let Ok(generics) = generics {
+                    name_resolve_generics(
+                        generics,
+                        environment_id,
+                        name_environments,
+                        resolved_map,
+                        errors,
+                        warnings,
+                        allocator
+                    );
+                }
+            }
+            if let Some(function_call) = &simple.2 {
                 name_resolve_function_call(
                     function_call,
                     environment_id,
@@ -1181,7 +1194,20 @@ fn name_resolve_primary_right<'allocator>(
     allocator: &'allocator Bump
 ) {
     if let Some(second_expr) = &ast.second_expr {
-        if let Some(function_call) = &second_expr.1 {
+        if let Some(generics) = &second_expr.1 {
+            if let Ok(generics) = generics {
+                name_resolve_generics(
+                    generics,
+                    environment_id,
+                    name_environments,
+                    resolved_map,
+                    errors,
+                    warnings,
+                    allocator
+                );
+            }
+        }
+        if let Some(function_call) = &second_expr.2 {
             name_resolve_function_call(
                 function_call,
                 environment_id,
@@ -1215,19 +1241,6 @@ fn name_resolve_function_call<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     allocator: &'allocator Bump
 ) {
-    if let Some(generics) = &ast.generics {
-        if let Ok(generics) = generics {
-            name_resolve_generics(
-                generics,
-                environment_id,
-                name_environments,
-                resolved_map,
-                errors,
-                warnings,
-                allocator
-            );
-        }
-    }
     if let Ok(arg_exprs) = &ast.arg_exprs {
         for expression in arg_exprs.iter() {
             name_resolve_expression(

@@ -57,7 +57,7 @@ implements Default for float {}
 implements<T: Default> TestInterface<T> for T {}
 
 test_generic:<int, int>()
-test_generic:<float, float>()
+test_generic:<float>()
 
 function <D: Default, T: TestInterface<D>> test_generic() {}
 ";

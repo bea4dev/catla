@@ -602,7 +602,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 self.add_generics_info(&mut name, generics);
 
                 name += "(";
-                for i in 0..generics.len() {
+                for i in 0..function_info.argument_types.len() {
                     let argument = &function_info.argument_types[i];
                     if i != 0 {
                         name += ", ";
@@ -678,6 +678,11 @@ impl<'allocator> TypeEnvironment<'allocator> {
             );
 
             if let Err(bounds) = result {
+                let contains_unknown = bounds.iter().any(|bound| { bound.ty.contains_unknown() });
+                if type_resolved.value.contains_unknown() || contains_unknown {
+                    continue;
+                }
+
                 let type_name = type_resolved.map(|ty| { self.get_type_display_string(&ty) });
                 let bounds_module_name = bounds.first().unwrap().module_name.clone();
                 let not_satisfied_bounds = bounds.into_iter().map(|bound| {
@@ -2990,7 +2995,7 @@ fn type_inference_generics<'allocator>(
             set_span: ast.span.clone(),
             expected: generics.len(),
             found: ast.elements.len(),
-            ty
+            ty: ty.map(|ty| { ty.as_original_type() })
         };
         type_environment.add_lazy_type_error_report(error);
         return;

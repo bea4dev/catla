@@ -138,6 +138,61 @@ impl Type {
         }
     }
 
+    pub(crate) fn as_original_type(&self) -> Type {
+        match self {
+            Type::UserType { user_type_info, generics } => {
+                let generics = user_type_info.generics_define.iter()
+                    .map(|generics_define| { Type::Generic(generics_define.clone()) })
+                    .collect();
+                Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(generics) }
+            },
+            Type::Function { function_info, generics } => {
+                let generics = function_info.generics_define.iter()
+                    .map(|generics_define| { Type::Generic(generics_define.clone()) })
+                    .collect();
+                Type::Function { function_info: function_info.clone(), generics: Arc::new(generics) }
+            },
+            _ => self.clone()
+        }
+    }
+
+    pub(crate) fn contains_unknown(&self) -> bool {
+        match self {
+            Type::UserType { user_type_info, generics } => {
+                let contains_unknown = user_type_info.generics_define.iter().any(|generics_define| {
+                    generics_define.bounds.freeze_and_get().iter().any(|bound| {
+                        bound.ty.contains_unknown()
+                    })
+                });
+                if contains_unknown {
+                    return true;
+                }
+                generics.iter().any(|generic| { generic.contains_unknown() })
+            },
+            Type::Function { function_info, generics } => {
+                let contains_unknown = function_info.generics_define.iter().any(|generics_define| {
+                    generics_define.bounds.freeze_and_get().iter().any(|bound| {
+                        bound.ty.contains_unknown()
+                    })
+                });
+                if contains_unknown {
+                    return true;
+                }
+                generics.iter().any(|generic| { generic.contains_unknown() })
+            },
+            Type::Generic(generics) => {
+                generics.bounds.freeze_and_get().iter()
+                    .any(|bound| { bound.ty.contains_unknown() })
+            },
+            Type::Option(value_type) => value_type.contains_unknown(),
+            Type::Result { value, error } => {
+                value.contains_unknown() || error.contains_unknown()
+            },
+            Type::Unknown => true,
+            _ => false
+        }
+    }
+
 }
 
 

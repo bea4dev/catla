@@ -31,7 +31,7 @@ impl TranspileReport for AdviceReport {
 
         let text = &context.context.localized_text;
 
-        let advice_color = Color::RGB(52, 226, 226);
+        let advice_color = Color::Rgb(52, 226, 226);
 
         let position = match self.elements.first().unwrap().1.get(0).unwrap() {
             Advice::Add { add: _, position, message_override: _ } => *position,
@@ -136,7 +136,7 @@ impl TranspileReport for AdviceReport {
                         builder.add_label(
                             Label::new((module_name.clone(), advice_source_position..(advice_source_position + (span.len()))))
                                 .with_message(text.get_text("advice.remove_label"))
-                                .with_color(Color::RGB(252, 233, 79))
+                                .with_color(Color::Rgb(252, 233, 79))
                         )
                     },
                 }

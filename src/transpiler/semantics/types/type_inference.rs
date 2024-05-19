@@ -9,7 +9,7 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfoSet, LocalGenericID, Type}, user_type_element_collector::get_type};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{GenericType, ImplementsInfoSet, LocalGenericID, Type}, user_type_element_collector::get_type};
 
 
 
@@ -3654,7 +3654,7 @@ impl LazyTypeReport for InvalidSetGenericsTypeError {
             INVALID_SET_GENERICS_TYPE_ERROR,
             self.set_span.clone(),
             vec![type_name],
-            vec![(self.set_span.clone(), Color::Red), (self.ty.span.clone(), Color::Red)]
+            vec![(self.set_span.clone(), Color::Red), (self.ty.span.clone(), Color::Yellow)]
         )))
     }
 }
@@ -3676,14 +3676,14 @@ impl LazyTypeReport for NumberOfGenericsMismatchError {
         let expected_text = self.expected.to_string().fg(Color::Yellow).to_string();
 
         let (define_module_name, define_span) = match &self.ty.value {
-            Type::UserType { user_type_info, generics } => {
+            Type::UserType { user_type_info, generics: _ } => {
                 (
                     user_type_info.module_name.clone(),
                     user_type_info.generics_define_span.clone()
                         .unwrap_or_else(|| { user_type_info.name.span.clone() })
                 )
             },
-            Type::Function { function_info, generics } => {
+            Type::Function { function_info, generics: _ } => {
                 (
                     function_info.define_info.module_name.clone(),
                     function_info.define_info.generics_define_span.clone()

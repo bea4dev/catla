@@ -140,13 +140,13 @@ impl Type {
 
     pub(crate) fn as_original_type(&self) -> Type {
         match self {
-            Type::UserType { user_type_info, generics } => {
+            Type::UserType { user_type_info, generics: _ } => {
                 let generics = user_type_info.generics_define.iter()
                     .map(|generics_define| { Type::Generic(generics_define.clone()) })
                     .collect();
                 Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(generics) }
             },
-            Type::Function { function_info, generics } => {
+            Type::Function { function_info, generics: _ } => {
                 let generics = function_info.generics_define.iter()
                     .map(|generics_define| { Type::Generic(generics_define.clone()) })
                     .collect();

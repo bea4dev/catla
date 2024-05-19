@@ -17,7 +17,7 @@ fn main() {
 "
 import test::test_module2
 
-class TestClass<T>: TestInterface<float> {
+class TestClass<T> {
     let field: T?
 
     function test() -> TestClass<T> {
@@ -49,17 +49,22 @@ function <T, E> error(error: E) -> T!<E> {}
 
 
 
-interface TestInterface<T> {}
+struct Zero {}
+struct Succ<T> {}
 
-interface Default {}
+interface Nat {}
 
-implements Default for float {}
-implements<T: Default> TestInterface<T> for T {}
+implements Nat for Zero {}
+implements<T: Nat> Nat for Succ<T> {}
 
-test_generic:<int, int>()
-test_generic:<float>()
+function <T: Nat> test_is_nat() {}
 
-function <D: Default, T: TestInterface<D>> test_generic() {}
+test_is_nat:<Zero>
+test_is_nat:<Succ<Succ<Zero>>>
+
+interface Add<RHS: Nat> {}
+
+implements<RHS: Nat> Add<RHS> for Zero {}
 ";
 let source1 = 
 "

@@ -61,10 +61,6 @@ function <T: Nat> test_is_nat() {}
 
 test_is_nat:<Zero>
 test_is_nat:<Succ<Succ<Zero>>>
-
-interface Add<RHS: Nat> {}
-
-implements<RHS: Nat> Add<RHS> for Zero {}
 ";
 let source1 = 
 "

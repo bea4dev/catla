@@ -13,18 +13,24 @@ bnf_rules!{
 
     define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define )
 
-    function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments [ function_type_tag ] [ line_feed ] block
+    function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments
+                            [ function_type_tag ] [ line_feed ] [ where_clause ] block
     function_arguments  ::= "(" [ line_feed ] [ function_argument [ line_feed ] ] { "," [ line_feed ] [ function_argument ] } ")"
     function_argument   ::= literal type_tag
+
+    where_clause        ::= "where" [ line_feed ] [ where_element ] { "," [ line_feed ] [ where_element ] }
+    where_element       ::= type_info [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]
 
     memory_manage_attr  ::= "new" | "drop" | "mutex"
 
     statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" }
 
-    user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define ] [ super_type_info ] block
+    user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define [ line_feed ] ]
+                            [ super_type_info ] [ where_clause ] block
     super_type_info     ::= ":" [ line_feed ] type_info [ line_feed ] { "," [ type_info [ line_feed ] ] }
     
-    impl_interface      ::= "implements" [ generics_define ] type_info "for" type_info block
+    impl_interface      ::= "implements" [ generics_define ] type_info [ line_feed ] "for" [ line_feed ] type_info
+                            [ line_feed ] [ where_clause ] block
     
     generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
     generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]

@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::Range};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
-use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag}};
+use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause}};
 use either::Either::{Left, Right};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -381,6 +381,18 @@ pub(crate) fn name_resolve_program<'allocator>(
                     name_environment.set_name_define_info(name, define_info);
                 }
 
+                if let Some(where_clause) = &function_define.where_clause {
+                    name_resolve_where_clause(
+                        where_clause,
+                        current_environment_id,
+                        name_environments,
+                        resolved_map,
+                        errors,
+                        warnings,
+                        allocator
+                    );
+                }
+
                 let entity_id = EntityID::from(function_define);
                 name_environments.insert(entity_id, name_environment);
 
@@ -444,6 +456,18 @@ pub(crate) fn name_resolve_program<'allocator>(
                     }
                 }
 
+                if let Some(where_clause) = &data_struct_define.where_clause {
+                    name_resolve_where_clause(
+                        where_clause,
+                        entity_id,
+                        name_environments,
+                        resolved_map,
+                        errors,
+                        warnings,
+                        allocator
+                    );
+                }
+
                 if let Some(block) = &data_struct_define.block.value {
                     name_resolve_block(
                         block,
@@ -491,6 +515,17 @@ pub(crate) fn name_resolve_program<'allocator>(
                 if let Ok(type_info) = &implements.target_user_type {
                     name_resolve_type_info(
                         type_info,
+                        entity_id,
+                        name_environments,
+                        resolved_map,
+                        errors,
+                        warnings,
+                        allocator
+                    );
+                }
+                if let Some(where_clause) = &implements.where_clause {
+                    name_resolve_where_clause(
+                        where_clause,
                         entity_id,
                         name_environments,
                         resolved_map,
@@ -565,6 +600,39 @@ fn name_resolve_generics_define<'allocator>(
         for bound_type_info in element.bounds.iter() {
             name_resolve_type_info(
                 bound_type_info,
+                environment_id,
+                name_environments,
+                resolved_map,
+                errors,
+                warnings,
+                allocator
+            );
+        }
+    }
+}
+
+fn name_resolve_where_clause<'allocator>(
+    ast: &'allocator WhereClause<'allocator, '_>,
+    environment_id: EntityID,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    allocator: &'allocator Bump
+) {
+    for element in ast.elements.iter() {
+        name_resolve_type_info(
+            &element.target_type,
+            environment_id,
+            name_environments,
+            resolved_map,
+            errors,
+            warnings,
+            allocator
+        );
+        for bound in element.bounds.iter() {
+            name_resolve_type_info(
+                bound,
                 environment_id,
                 name_environments,
                 resolved_map,

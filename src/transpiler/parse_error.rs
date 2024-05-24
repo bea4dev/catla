@@ -1,5 +1,5 @@
 use bumpalo::Bump;
-use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FieldAssign, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag}};
+use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FieldAssign, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause, WhereElement}};
 use either::Either::{Right, Left, self};
 
 use self::{statement::{not_separated_statement_error_1, statement_attributes_without_define}, misc::{unexpected_token_error, Expected, UnexpectedTokens}};
@@ -135,6 +135,10 @@ pub fn collect_parse_error_program(
                     collect_parse_error_type_tag(type_tag, errors, warnings, context);
                 }
 
+                if let Some(where_clause) = &function_define.where_clause {
+                    collect_parse_error_where_clause(where_clause, errors, warnings, context);
+                }
+
                 collect_parse_error_with_recovered(
                     &function_define.block,
                     collect_parse_error_block,
@@ -163,6 +167,10 @@ pub fn collect_parse_error_program(
                         collect_parse_error_type_info(type_info, errors, warnings, context);
                     }
                     collect_error_tokens(&super_type_info.error_tokens, Expected::SuperTypeInfo, 0010, errors, context);
+                }
+
+                if let Some(where_clause) = &data_struct_define.where_clause {
+                    collect_parse_error_where_clause(where_clause, errors, warnings, context);
                 }
 
                 collect_error_tokens(&data_struct_define.error_tokens, Expected::Unnecessary, 0010, errors, context);
@@ -205,6 +213,14 @@ pub fn collect_parse_error_program(
                     warnings,
                     context
                 );
+                if let Some(where_clause) = &implements.where_clause {
+                    collect_parse_error_where_clause(
+                        where_clause,
+                        errors,
+                        warnings,
+                        context
+                    );
+                }
                 collect_parse_error_with_recovered(
                     &implements.block,
                     collect_parse_error_block,
@@ -258,6 +274,39 @@ fn collect_parse_error_generics_define(
         for bound_type_info in element.bounds.iter() {
             collect_parse_error_type_info(bound_type_info, errors, warnings, context);
         }
+    }
+}
+
+fn collect_parse_error_where_clause(
+    ast: &WhereClause,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    for element in ast.elements.iter() {
+        collect_parse_error_where_element(element, errors, warnings, context);
+    }
+    for error_tokens in ast.error_tokens.iter() {
+        collect_error_tokens(error_tokens, Expected::Unnecessary, 0049, errors, context);
+    }
+    collect_parse_error_only_parse_result_error(
+        &ast.next_expected_token,
+        Expected::BraceLeft,
+        0049,
+        errors,
+        context
+    );
+}
+
+fn collect_parse_error_where_element(
+    ast: &WhereElement,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    collect_parse_error_type_info(&ast.target_type, errors, warnings, context);
+    for bound in ast.bounds.iter() {
+        collect_parse_error_type_info(bound, errors, warnings, context);
     }
 }
 

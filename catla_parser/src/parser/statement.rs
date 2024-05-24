@@ -332,11 +332,116 @@ fn parse_function_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
 
     let type_tag = parse_type_tag(cursor);
 
+    let where_clause = parse_where_clause(cursor, TokenKind::BraceLeft);
+
     let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
 
     let span = statement_attributes.get(0).map_or(span.start_position, |spanned| { spanned.span.start })..span.elapsed(cursor).end;
 
-    return Some(FunctionDefine { attributes: statement_attributes.clone(), generics_define, name, args, type_tag, block, span });
+    return Some(FunctionDefine { attributes: statement_attributes.clone(), generics_define, name, args, type_tag, where_clause, block, span });
+}
+
+pub fn parse_where_clause<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, next_expected_token: TokenKind) -> Option<WhereClause<'allocator, 'input>> {
+    let span = Span::start(cursor);
+
+    let first_token = cursor.next().get_kind();
+    if first_token != TokenKind::Where {
+        cursor.prev();
+        return None;
+    }
+
+    let mut elements = Vec::new_in(cursor.allocator);
+    let mut error_tokens = Vec::new_in(cursor.allocator);
+
+    let next_expected_token = loop {
+        skip(cursor, &[TokenKind::LineFeed]);
+
+        let element = match parse_where_element(cursor) {
+            Some(element) => element,
+            _ => {
+                skip(cursor, &[TokenKind::LineFeed]);
+
+                error_tokens.push(read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::LineFeed, TokenKind::Semicolon, next_expected_token]));
+                
+                let prev_token_kind = cursor.peek_prev().get_kind();
+                match prev_token_kind {
+                    TokenKind::Comma => {
+                        skip(cursor, &[TokenKind::LineFeed]);
+                        continue;
+                    },
+                    _ => {
+                        break if prev_token_kind == next_expected_token {
+                            Ok(())
+                        } else {
+                            Err(unexpected_token_error(cursor.allocator, cursor.peek_prev()))
+                        };
+                    }
+                }
+            }
+        };
+
+        elements.push(element);
+
+        let comma_or_next_expected = cursor.next().get_kind();
+        match comma_or_next_expected {
+            TokenKind::Comma => {
+                skip(cursor, &[TokenKind::LineFeed]);
+                continue
+            },
+            _ => {
+                if comma_or_next_expected == next_expected_token {
+                    break Ok(());
+                }
+
+                let prev = cursor.peek_prev();
+                if let Some(prev) = prev {
+                    if prev.kind == TokenKind::LineFeed || prev.kind == TokenKind::Semicolon {
+                        break Err(unexpected_token_error(cursor.allocator, Some(prev)));
+                    }
+                    error_tokens.push(bump_vec![cursor.allocator, prev.clone()]);
+                }
+                continue;
+            }
+        }
+    };
+
+    if next_expected_token.is_ok() {
+        cursor.prev();
+    }
+
+    return Some(WhereClause { elements, error_tokens, next_expected_token, span: span.elapsed(cursor) });
+}
+
+pub fn parse_where_element<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<WhereElement<'allocator, 'input>> {
+    let span = Span::start(cursor);
+
+    let target_type = parse_type_info(cursor)?;
+
+    let mut bounds = Vec::new_in(cursor.allocator);
+
+    if cursor.next().get_kind() == TokenKind::Colon {
+        loop {
+            skip(cursor, &[TokenKind::LineFeed]);
+
+            let bound = match parse_type_info(cursor) {
+                Some(bound_type_info) => bound_type_info,
+                _ => break
+            };
+
+            skip(cursor, &[TokenKind::LineFeed]);
+
+            bounds.push(bound);
+
+            if cursor.next().get_kind() != TokenKind::Plus {
+                cursor.prev();
+                break;
+            }
+        }
+    } else {
+        cursor.prev();
+    }
+
+    return Some(WhereElement { target_type, bounds, span: span.elapsed(cursor) });
 }
 
 fn parse_function_arguments<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> FunctionArguments<'allocator, 'input> {
@@ -550,9 +655,11 @@ fn parse_user_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocato
         error_tokens.merged_extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft]));
     }
 
+    let where_clause = parse_where_clause(cursor, TokenKind::BraceLeft);
+
     let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
     
-    return Some(UserTypeDefine { attributes: statement_attributes.clone(), kind, name, generics_define, super_type_info, error_tokens, block, span: span.elapsed(cursor) });
+    return Some(UserTypeDefine { attributes: statement_attributes.clone(), kind, name, generics_define, super_type_info, error_tokens, where_clause, block, span: span.elapsed(cursor) });
 }
 
 fn parse_super_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<SuperTypeInfo<'allocator, 'input>> {
@@ -620,12 +727,15 @@ fn parse_implements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'in
         Err(unexpected_token_error(&cursor.allocator, cursor.current()))
     };
 
+    let where_clause = parse_where_clause(cursor, TokenKind::BraceLeft);
+
     let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
 
     Some(Implements {
         generics_define,
         interface,
         target_user_type,
+        where_clause,
         block,
         span: span.elapsed(cursor)
     })

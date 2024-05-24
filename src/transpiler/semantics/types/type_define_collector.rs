@@ -65,6 +65,7 @@ pub(crate) fn collect_user_type_program(
                         generics_define,
                         generics_define_span,
                         element_types: Mutex::new(HashMap::new()),
+                        where_bounds: Default::default()
                     };
 
                     if let Some(block) = &data_struct_define.block.value {

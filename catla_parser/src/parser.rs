@@ -45,6 +45,7 @@ pub enum ASTParseError<'allocator, 'input> {
 }
 
 pub type ParseResult<'allocator, 'input, T> = Result<T, ASTParseError<'allocator, 'input>>;
+pub type ErrorTokens<'allocator, 'input> = Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>;
 
 
 pub trait AST {}
@@ -130,6 +131,7 @@ pub struct FunctionDefine<'allocator, 'input> {
     pub name: FunctionName<'allocator, 'input>,
     pub args: FunctionArguments<'allocator, 'input>,
     pub type_tag: Option<TypeTag<'allocator, 'input>>,
+    pub where_clause: Option<WhereClause<'allocator, 'input>>,
     pub block: BlockRecovered<'allocator, 'input>,
     pub span: Range<usize>
 }
@@ -197,6 +199,7 @@ pub struct UserTypeDefine<'allocator, 'input> {
     pub name: LiteralResult<'allocator, 'input>,
     pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
     pub super_type_info: Option<SuperTypeInfo<'allocator, 'input>>,
+    pub where_clause: Option<WhereClause<'allocator, 'input>>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub block: BlockRecovered<'allocator, 'input>,
     pub span: Range<usize>
@@ -223,7 +226,23 @@ pub struct Implements<'allocator, 'input> {
     pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
     pub interface: TypeInfoResult<'allocator, 'input>,
     pub target_user_type: TypeInfoResult<'allocator, 'input>,
+    pub where_clause: Option<WhereClause<'allocator, 'input>>,
     pub block: BlockRecovered<'allocator, 'input>,
+    pub span: Range<usize>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhereClause<'allocator, 'input> {
+    pub elements: Vec<WhereElement<'allocator, 'input>, &'allocator Bump>,
+    pub error_tokens: ErrorTokens<'allocator, 'input>,
+    pub next_expected_token: ParseResult<'allocator, 'input, ()>,
+    pub span: Range<usize>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhereElement<'allocator, 'input> {
+    pub target_type: TypeInfo<'allocator, 'input>,
+    pub bounds: Vec<TypeInfo<'allocator, 'input>, &'allocator Bump>,
     pub span: Range<usize>
 }
 

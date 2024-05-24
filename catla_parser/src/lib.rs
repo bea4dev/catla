@@ -12,7 +12,7 @@ fn test() {
 
     let source = 
 "
-function <T> test(value: T) -> T {
+function <T> test(value: T) -> T where T: TestInterface {
     return value
 }
 

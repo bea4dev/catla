@@ -69,7 +69,8 @@ impl Type {
                     generics_define: function_info.generics_define.clone(),
                     argument_types,
                     return_type: Spanned::new(return_type, function_info.return_type.span.clone()),
-                    define_info: function_info.define_info.clone()
+                    define_info: function_info.define_info.clone(),
+                    where_bounds: function_info.where_bounds.clone()
                 };
 
                 Type::Function { function_info: Arc::new(function_info), generics: Arc::new(new_generics) }
@@ -95,6 +96,29 @@ impl Type {
         }
     }
 
+    fn get_where_bounds_with_generics(
+        where_bounds: &Vec<WhereBound>,
+        generics_define: &Vec<Arc<GenericType>>,
+        local_generics: &Arc<Vec<Type>>
+    ) -> Vec<WhereBound> {
+        let mut new_where_bounds = Vec::new();
+        for where_bound in where_bounds.iter() {
+            let target_type = Type::get_type_with_generics(
+                &where_bound.target_type,
+                generics_define,
+                local_generics
+            );
+            let mut bounds = Vec::new();
+            for bound in where_bound.bounds.iter() {
+                let ty = Type::get_type_with_generics(&bound.ty, generics_define, local_generics);
+                let bound = Bound { module_name: bound.module_name.clone(), span: bound.span.clone(), ty };
+                bounds.push(Arc::new(bound));
+            }
+            new_where_bounds.push(WhereBound { target_type, bounds })
+        }
+        new_where_bounds
+    }
+
     pub(crate) fn get_element_type_with_local_generic(&self, name: &str) -> Option<Type> {
         match self {
             Type::UserType { user_type_info, generics } => {
@@ -104,6 +128,26 @@ impl Type {
                 };
 
                 element_type.map(|ty| { Type::get_type_with_generics(&ty, &user_type_info.generics_define, generics) })
+            },
+            _ => None
+        }
+    }
+
+    pub(crate) fn get_where_bounds_with_local_generic(&self) -> Option<Vec<WhereBound>> {
+        match self {
+            Type::UserType { user_type_info, generics } => {
+                Some(Type::get_where_bounds_with_generics(
+                    &user_type_info.where_bounds.freeze_and_get(),
+                    &user_type_info.generics_define,
+                    generics
+                ))
+            },
+            Type::Function { function_info, generics } => {
+                Some(Type::get_where_bounds_with_generics(
+                    &function_info.where_bounds.freeze_and_get(),
+                    &function_info.generics_define,
+                    generics
+                ))
             },
             _ => None
         }
@@ -224,7 +268,8 @@ pub struct DataStructInfo {
     pub kind: DataStructKindEnum,
     pub generics_define: Vec<Arc<GenericType>>,
     pub generics_define_span: Option<Range<usize>>,
-    pub element_types: Mutex<HashMap<String, Type>>
+    pub element_types: Mutex<HashMap<String, Type>>,
+    pub where_bounds: FreezableMutex<Vec<WhereBound>>
 }
 
 impl PartialEq for DataStructInfo {
@@ -273,6 +318,19 @@ impl<T: Default> FreezableMutex<T> {
 
 }
 
+impl<T: Default> Default for FreezableMutex<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
+impl<T: Default> Clone for FreezableMutex<T> {
+    fn clone(&self) -> Self {
+        let value = self.freeze_and_get();
+        Self { mutex: Mutex::new(Either::Right(value)) }
+    }
+}
+
 
 #[derive(Debug)]
 pub struct GenericType {
@@ -289,6 +347,12 @@ impl PartialEq for GenericType {
 impl Eq for GenericType {}
 
 #[derive(Debug)]
+pub struct WhereBound {
+    pub target_type: Type,
+    pub bounds: Vec<Arc<Bound>>
+}
+
+#[derive(Debug)]
 pub struct Bound {
     pub module_name: String,
     pub span: Range<usize>,
@@ -303,7 +367,9 @@ pub struct FunctionType {
     pub argument_types: Vec<Type>,
     pub return_type: Spanned<Type>,
     #[derivative(PartialEq="ignore")]
-    pub define_info: FunctionDefineInfo
+    pub define_info: FunctionDefineInfo,
+    #[derivative(PartialEq="ignore")]
+    pub where_bounds: FreezableMutex<Vec<WhereBound>>
 }
 
 #[derive(Debug, Clone)]

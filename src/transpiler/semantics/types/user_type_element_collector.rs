@@ -1,13 +1,13 @@
 use std::{mem, ops::DerefMut, sync::Arc};
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo, WhereClause};
 use either::Either;
 use fxhash::FxHashMap;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::type_info::{Bound, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, Type};
+use super::type_info::{Bound, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, Type, WhereBound};
 
 
 pub(crate) fn collect_module_element_types_program(
@@ -227,11 +227,11 @@ pub(crate) fn collect_module_element_types_program(
                         
                         // set generic bounds type
                         let user_type = user_type_map.get(name.value).unwrap().clone();
-                        if let Type::UserType{ user_type_info: data_struct_info, generics: _ } = user_type {
-                            let size = data_struct_info.generics_define.len();
+                        if let Type::UserType{ user_type_info, generics: _ } = user_type {
+                            let size = user_type_info.generics_define.len();
                             if size == generic_types.len() {
                                 for i in 0..size {
-                                    let generic_type_old = &data_struct_info.generics_define[i];
+                                    let generic_type_old = &user_type_info.generics_define[i];
                                     let generic_type_new = &generic_types[i];
 
                                     let mut bounds_old = generic_type_old.bounds.lock().unwrap();
@@ -243,6 +243,21 @@ pub(crate) fn collect_module_element_types_program(
                                     }
                                 }
                             }
+
+                            let where_bounds = get_where_bounds(
+                                &data_struct_define.where_clause,
+                                user_type_map,
+                                import_element_map,
+                                name_resolved_map,
+                                module_user_type_map,
+                                module_element_type_map,
+                                generics_map,
+                                errors,
+                                warnings,
+                                context
+                            );
+                            let mut where_bounds_lock = user_type_info.where_bounds.lock().unwrap();
+                            *where_bounds_lock.as_mut().left().unwrap() = where_bounds;
                         }
                     }
 
@@ -590,13 +605,27 @@ fn get_function_type_and_name<'allocator>(
         arguments_span: ast.args.span.clone(),
         span: ast.span.clone()
     };
+    
+    let where_bounds = get_where_bounds(
+        &ast.where_clause,
+        user_type_map,
+        import_element_map,
+        name_resolved_map,
+        module_user_type_map,
+        module_element_type_map,
+        generics_map,
+        errors,
+        warnings,
+        context
+    );
 
     let function_info = Arc::new(FunctionType {
         is_extension: current_user_type_name.is_some(),
         generics_define,
         argument_types,
         return_type,
-        define_info
+        define_info,
+        where_bounds: FreezableMutex::new(where_bounds)
     });
 
     let function_type = Type::Function{ function_info, generics: Arc::new(Vec::new()) };
@@ -618,6 +647,62 @@ fn get_function_type_and_name<'allocator>(
             Some((name, function_type))
         },
         _ => None
+    }
+}
+
+fn get_where_bounds(
+    ast: &Option<WhereClause>,
+    user_type_map: &FxHashMap<String, Type>,
+    import_element_map: &FxHashMap<EntityID, String>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &mut FxHashMap<String, Type>,
+    generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) -> Vec<WhereBound> {
+    if let Some(ast) = ast {
+        let mut where_bounds = Vec::new();
+        for element in ast.elements.iter() {
+            let target_type = get_type(
+                &element.target_type,
+                user_type_map,
+                import_element_map,
+                name_resolved_map,
+                module_user_type_map,
+                module_element_type_map,
+                generics_map,
+                errors,
+                warnings,
+                context
+            );
+            let mut bounds = Vec::new();
+            for bound in element.bounds.iter() {
+                let ty = get_type(
+                    bound,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    generics_map,
+                    errors,
+                    warnings,
+                    context
+                );
+                // TODO - check sanity of bound types
+                bounds.push(Arc::new(Bound {
+                    module_name: context.module_name.clone(),
+                    span: bound.span.clone(),
+                    ty
+                }));
+            }
+            where_bounds.push(WhereBound { target_type, bounds });
+        }
+        where_bounds
+    } else {
+        Vec::new()
     }
 }
 

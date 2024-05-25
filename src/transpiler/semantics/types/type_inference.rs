@@ -9,7 +9,7 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{GenericType, ImplementsInfoSet, LocalGenericID, Type}, user_type_element_collector::get_type};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfoSet, LocalGenericID, Type, WhereBound}, user_type_element_collector::get_type};
 
 
 
@@ -19,12 +19,13 @@ const MAPPING_OPERATOR_TYPE_ERROR: usize = 0041;
 const BOUNDS_NOT_SATISFIED_ERROR: usize = 0046;
 const INVALID_SET_GENERICS_TYPE_ERROR: usize = 0047;
 const NUMBER_OF_GENERICS_MISMATCH_ERROR: usize = 0048;
+const WHERE_BOUNDS_NOT_SATISFIED_ERROR: usize = 0050;
 
 
 pub(crate) struct TypeEnvironment<'allocator> {
     entity_type_map: HashMap<EntityID, Either<EntityID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_type_map: HashMap<LocalGenericID, Either<LocalGenericID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
-    generic_bounds_checks: Vec<(Spanned<LocalGenericID>, Arc<GenericType>), &'allocator Bump>,
+    generic_bounds_checks: Vec<GenericsBoundCheck, &'allocator Bump>,
     implicit_convert_map: HashMap<EntityID, ImplicitConvertKind, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, Spanned<Type>>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
@@ -61,8 +62,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
             Either::Right(Spanned::new(Type::Unknown, type_span.clone()))
         );
         
-        if let Some(generic_type) = generic_type {
-            self.generic_bounds_checks.push((Spanned::new(generic_id, type_span), generic_type));
+        if let Some(generics_define) = generic_type {
+            self.generic_bounds_checks.push(GenericsBoundCheck::Generics { type_span, generic_id, generics_define });
         }
         
         generic_id
@@ -90,7 +91,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
         let generics = Arc::new(generics);
 
-        match &ty.value {
+        let ty = match &ty.value {
             Type::UserType { user_type_info, generics: _ } => {
                 Spanned::new(Type::UserType { user_type_info: user_type_info.clone(), generics }, ty.span)
             },
@@ -98,7 +99,18 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 Spanned::new(Type::Function { function_info: function_info.clone(), generics }, ty.span)
             },
             _ => unreachable!()
+        };
+
+        let where_bounds = ty.value.get_where_bounds_with_local_generic().unwrap();
+        for where_bound in where_bounds {
+            self.generic_bounds_checks.push(GenericsBoundCheck::Where {
+                type_span: ty.span.clone(),
+                target_type: where_bound.target_type,
+                bounds: where_bound.bounds
+            });
         }
+
+        ty
     }
 
     pub fn set_entity_type(&mut self, entity_id: EntityID, ty: Spanned<Type>) {
@@ -630,6 +642,34 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
     }
 
+    pub fn resolve_type(&self, ty: &Type) -> Type {
+        match ty {
+            Type::UserType { user_type_info, generics } => {
+                let mut new_generics = Vec::new();
+                for generic in generics.iter() {
+                    new_generics.push(self.resolve_type(generic));
+                }
+                Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(new_generics) }
+            },
+            Type::Function { function_info, generics } => {
+                let mut new_generics = Vec::new();
+                for generic in generics.iter() {
+                    new_generics.push(self.resolve_type(generic));
+                }
+                Type::Function { function_info: function_info.clone(), generics: Arc::new(new_generics) }
+            },
+            Type::LocalGeneric(generic_id) => self.resolve_generic_type(*generic_id).1.value,
+            Type::Option(value) => Type::Option(Arc::new(self.resolve_type(&value))),
+            Type::Result { value, error } => {
+                Type::Result {
+                    value: Arc::new(self.resolve_type(&value)),
+                    error: Arc::new(self.resolve_type(&error))
+                }
+            },
+            _ => ty.clone()
+        }
+    }
+
     fn add_generics_info(&self, name: &mut String, generics: &Vec<Type>) {
         if !generics.is_empty() {
             *name += "<";
@@ -669,33 +709,65 @@ impl<'allocator> TypeEnvironment<'allocator> {
     }
 
     fn type_check_bounds(&self, implements_infos: &ImplementsInfoSet, errors: &mut Vec<TranspileError>) {
-        for (generic_id, generic_define) in self.generic_bounds_checks.iter() {
-            let type_resolved = self.resolve_generic_type(generic_id.value).1;
-            let result = implements_infos.is_satisfied(
-                &type_resolved.value,
-                &generic_define,
-                self
-            );
+        for bounds_check in self.generic_bounds_checks.iter() {
+            match bounds_check {
+                GenericsBoundCheck::Generics { type_span, generic_id, generics_define } => {
+                    let type_resolved = self.resolve_generic_type(*generic_id).1;
+                    let result = implements_infos.is_satisfied(
+                        &type_resolved.value,
+                        &generics_define.bounds.freeze_and_get(),
+                        self
+                    );
+        
+                    if let Err(bounds) = result {
+                        let contains_unknown = bounds.iter().any(|bound| { bound.ty.contains_unknown() });
+                        if type_resolved.value.contains_unknown() || contains_unknown {
+                            continue;
+                        }
+        
+                        let type_name = type_resolved.map(|ty| { self.get_type_display_string(&ty) });
+                        let bounds_module_name = bounds.first().unwrap().module_name.clone();
+                        let not_satisfied_bounds = bounds.into_iter().map(|bound| {
+                            Spanned::new(self.get_type_display_string(&bound.ty), bound.span.clone())
+                        }).collect();
+        
+                        let error = TranspileError::new(BoundsNotSatisfiedError {
+                            span: type_span.clone(),
+                            type_name,
+                            bounds_module_name,
+                            not_satisfied_bounds
+                        });
+                        errors.push(error);
+                    }
+                },
+                GenericsBoundCheck::Where { type_span, target_type, bounds } => {
+                    let result = implements_infos.is_satisfied(
+                        target_type,
+                        bounds,
+                        self
+                    );
 
-            if let Err(bounds) = result {
-                let contains_unknown = bounds.iter().any(|bound| { bound.ty.contains_unknown() });
-                if type_resolved.value.contains_unknown() || contains_unknown {
-                    continue;
+                    if let Err(bounds) = result {
+                        let contains_unknown = bounds.iter()
+                            .any(|bound| { self.resolve_type(&bound.ty).contains_unknown() });
+                        if self.resolve_type(target_type).contains_unknown() || contains_unknown {
+                            continue;
+                        }
+        
+                        let type_name = self.get_type_display_string(target_type);
+                        let bounds_module_name = bounds.first().unwrap().module_name.clone();
+                        let not_satisfied_bounds = bounds.into_iter().map(|bound| {
+                            Spanned::new(self.get_type_display_string(&bound.ty), bound.span.clone())
+                        }).collect();
+        
+                        let error = TranspileError::new(WhereBoundsNotSatisfiedError {
+                            type_name: Spanned::new(type_name, type_span.clone()),
+                            bounds_module_name,
+                            not_satisfied_bounds
+                        });
+                        errors.push(error);
+                    }
                 }
-
-                let type_name = type_resolved.map(|ty| { self.get_type_display_string(&ty) });
-                let bounds_module_name = bounds.first().unwrap().module_name.clone();
-                let not_satisfied_bounds = bounds.into_iter().map(|bound| {
-                    Spanned::new(self.get_type_display_string(&bound.ty), bound.span.clone())
-                }).collect();
-
-                let error = TranspileError::new(BoundsNotSatisfiedError {
-                    span: generic_id.span.clone(),
-                    type_name,
-                    bounds_module_name,
-                    not_satisfied_bounds
-                });
-                errors.push(error);
             }
         }
     }
@@ -708,6 +780,11 @@ pub(crate) enum ImplicitConvertKind {
     Some,
     Ok,
     Error
+}
+
+pub(crate) enum GenericsBoundCheck {
+    Generics { type_span: Range<usize>, generic_id: LocalGenericID, generics_define: Arc<GenericType> },
+    Where { type_span: Range<usize>, target_type: Type, bounds: Vec<Arc<Bound>> }
 }
 
 
@@ -3612,6 +3689,76 @@ impl TranspileReport for BoundsNotSatisfiedError {
                     .with_color(Color::Yellow)
                     .with_message(
                         key.get_massage(text, ErrorMessageType::Label(2))
+                            .replace("%bound", &bound_text)
+                    )
+            );
+        }
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            let note = note.replace("%type", &type_text).replace("%bounds", &bounds_text);
+            builder.set_note(note);
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            let help = help.replace("%type", &type_text).replace("%bounds", &bounds_text);
+            builder.set_help(help);
+        }
+
+
+        let bounds_module_context = context.context.get_module_context(&self.bounds_module_name).unwrap();
+
+        let source_list = vec![
+            (module_name.clone(), context.source_code.code.as_str()),
+            (self.bounds_module_name.clone(), bounds_module_context.source_code.code.as_str())
+        ];
+
+        builder.finish().print(sources(source_list)).unwrap();
+    }
+}
+
+struct WhereBoundsNotSatisfiedError {
+    type_name: Spanned<String>,
+    bounds_module_name: String,
+    not_satisfied_bounds: Vec<Spanned<String>>
+}
+
+impl TranspileReport for WhereBoundsNotSatisfiedError {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let key = ErrorMessageKey::new(WHERE_BOUNDS_NOT_SATISFIED_ERROR);
+
+        let message = key.get_massage(text, ErrorMessageType::Message);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.type_name.span.start)
+            .with_code(WHERE_BOUNDS_NOT_SATISFIED_ERROR)
+            .with_message(message);
+
+        let type_text = self.type_name.value.clone().fg(Color::Red).to_string();
+
+        let bounds_text = self.not_satisfied_bounds.iter()
+            .map(|bound| { bound.value.clone().fg(Color::Yellow).to_string() })
+            .collect::<Vec<String>>()
+            .join(" + ");
+
+        builder.add_label(
+            Label::new((module_name.clone(), self.type_name.span.clone()))
+                .with_color(Color::Red)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(0))
+                        .replace("%type", &type_text)
+                        .replace("%bounds", &bounds_text)
+                )
+        );
+
+        for bound in self.not_satisfied_bounds.iter() {
+            let bound_text = bound.value.clone().fg(Color::Yellow).to_string();
+
+            builder.add_label(
+                Label::new((self.bounds_module_name.clone(), bound.span.clone()))
+                    .with_color(Color::Yellow)
+                    .with_message(
+                        key.get_massage(text, ErrorMessageType::Label(1))
                             .replace("%bound", &bound_text)
                     )
             );

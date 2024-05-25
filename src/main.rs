@@ -55,11 +55,11 @@ struct Succ<T> {}
 interface Nat {}
 
 implements Nat for Zero {}
-implements<T: Nat> Nat for Succ<T> {}
+implements<T> Nat for Succ<T> where T: Nat {}
 
-function <T: Nat> test_is_nat() {}
+function <T> test_is_nat() where T: Nat {}
 
-test_is_nat:<Zero>
+test_is_nat:<TestClass>
 test_is_nat:<Succ<Succ<Zero>>>
 ";
 let source1 = 

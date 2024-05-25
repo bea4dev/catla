@@ -613,9 +613,9 @@ impl ImplementsInfoSet {
         false
     }
 
-    pub(crate) fn is_satisfied(&self, ty: &Type, generic_type: &GenericType, type_environment: &TypeEnvironment) -> Result<(), Vec<Arc<Bound>>> {
+    pub(crate) fn is_satisfied(&self, ty: &Type, bounds: &Vec<Arc<Bound>>, type_environment: &TypeEnvironment) -> Result<(), Vec<Arc<Bound>>> {
         let mut not_satisfied_types = Vec::new();
-        for bound in generic_type.bounds.freeze_and_get().iter() {
+        for bound in bounds.iter() {
             if !self.is_implemented(ty, &bound.ty, type_environment) {
                 not_satisfied_types.push(bound.clone())
             }

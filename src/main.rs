@@ -59,7 +59,7 @@ implements<T> Nat for Succ<T> where T: Nat {}
 
 function <T> test_is_nat() where T: Nat {}
 
-test_is_nat:<TestClass>
+test_is_nat:<Succ<TestClass>>
 test_is_nat:<Succ<Succ<Zero>>>
 ";
 let source1 = 

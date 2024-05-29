@@ -286,7 +286,8 @@ pub(crate) fn collect_module_element_types_program(
                             let implements_info = ImplementsInfo {
                                 generics: generics.clone(),
                                 interface,
-                                concrete: concrete.clone()
+                                concrete: concrete.clone(),
+                                where_bounds: Arc::new(Vec::new())
                             };
                             implements_infos.add(implements_info);
                         }
@@ -355,10 +356,24 @@ pub(crate) fn collect_module_element_types_program(
                             context
                         );
 
+                        let where_bounds = get_where_bounds(
+                            &implements.where_clause,
+                            user_type_map,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            generics_map,
+                            errors,
+                            warnings,
+                            context
+                        );
+
                         let implements_info = ImplementsInfo {
                             generics,
                             interface,
                             concrete,
+                            where_bounds: Arc::new(where_bounds)
                         };
                         implements_infos.add(implements_info);
                     }

@@ -34,7 +34,7 @@ pub enum Type {
 
 impl Type {
     
-    fn get_type_with_generics(ty: &Type, generics_define: &Vec<Arc<GenericType>>, local_generics: &Arc<Vec<Type>>) -> Type {
+    fn get_type_with_generics(ty: &Type, generics_define: &Vec<Arc<GenericType>>, local_generics: &Vec<Type>) -> Type {
         match ty {
             Type::UserType { user_type_info, generics } => {
                 let mut new_generics = Vec::with_capacity(generics.len());
@@ -99,7 +99,7 @@ impl Type {
     fn get_where_bounds_with_generics(
         where_bounds: &Vec<WhereBound>,
         generics_define: &Vec<Arc<GenericType>>,
-        local_generics: &Arc<Vec<Type>>
+        local_generics: &Vec<Type>
     ) -> Vec<WhereBound> {
         let mut new_where_bounds = Vec::new();
         for where_bound in where_bounds.iter() {
@@ -389,7 +389,8 @@ pub struct LocalGenericID(pub usize);
 pub struct ImplementsInfo {
     pub generics: Arc<Vec<Arc<GenericType>>>,
     pub interface: Type,
-    pub concrete: Type
+    pub concrete: Type,
+    pub where_bounds: Arc<Vec<WhereBound>>
 }
 
 impl ImplementsInfo {
@@ -398,7 +399,7 @@ impl ImplementsInfo {
         self_type: &Type,
         ty: &Type,
         implements_infos: &ImplementsInfoSet,
-        type_environment: &TypeEnvironment
+        type_environment: &mut TypeEnvironment
     ) -> bool {
         if let Type::LocalGeneric(generic_id) = ty {
             let (_, ty) = type_environment.resolve_generic_type(*generic_id);
@@ -589,7 +590,7 @@ impl ImplementsInfoSet {
         self.implements_infos.extend(other.implements_infos.clone());
     }
 
-    pub(crate) fn is_implemented(&self, ty: &Type, interface: &Type, type_environment: &TypeEnvironment) -> bool {
+    pub(crate) fn is_implemented(&self, ty: &Type, interface: &Type, type_environment: &mut TypeEnvironment) -> bool {
         for implements_info in self.implements_infos.iter() {
             if (ImplementsInfo::contains_target_type(
                 &implements_info.interface,
@@ -607,13 +608,81 @@ impl ImplementsInfoSet {
                 self,
                 type_environment
             ) {
-                return true;
+                if implements_info.where_bounds.is_empty() {
+                    return true;
+                }
+
+                // init generic variables
+                let generics_define = &implements_info.generics;
+                let mut local_generics = Vec::new();
+                for _ in 0..generics_define.len() {
+                    let generic_id = type_environment.new_local_generic_id(0..0, None);
+                    local_generics.push(Type::LocalGeneric(generic_id));
+                }
+
+                let impl_concrete = Type::get_type_with_generics(
+                    &implements_info.concrete,
+                    generics_define,
+                    &local_generics
+                );
+                let impl_interface = Type::get_type_with_generics(
+                    &implements_info.interface,
+                    generics_define,
+                    &local_generics
+                );
+
+                let resolved_ty = type_environment.resolve_type(ty);
+                let resolved_interface = type_environment.resolve_type(interface);
+
+                // give answer to resolving generic variables
+                let result1 = type_environment.unify_type(
+                    &impl_concrete,
+                    &(0..0),
+                    &resolved_ty,
+                    &(0..0)
+                );
+                let result2 = type_environment.unify_type(
+                    &impl_interface,
+                    &(0..0),
+                    &resolved_interface,
+                    &(0..0)
+                );
+
+                if result1.is_err() || result2.is_err() {
+                    // ignore
+                    continue;
+                }
+
+                let mut is_satisfied = true;
+                'check: for where_bound in implements_info.where_bounds.iter() {
+                    let target_type = Type::get_type_with_generics(
+                        &where_bound.target_type,
+                        generics_define,
+                        &local_generics
+                    );
+                    for bound in where_bound.bounds.iter() {
+                        let bound_type = Type::get_type_with_generics(
+                            &bound.ty,
+                            generics_define,
+                            &local_generics
+                        );
+
+                        if !self.is_implemented(&target_type, &bound_type, type_environment) {
+                            is_satisfied = false;
+                            break 'check;
+                        }
+                    }
+                }
+
+                if is_satisfied {
+                    return true;
+                }
             }
         }
         false
     }
 
-    pub(crate) fn is_satisfied(&self, ty: &Type, bounds: &Vec<Arc<Bound>>, type_environment: &TypeEnvironment) -> Result<(), Vec<Arc<Bound>>> {
+    pub(crate) fn is_satisfied(&self, ty: &Type, bounds: &Vec<Arc<Bound>>, type_environment: &mut TypeEnvironment) -> Result<(), Vec<Arc<Bound>>> {
         let mut not_satisfied_types = Vec::new();
         for bound in bounds.iter() {
             if !self.is_implemented(ty, &bound.ty, type_environment) {

@@ -690,7 +690,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
     }
 
     pub(crate) fn collect_info(
-        &self,
+        &mut self,
         implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
         implements_infos: &ImplementsInfoSet,
         errors: &mut Vec<TranspileError>,
@@ -708,8 +708,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
     }
 
-    fn type_check_bounds(&self, implements_infos: &ImplementsInfoSet, errors: &mut Vec<TranspileError>) {
-        for bounds_check in self.generic_bounds_checks.iter() {
+    fn type_check_bounds(&mut self, implements_infos: &ImplementsInfoSet, errors: &mut Vec<TranspileError>) {
+        for bounds_check in self.generic_bounds_checks.clone().iter() {
             match bounds_check {
                 GenericsBoundCheck::Generics { type_span, generic_id, generics_define } => {
                     let type_resolved = self.resolve_generic_type(*generic_id).1;
@@ -782,6 +782,7 @@ pub(crate) enum ImplicitConvertKind {
     Error
 }
 
+#[derive(Debug, Clone)]
 pub(crate) enum GenericsBoundCheck {
     Generics { type_span: Range<usize>, generic_id: LocalGenericID, generics_define: Arc<GenericType> },
     Where { type_span: Range<usize>, target_type: Type, bounds: Vec<Arc<Bound>> }

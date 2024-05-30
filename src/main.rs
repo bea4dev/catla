@@ -55,12 +55,24 @@ struct Succ<T> {}
 interface Nat {}
 
 implements Nat for Zero {}
-implements<T> Nat for Succ<T> where T: Nat {}
+implements<N: Nat> Nat for Succ<N> {}
 
-function <T> test_is_nat() where T: Nat {}
+interface NonZero {}
+implements<N: Nat> NonZero for Succ<N> {}
 
-test_is_nat:<Succ<TestClass>>
-test_is_nat:<Succ<Succ<Zero>>>
+interface LessThan<A: Nat, B: Nat> {}
+
+struct ProofLessThan<A: Nat, B: Nat> {}
+
+implements<N: NonZero> LessThan<Zero, N> for ProofLessThan<Zero, N> {}
+
+implements<A: Nat, B: Nat> LessThan<Succ<A>, Succ<B>> for ProofLessThan<Succ<A>, Succ<B>> where ProofLessThan<A, B>: LessThan<A, B> {}
+
+function <A: Nat, B: Nat> check_less_than() where ProofLessThan<A, B>: LessThan<A, B> {}
+
+check_less_than:<Zero, Succ<Zero>>
+check_less_than:<Succ<Succ<Zero>>, Succ<Succ<Succ<Zero>>>>
+check_less_than:<Succ<Succ<Zero>>, Succ<Zero>>
 ";
 let source1 = 
 "

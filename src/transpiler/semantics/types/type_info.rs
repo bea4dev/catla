@@ -411,6 +411,16 @@ impl ImplementsInfo {
                 type_environment
             );
         }
+        if let Type::LocalGeneric(generic_id) = self_type {
+            let (_, self_type) = type_environment.resolve_generic_type(*generic_id);
+
+            return ImplementsInfo::contains_target_type(
+                &self_type.value,
+                ty,
+                implements_infos,
+                type_environment
+            );
+        }
 
         match self_type {
             Type::Int8 => ty == &Type::Int8,

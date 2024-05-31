@@ -716,7 +716,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     let result = implements_infos.is_satisfied(
                         &type_resolved.value,
                         &generics_define.bounds.freeze_and_get(),
-                        self
+                        self,
+                        false
                     );
         
                     if let Err(bounds) = result {
@@ -744,7 +745,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     let result = implements_infos.is_satisfied(
                         target_type,
                         bounds,
-                        self
+                        self,
+                        false
                     );
 
                     if let Err(bounds) = result {
@@ -2373,7 +2375,7 @@ fn type_inference_primary_left<'allocator>(
                         if let Some(element_type) = user_type.value.get_element_type_with_local_generic(field_assign.name.value) {
                             type_environment.set_entity_type(
                                 EntityID::from(field_assign),
-                                Spanned::new(element_type, field_assign.name.span.clone())
+                                Spanned::new(element_type.value, field_assign.name.span.clone())
                             );
 
                             if let Ok(expression) = &field_assign.expression {
@@ -2790,15 +2792,39 @@ fn type_inference_primary_right<'allocator>(
     let second_expr_id = if let Some(second_expr) = &ast.second_expr {
         let user_type = type_environment.resolve_entity_type(previous_primary.value);
         let literal_entity_id = EntityID::from(&second_expr.0);
-        let element_type = match user_type.value.get_element_type_with_local_generic(second_expr.0.value) {
+        
+        let element_name = second_expr.0.value;
+        let element_type = user_type.value.get_element_type_with_local_generic(element_name);
+        let mut element_types = Vec::new_in(allocator);
+        if let Some(element_type) = element_type {
+            element_types.push(element_type);
+        }
+
+        let implementations = implements_infos.collect_satisfied_implementations(
+            &user_type.value,
+            type_environment,
+            allocator
+        );
+        for implementation in implementations {
+            let element_type = implementation.implements_info.element_types.get(element_name);
+            if let Some(element_type) = element_type {
+                let ty = Type::get_type_with_generics(
+                    &element_type.value,
+                    &implementation.implements_info.generics,
+                    &implementation.local_generics
+                );
+            }
+        }
+
+        let element_type = match element_type {
             Some(element_type) => element_type,
             _ => {
                 let error = NotFoundTypeElementError {
-                    user_type: user_type.value,
+                    user_type: user_type.value.clone(),
                     name: second_expr.0.clone().map(|name| { name.to_string() })
                 };
                 type_environment.add_lazy_type_error_report(error);
-
+    
                 Type::Unknown
             }
         };

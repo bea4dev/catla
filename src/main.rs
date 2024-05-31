@@ -71,7 +71,7 @@ implements<A: Nat, B: Nat> LessThan<Succ<A>, Succ<B>> for ProofLessThan<Succ<A>,
 function <A: Nat, B: Nat> check_less_than() where ProofLessThan<A, B>: LessThan<A, B> {}
 
 check_less_than:<Zero, Succ<Zero>>
-check_less_than:<Succ<Succ<Zero>>, Succ<Succ<Succ<Zero>>>>
+check_less_than:<Succ<Succ<Zero>>, Succ<Succ<Succ<Succ<Zero>>>>>
 check_less_than:<Succ<Succ<Zero>>, Succ<Zero>>
 ";
 let source1 = 

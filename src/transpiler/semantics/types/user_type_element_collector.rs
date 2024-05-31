@@ -7,7 +7,7 @@ use fxhash::FxHashMap;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::type_info::{Bound, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, Type, WhereBound};
+use super::type_info::{Bound, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, Type, WhereBound, WithDefineInfo};
 
 
 pub(crate) fn collect_module_element_types_program(
@@ -22,7 +22,7 @@ pub(crate) fn collect_module_element_types_program(
     implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
-    current_user_type_name: Option<&str>,
+    mut owner_info: Option<(&Type, Option<&mut FxHashMap<String, WithDefineInfo<Type>>>)>,
     context: &TranspileModuleContext
 ) {
     for statement in ast.statements.iter() {
@@ -31,7 +31,9 @@ pub(crate) fn collect_module_element_types_program(
             _ => continue
         };
 
-        if let Some(user_type_name) = &current_user_type_name {
+        if let Some((user_type, implementation_element_map)) = owner_info.as_mut() {
+            let user_type = *user_type;
+
             let element = match statement {
                 StatementAST::VariableDefine(field_define) => {
                     let type_info = match &field_define.type_tag {
@@ -69,7 +71,7 @@ pub(crate) fn collect_module_element_types_program(
                     module_entity_type_map.insert(EntityID::from(field_define), type_info.clone());
 
                     match &field_define.name {
-                        Ok(name) => Some((name.value, type_info)),
+                        Ok(name) => Some((name.clone(), type_info)),
                         _ => None
                     }
                 },
@@ -86,7 +88,7 @@ pub(crate) fn collect_module_element_types_program(
                         implements_infos,
                         errors,
                         warnings,
-                        Some(*user_type_name),
+                        Some(user_type),
                         context
                     )
                 },
@@ -94,11 +96,17 @@ pub(crate) fn collect_module_element_types_program(
             };
 
             if let Some(element) = element {
-                let user_type = user_type_map.get(*user_type_name).unwrap().clone();
-
-                if let Type::UserType{ user_type_info: data_struct_info, generics: _ } = user_type {
+                if let Some(implementation_element_map) = implementation_element_map {
+                    implementation_element_map.insert(
+                        element.0.value.to_string(),
+                        WithDefineInfo { value: element.1, module_name: context.module_name.clone(), span: element.0.span }
+                    );
+                } else if let Type::UserType{ user_type_info: data_struct_info, generics: _ } = user_type {
                     let mut element_map = data_struct_info.element_types.lock().unwrap();
-                    element_map.insert(element.0.to_string(), element.1);
+                    element_map.insert(
+                        element.0.value.to_string(),
+                        WithDefineInfo { value: element.1, module_name: context.module_name.clone(), span: element.0.span }
+                    );
                 }
             }
         }
@@ -169,7 +177,7 @@ pub(crate) fn collect_module_element_types_program(
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
-                if current_user_type_name.is_none() {
+                if owner_info.is_none() {
                     let function_type = get_function_type_and_name(
                         function_define,
                         user_type_map,
@@ -187,7 +195,7 @@ pub(crate) fn collect_module_element_types_program(
                     );
 
                     if let Some(function_type) = function_type {
-                        module_element_type_map.insert(function_type.0.to_string(), function_type.1);
+                        module_element_type_map.insert(function_type.0.value.to_string(), function_type.1);
                     }
                 }
 
@@ -287,13 +295,16 @@ pub(crate) fn collect_module_element_types_program(
                                 generics: generics.clone(),
                                 interface,
                                 concrete: concrete.clone(),
-                                where_bounds: Arc::new(Vec::new())
+                                where_bounds: Arc::new(Vec::new()),
+                                element_types: Arc::new(FxHashMap::default())
                             };
                             implements_infos.add(implements_info);
                         }
                     }
 
                     if let Some(block) = &data_struct_define.block.value {
+                        let user_type = user_type_map.get(name.value).unwrap();
+
                         collect_module_element_types_program(
                             block.program,
                             user_type_map,
@@ -305,14 +316,14 @@ pub(crate) fn collect_module_element_types_program(
                             implements_infos,
                             errors,
                             warnings,
-                            Some(name.value),
+                            Some((user_type, None)),
                             context
                         );
                     }
                 }
             },
             StatementAST::Implements(implements) => {
-                if let Ok(interface) = &implements.interface {
+                let implements_info = if let Ok(interface) = &implements.interface {
                     if let Ok(target_type) = &implements.target_user_type {
                         let generics = implements.generics_define.as_ref().map(|define| {
                             get_generic_type(
@@ -369,32 +380,65 @@ pub(crate) fn collect_module_element_types_program(
                             context
                         );
 
-                        let implements_info = ImplementsInfo {
+                        Some(ImplementsInfo {
                             generics,
                             interface,
                             concrete,
-                            where_bounds: Arc::new(where_bounds)
-                        };
-                        implements_infos.add(implements_info);
+                            where_bounds: Arc::new(where_bounds),
+                            element_types: Arc::new(FxHashMap::default())
+                        })
+                    } else {
+                        None
                     }
-                }
+                } else {
+                    None
+                };
 
-                if let Some(block) = &implements.block.value {
-                    collect_module_element_types_program(
-                        block.program,
-                        user_type_map,
-                        import_element_map,
-                        name_resolved_map,
-                        module_user_type_map,
-                        module_element_type_map,
-                        generics_map,
-                        module_entity_type_map,
-                        implements_infos,
-                        errors,
-                        warnings,
-                        current_user_type_name,
-                        context
-                    );
+                if let Some(implements_info) = implements_info {
+                    let mut element_types = FxHashMap::default();
+                    if let Some(block) = &implements.block.value {
+                        collect_module_element_types_program(
+                            block.program,
+                            user_type_map,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            generics_map,
+                            module_entity_type_map,
+                            implements_infos,
+                            errors,
+                            warnings,
+                            Some((&implements_info.concrete, Some(&mut element_types))),
+                            context
+                        );
+                    }
+                    let implements_info = ImplementsInfo {
+                        generics: implements_info.generics,
+                        interface: implements_info.interface,
+                        concrete: implements_info.concrete,
+                        where_bounds: implements_info.where_bounds,
+                        element_types: Arc::new(element_types)
+                    };
+                    implements_infos.add(implements_info);
+                } else {
+                    if let Some(block) = &implements.block.value {
+                        collect_module_element_types_program(
+                            block.program,
+                            user_type_map,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            generics_map,
+                            module_entity_type_map,
+                            implements_infos,
+                            errors,
+                            warnings,
+                            None,
+                            context
+                        );
+                    }
                 }
             },
             StatementAST::DropStatement(drop_statement) => {
@@ -521,9 +565,9 @@ fn get_function_type_and_name<'allocator>(
     implements_infos: &mut ImplementsInfoSet,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
-    current_user_type_name: Option<&str>,
+    current_user_type: Option<&Type>,
     context: &TranspileModuleContext
-) -> Option<(&'allocator str, Type)> {
+) -> Option<(Spanned<&'allocator str>, Type)> {
     let (generics_define, generics_define_span) = match &ast.generics_define {
         Some(generics_define) => {
             (
@@ -571,8 +615,8 @@ fn get_function_type_and_name<'allocator>(
 
     let mut argument_types = Vec::new();
 
-    if let Some(user_type_name) = &current_user_type_name {
-        argument_types.push(user_type_map.get(*user_type_name).unwrap().clone());
+    if let Some(user_type) = current_user_type {
+        argument_types.push(user_type.clone());
     }
 
     for argument in ast.args.arguments.iter() {
@@ -609,7 +653,7 @@ fn get_function_type_and_name<'allocator>(
             implements_infos,
             errors,
             warnings,
-            current_user_type_name,
+            None,
             context
         );
     }
@@ -635,7 +679,7 @@ fn get_function_type_and_name<'allocator>(
     );
 
     let function_info = Arc::new(FunctionType {
-        is_extension: current_user_type_name.is_some(),
+        is_extension: current_user_type.is_some(),
         generics_define,
         argument_types,
         return_type,
@@ -650,13 +694,15 @@ fn get_function_type_and_name<'allocator>(
     match &ast.name {
         Ok(name) => {
             let name = match name {
-                Either::Left(name) => name.value,
+                Either::Left(name) => name.clone(),
                 Either::Right(attribute) => {
-                    match attribute.value {
-                        MemoryManageAttributeKind::New => "new",
-                        MemoryManageAttributeKind::Drop => "drop",
-                        MemoryManageAttributeKind::Mutex => "mutex",
-                    }
+                    attribute.clone().map(|value| {
+                        match value {
+                            MemoryManageAttributeKind::New => "new",
+                            MemoryManageAttributeKind::Drop => "drop",
+                            MemoryManageAttributeKind::Mutex => "mutex",
+                        }
+                    })
                 },
             };
             Some((name, function_type))

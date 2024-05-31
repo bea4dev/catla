@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::{Arc, Mutex}};
+use std::sync::{Arc, Mutex};
 
 use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST};
 use either::Either;
@@ -64,7 +64,7 @@ pub(crate) fn collect_user_type_program(
                         kind: data_struct_define.kind.value.clone(),
                         generics_define,
                         generics_define_span,
-                        element_types: Mutex::new(HashMap::new()),
+                        element_types: Mutex::new(FxHashMap::default()),
                         where_bounds: Default::default()
                     };
 

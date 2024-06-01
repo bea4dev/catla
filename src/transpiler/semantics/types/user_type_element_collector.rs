@@ -293,8 +293,9 @@ pub(crate) fn collect_module_element_types_program(
 
                             let implements_info = ImplementsInfo {
                                 generics: generics.clone(),
-                                interface,
-                                concrete: concrete.clone(),
+                                interface: Spanned::new(interface, type_info.span.clone()),
+                                concrete: Spanned::new(concrete.clone(), name.span.clone()),
+                                module_name: Arc::new(context.module_name.clone()),
                                 where_bounds: Arc::new(Vec::new()),
                                 element_types: Arc::new(FxHashMap::default())
                             };
@@ -341,7 +342,7 @@ pub(crate) fn collect_module_element_types_program(
                         }).unwrap_or_else(|| { vec![] });
                         let generics = Arc::new(generics);
 
-                        let interface = get_type(
+                        let interface = Spanned::new(get_type(
                             interface,
                             user_type_map,
                             import_element_map,
@@ -352,9 +353,9 @@ pub(crate) fn collect_module_element_types_program(
                             errors,
                             warnings,
                             context
-                        );
+                        ), interface.span.clone());
 
-                        let concrete = get_type(
+                        let concrete = Spanned::new(get_type(
                             target_type,
                             user_type_map,
                             import_element_map,
@@ -365,7 +366,7 @@ pub(crate) fn collect_module_element_types_program(
                             errors,
                             warnings,
                             context
-                        );
+                        ), target_type.span.clone());
 
                         let where_bounds = get_where_bounds(
                             &implements.where_clause,
@@ -384,6 +385,7 @@ pub(crate) fn collect_module_element_types_program(
                             generics,
                             interface,
                             concrete,
+                            module_name: Arc::new(context.module_name.clone()),
                             where_bounds: Arc::new(where_bounds),
                             element_types: Arc::new(FxHashMap::default())
                         })
@@ -409,7 +411,7 @@ pub(crate) fn collect_module_element_types_program(
                             implements_infos,
                             errors,
                             warnings,
-                            Some((&implements_info.concrete, Some(&mut element_types))),
+                            Some((&implements_info.concrete.value, Some(&mut element_types))),
                             context
                         );
                     }
@@ -417,6 +419,7 @@ pub(crate) fn collect_module_element_types_program(
                         generics: implements_info.generics,
                         interface: implements_info.interface,
                         concrete: implements_info.concrete,
+                        module_name: implements_info.module_name,
                         where_bounds: implements_info.where_bounds,
                         element_types: Arc::new(element_types)
                     };

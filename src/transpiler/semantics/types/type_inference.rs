@@ -9,7 +9,7 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfoSet, LocalGenericID, Type, WhereBound}, user_type_element_collector::get_type};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfoSet, LocalGenericID, Type, WhereBound, WithDefineInfo}, user_type_element_collector::get_type};
 
 
 
@@ -20,12 +20,15 @@ const BOUNDS_NOT_SATISFIED_ERROR: usize = 0046;
 const INVALID_SET_GENERICS_TYPE_ERROR: usize = 0047;
 const NUMBER_OF_GENERICS_MISMATCH_ERROR: usize = 0048;
 const WHERE_BOUNDS_NOT_SATISFIED_ERROR: usize = 0050;
+const DUPLICATED_ELEMENT_ERROR: usize = 0051;
+const UNRESOLVED_INTERFACE: usize = 0052;
 
 
 pub(crate) struct TypeEnvironment<'allocator> {
     entity_type_map: HashMap<EntityID, Either<EntityID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_type_map: HashMap<LocalGenericID, Either<LocalGenericID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_bounds_checks: Vec<GenericsBoundCheck, &'allocator Bump>,
+    impl_interface_generics_check: Vec<(Range<usize>, WithDefineInfo<Type>), &'allocator Bump>,
     implicit_convert_map: HashMap<EntityID, ImplicitConvertKind, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, Spanned<Type>>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
@@ -46,6 +49,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             entity_type_map: HashMap::new_in(allocator),
             generic_type_map: HashMap::new_in(allocator),
             generic_bounds_checks: Vec::new_in(allocator),
+            impl_interface_generics_check: Vec::new_in(allocator),
             implicit_convert_map: HashMap::new_in(allocator),
             return_type,
             lazy_type_reports: Vec::new_in(allocator),
@@ -69,7 +73,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         generic_id
     }
 
-    pub fn get_user_or_function_type_with_local_generic_id(&mut self, ty: Spanned<Type>) -> Spanned<Type> {
+    pub fn get_user_or_function_type_with_local_generic_id(&mut self, ty: Spanned<Type>, register_bounds_check: bool) -> Spanned<Type> {
         let generics_define = match &ty.value {
             Type::UserType { user_type_info, generics: _ } => {
                 &user_type_info.generics_define
@@ -101,13 +105,15 @@ impl<'allocator> TypeEnvironment<'allocator> {
             _ => unreachable!()
         };
 
-        let where_bounds = ty.value.get_where_bounds_with_local_generic().unwrap();
-        for where_bound in where_bounds {
-            self.generic_bounds_checks.push(GenericsBoundCheck::Where {
-                type_span: ty.span.clone(),
-                target_type: where_bound.target_type,
-                bounds: where_bound.bounds
-            });
+        if register_bounds_check {
+            let where_bounds = ty.value.get_where_bounds_with_local_generic().unwrap();
+            for where_bound in where_bounds {
+                self.generic_bounds_checks.push(GenericsBoundCheck::Where {
+                    type_span: ty.span.clone(),
+                    target_type: where_bound.target_type,
+                    bounds: where_bound.bounds
+                });
+            }
         }
 
         ty
@@ -706,6 +712,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 Either::Right(warning) => warnings.push(warning),
             }
         }
+
+        self.check_impl_interface_generics(errors);
     }
 
     fn type_check_bounds(&mut self, implements_infos: &ImplementsInfoSet, errors: &mut Vec<TranspileError>) {
@@ -769,6 +777,33 @@ impl<'allocator> TypeEnvironment<'allocator> {
                         });
                         errors.push(error);
                     }
+                }
+            }
+        }
+    }
+
+    fn check_impl_interface_generics(&self, errors: &mut Vec<TranspileError>) {
+        for (reference_span, interface) in self.impl_interface_generics_check.iter() {
+            if let Type::UserType { user_type_info: _, generics } = self.resolve_type(&interface.value) {
+                let mut has_unknown = false;
+                for generic in generics.iter() {
+                    if generic.contains_unknown() {
+                        has_unknown = true;
+                        break;
+                    }
+                }
+
+                if has_unknown {
+                    let original_name = self.get_type_display_string(&interface.value.as_original_type());
+                    let resolved_name = self.get_type_display_string(&self.resolve_type(&interface.value));
+
+                    let error = UnresolvedInterface {
+                        original_name,
+                        resolved_name,
+                        reference_span: reference_span.clone(),
+                        implementation: interface.clone().map(|_| { () })
+                    };
+                    errors.push(TranspileError::new(error));
                 }
             }
         }
@@ -1906,7 +1941,8 @@ fn type_inference_primary<'allocator>(
             };
             
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
-                Spanned::new(ty, second_expr.0.span.clone())
+                Spanned::new(ty, second_expr.0.span.clone()),
+                true
             );
 
             type_environment.set_entity_type(
@@ -2202,7 +2238,8 @@ fn type_inference_primary_left<'allocator>(
                                 };
 
                                 let ty = type_environment.get_user_or_function_type_with_local_generic_id(
-                                    Spanned::new(ty, identifier.span.clone())
+                                    Spanned::new(ty, identifier.span.clone()),
+                                    true
                                 );
 
                                 type_environment.set_entity_type(
@@ -2366,7 +2403,8 @@ fn type_inference_primary_left<'allocator>(
             };
 
             let user_type = type_environment.get_user_or_function_type_with_local_generic_id(
-                Spanned::new(user_type, user_type_span)
+                Spanned::new(user_type, user_type_span),
+                true
             );
 
             if let Type::UserType { user_type_info: _, generics: _ } = &user_type.value {
@@ -2795,9 +2833,10 @@ fn type_inference_primary_right<'allocator>(
         
         let element_name = second_expr.0.value;
         let element_type = user_type.value.get_element_type_with_local_generic(element_name);
-        let mut element_types = Vec::new_in(allocator);
+
+        let mut pre_element_types = Vec::new_in(allocator);
         if let Some(element_type) = element_type {
-            element_types.push(element_type);
+            pre_element_types.push((element_type, None));
         }
 
         let implementations = implements_infos.collect_satisfied_implementations(
@@ -2805,6 +2844,7 @@ fn type_inference_primary_right<'allocator>(
             type_environment,
             allocator
         );
+        
         for implementation in implementations {
             let element_type = implementation.implements_info.element_types.get(element_name);
             if let Some(element_type) = element_type {
@@ -2813,25 +2853,102 @@ fn type_inference_primary_right<'allocator>(
                     &implementation.implements_info.generics,
                     &implementation.local_generics
                 );
+
+                let interface = implementation.implements_info.interface;
+
+                pre_element_types.push(
+                    (
+                        WithDefineInfo {
+                            value: ty,
+                            module_name: element_type.module_name.clone(),
+                            span: element_type.span.clone()
+                        },
+                        Some(WithDefineInfo {
+                            value: interface.value,
+                            module_name: implementation.implements_info.module_name.as_ref().clone(),
+                            span: interface.span
+                        })
+                    )
+                );
             }
         }
 
-        let element_type = match element_type {
-            Some(element_type) => element_type,
-            _ => {
-                let error = NotFoundTypeElementError {
-                    user_type: user_type.value.clone(),
-                    name: second_expr.0.clone().map(|name| { name.to_string() })
-                };
-                type_environment.add_lazy_type_error_report(error);
-    
-                Type::Unknown
+        let mut element_types = Vec::new_in(allocator);
+        'root: for (element_type, interface) in pre_element_types {
+            let ty = type_environment.get_user_or_function_type_with_local_generic_id(
+                Spanned::new(element_type.value, second_expr.0.span.clone()),
+                false
+            ).value;
+
+            if let Some(where_bounds) = ty.get_where_bounds_with_local_generic() {
+                for where_bound in where_bounds {
+                    for bound in where_bound.bounds.iter() {
+                        if !implements_infos.is_implemented(
+                            &where_bound.target_type,
+                            &bound.ty,
+                            type_environment,
+                            true
+                        ) {
+                            continue 'root;
+                        }
+                    }
+                }
             }
+
+            element_types.push(
+                (
+                    WithDefineInfo {
+                        value: ty,
+                        module_name: element_type.module_name.clone(),
+                        span: element_type.span.clone()
+                    },
+                    interface
+                )
+            );
+        }
+
+        let element_type = if element_types.is_empty() {
+            let error = NotFoundTypeElementError {
+                user_type: user_type.value.clone(),
+                name: second_expr.0.clone().map(|name| { name.to_string() })
+            };
+            type_environment.add_lazy_type_error_report(error);
+
+            Type::Unknown
+        } else {
+            if element_types.len() > 1 {
+                let found_elements = element_types.iter()
+                    .map(|element| { element.0.clone().map(|_| {()}) })
+                    .collect();
+
+                let error = DuplicatedElement {
+                    type_name: type_environment.get_type_display_string(&user_type.value),
+                    element: second_expr.0.clone().map(|name| { name.to_string() }),
+                    count: element_types.len(),
+                    found_elements
+                };
+                errors.push(TranspileError::new(error));
+            } else {
+                let where_bounds = element_types.last().unwrap().0.value.get_where_bounds_with_local_generic();
+
+                if let Some(where_bounds) = where_bounds {
+                    for where_bound in where_bounds {
+                        type_environment.generic_bounds_checks.push(GenericsBoundCheck::Where {
+                            type_span: second_expr.0.span.clone(),
+                            target_type: where_bound.target_type,
+                            bounds: where_bound.bounds
+                        });
+                    }
+                }
+
+                if let Some(interface) = &element_types.last().unwrap().1 {
+                    type_environment.impl_interface_generics_check.push((second_expr.0.span.clone(), interface.clone()));
+                }
+            }
+            element_types.last().unwrap().0.value.clone()
         };
 
-        let element_type = type_environment.get_user_or_function_type_with_local_generic_id(
-            Spanned::new(element_type, second_expr.0.span.clone())
-        );
+        let element_type = Spanned::new(element_type, second_expr.0.span.clone());
 
         type_environment.set_entity_type(
             literal_entity_id,
@@ -3934,6 +4051,136 @@ impl TranspileReport for NumberOfGenericsMismatchErrorReport {
         let source_list = vec![
             (module_name.clone(), context.source_code.code.as_str()),
             (self.define_module_name.clone(), bounds_module_context.source_code.code.as_str())
+        ];
+
+        builder.finish().print(sources(source_list)).unwrap();
+    }
+}
+
+
+struct DuplicatedElement {
+    type_name: String,
+    element: Spanned<String>,
+    count: usize,
+    found_elements: Vec<WithDefineInfo<()>>
+}
+
+impl TranspileReport for DuplicatedElement {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let key = ErrorMessageKey::new(DUPLICATED_ELEMENT_ERROR);
+
+        let type_name = self.type_name.clone().fg(Color::Yellow).to_string();
+        let count = self.count.to_string().fg(Color::Red).to_string();
+        let element = self.element.value.clone().fg(Color::Yellow).to_string();
+
+        let message = key.get_massage(text, ErrorMessageType::Message)
+            .replace("%type", &type_name);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.element.span.start)
+            .with_code(DUPLICATED_ELEMENT_ERROR)
+            .with_message(message);
+
+        builder.add_label(
+            Label::new((module_name.clone(), self.element.span.clone()))
+                .with_color(Color::Red)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(0))
+                        .replace("%count", &count)
+                )
+        );
+
+        let mut module_names = Vec::new();
+        module_names.push(module_name.clone());
+        
+        for found_element in self.found_elements.iter() {
+            builder.add_label(
+                Label::new((found_element.module_name.clone(), found_element.span.clone()))
+                    .with_color(Color::Yellow)
+                    .with_message(
+                        key.get_massage(text, ErrorMessageType::Label(1))
+                            .replace("%element", &element)
+                    )
+            );
+
+            module_names.push(found_element.module_name.clone());
+        }
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            builder.set_note(note.replace("%type", &type_name).replace("%element", &element));
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+
+        let module_list = module_names.iter()
+            .map(|module_name| { context.context.get_module_context(module_name).unwrap() })
+            .collect::<Vec<_>>();
+
+        let source_list = module_list.iter()
+            .map(|context| { (context.module_name.clone(), context.source_code.code.as_str()) });
+
+        builder.finish().print(sources(source_list)).unwrap();
+    }
+}
+
+
+struct UnresolvedInterface {
+    original_name: String,
+    resolved_name: String,
+    reference_span: Range<usize>,
+    implementation: WithDefineInfo<()>
+}
+
+impl TranspileReport for UnresolvedInterface {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let key = ErrorMessageKey::new(UNRESOLVED_INTERFACE);
+
+        let original_name = self.original_name.clone().fg(Color::Yellow).to_string();
+        let resolved_name = self.resolved_name.clone().fg(Color::Red).to_string();
+
+        let message = key.get_massage(text, ErrorMessageType::Message)
+            .replace("%original", &original_name);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.reference_span.start)
+            .with_code(UNRESOLVED_INTERFACE)
+            .with_message(message);
+
+        builder.add_label(
+            Label::new((module_name.clone(), self.reference_span.clone()))
+                .with_color(Color::Red)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(0))
+                        .replace("%resolved", &resolved_name)
+                )
+        );
+        
+        builder.add_label(
+            Label::new((self.implementation.module_name.clone(), self.implementation.span.clone()))
+                .with_color(Color::Yellow)
+                .with_message(
+                    key.get_massage(text, ErrorMessageType::Label(1))
+                )
+        );
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            builder.set_note(note);
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+        let impl_module_context = context.context.get_module_context(&self.implementation.module_name).unwrap();
+
+        let source_list = vec![
+            (module_name.clone(), context.source_code.code.as_str()),
+            (impl_module_context.module_name.clone(), impl_module_context.source_code.code.as_str())
         ];
 
         builder.finish().print(sources(source_list)).unwrap();

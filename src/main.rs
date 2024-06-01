@@ -48,31 +48,31 @@ function <T, E> ok(value: T) -> T!<E> {
 function <T, E> error(error: E) -> T!<E> {}
 
 
+let g: int = new TestStruct { field: 100 }.test1()
 
-struct Zero {}
-struct Succ<T> {}
+struct TestStruct<T> {
+    let field: T
+}
 
-interface Nat {}
+interface TestInterface<U> {
+    function test1() -> U where U: TestInterface3 {}
+}
 
-implements Nat for Zero {}
-implements<N: Nat> Nat for Succ<N> {}
+interface TestInterface2<U> {
+    function test1() -> U {}
+}
 
-interface NonZero {}
-implements<N: Nat> NonZero for Succ<N> {}
+interface TestInterface3 {}
 
-interface LessThan<A: Nat, B: Nat> {}
+implements<T> TestInterface3 for TestStruct<T> {}
 
-struct ProofLessThan<A: Nat, B: Nat> {}
+implements<T, U> TestInterface<U> for T {
+    function test1() -> U where U: TestInterface3 {}
+}
 
-implements<N: NonZero> LessThan<Zero, N> for ProofLessThan<Zero, N> {}
-
-implements<A: Nat, B: Nat> LessThan<Succ<A>, Succ<B>> for ProofLessThan<Succ<A>, Succ<B>> where ProofLessThan<A, B>: LessThan<A, B> {}
-
-function <A: Nat, B: Nat> check_less_than() where ProofLessThan<A, B>: LessThan<A, B> {}
-
-check_less_than:<Zero, Succ<Zero>>
-check_less_than:<Succ<Succ<Zero>>, Succ<Succ<Succ<Succ<Zero>>>>>
-check_less_than:<Succ<Succ<Zero>>, Succ<Zero>>
+implements<T, U> TestInterface2<U> for T {
+    function test1() -> U {}
+}
 ";
 let source1 = 
 "

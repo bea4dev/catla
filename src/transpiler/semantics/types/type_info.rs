@@ -66,13 +66,19 @@ impl Type {
                     local_generics
                 );
 
+                let where_bounds = Type::get_where_bounds_with_generics(
+                    &function_info.where_bounds.freeze_and_get(),
+                    generics_define,
+                    local_generics
+                );
+
                 let function_info = FunctionType {
                     is_extension: function_info.is_extension,
                     generics_define: function_info.generics_define.clone(),
                     argument_types,
                     return_type: Spanned::new(return_type, function_info.return_type.span.clone()),
                     define_info: function_info.define_info.clone(),
-                    where_bounds: function_info.where_bounds.clone()
+                    where_bounds: FreezableMutex::new(where_bounds)
                 };
 
                 Type::Function { function_info: Arc::new(function_info), generics: Arc::new(new_generics) }
@@ -130,11 +136,9 @@ impl Type {
                 };
 
                 element_type.map(|ty| {
-                    WithDefineInfo {
-                        value: Type::get_type_with_generics(&ty.value, &user_type_info.generics_define, generics),
-                        module_name: ty.module_name,
-                        span: ty.span
-                    }
+                    ty.map(|ty| {
+                        Type::get_type_with_generics(&ty, &user_type_info.generics_define, generics)
+                    })
                 })
             },
             _ => None
@@ -347,6 +351,18 @@ pub struct WithDefineInfo<T> {
     pub span: Range<usize>
 }
 
+impl<T> WithDefineInfo<T> {
+    pub fn map<U, F>(self, function: F) -> WithDefineInfo<U>
+    where F: FnOnce(T) -> U {
+        let value = function(self.value);
+        WithDefineInfo {
+            value,
+            module_name: self.module_name,
+            span: self.span
+        }
+    }
+}
+
 
 #[derive(Debug)]
 pub struct GenericType {
@@ -404,8 +420,9 @@ pub struct LocalGenericID(pub usize);
 #[derive(Debug, Clone)]
 pub struct ImplementsInfo {
     pub generics: Arc<Vec<Arc<GenericType>>>,
-    pub interface: Type,
-    pub concrete: Type,
+    pub interface: Spanned<Type>,
+    pub concrete: Spanned<Type>,
+    pub module_name: Arc<String>,
     pub where_bounds: Arc<Vec<WhereBound>>,
     pub element_types: Arc<FxHashMap<String, WithDefineInfo<Type>>>
 }
@@ -643,19 +660,19 @@ impl ImplementsInfoSet {
     ) -> bool {
         for implements_info in self.implements_infos.iter() {
             if (ImplementsInfo::contains_target_type(
-                &implements_info.interface,
+                &implements_info.interface.value,
                 interface,
                 self,
                 type_environment,
                 allow_unknown
             ) || ImplementsInfo::contains_target_type(
                 interface,
-                &implements_info.interface,
+                &implements_info.interface.value,
                 self,
                 type_environment,
                 allow_unknown
             )) && ImplementsInfo::contains_target_type(
-                &implements_info.concrete,
+                &implements_info.concrete.value,
                 ty,
                 self,
                 type_environment,
@@ -674,12 +691,12 @@ impl ImplementsInfoSet {
                 }
 
                 let impl_concrete = Type::get_type_with_generics(
-                    &implements_info.concrete,
+                    &implements_info.concrete.value,
                     generics_define,
                     &local_generics
                 );
                 let impl_interface = Type::get_type_with_generics(
-                    &implements_info.interface,
+                    &implements_info.interface.value,
                     generics_define,
                     &local_generics
                 );
@@ -771,7 +788,7 @@ impl ImplementsInfoSet {
 
         for implements_info in self.implements_infos.iter() {
             if !ImplementsInfo::contains_target_type(
-                &implements_info.concrete,
+                &implements_info.concrete.value,
                 ty,
                 self,
                 type_environment,
@@ -789,12 +806,12 @@ impl ImplementsInfoSet {
             }
 
             let impl_concrete = Type::get_type_with_generics(
-                &implements_info.concrete,
+                &implements_info.concrete.value,
                 generics_define,
                 &local_generics
             );
             let impl_interface = Type::get_type_with_generics(
-                &implements_info.interface,
+                &implements_info.interface.value,
                 generics_define,
                 &local_generics
             );
@@ -842,8 +859,9 @@ impl ImplementsInfoSet {
             if is_satisfied {
                 let implements_info = ImplementsInfo {
                     generics: implements_info.generics.clone(),
-                    interface: impl_interface,
-                    concrete: impl_concrete,
+                    interface: Spanned::new(impl_interface, implements_info.interface.span.clone()),
+                    concrete: Spanned::new(impl_concrete, implements_info.concrete.span.clone()),
+                    module_name: implements_info.module_name.clone(),
                     where_bounds: implements_info.where_bounds.clone(),
                     element_types: implements_info.element_types.clone()
                 };

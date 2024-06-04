@@ -9,7 +9,7 @@ bnf_rules!{
 
     program             ::= [ statement ] { end_of_statement [ statement ] }
     statement           ::= assignment | exchange_statement | import_statement |
-                            define_with_attr | drop_statement | expression | impl_interface
+                            define_with_attr | drop_statement | expression | impl_interface | type_define
 
     define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define )
 
@@ -31,6 +31,8 @@ bnf_rules!{
     
     impl_interface      ::= "implements" [ generics_define ] type_info [ line_feed ] "for" [ line_feed ] type_info
                             [ line_feed ] [ where_clause ] block
+
+    type_define         ::= "type" type_info "=" type_info
     
     generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
     generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]

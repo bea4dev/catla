@@ -232,6 +232,14 @@ pub struct Implements<'allocator, 'input> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeDefine<'allocator, 'input> {
+    pub name: LiteralResult<'allocator, 'input>,
+    pub define_type: TypeInfoResult<'allocator, 'input>,
+    pub original_type: TypeInfoResult<'allocator, 'input>,
+    pub span: Range<usize>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhereClause<'allocator, 'input> {
     pub elements: Vec<WhereElement<'allocator, 'input>, &'allocator Bump>,
     pub error_tokens: ErrorTokens<'allocator, 'input>,

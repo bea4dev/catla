@@ -12,11 +12,7 @@ fn test() {
 
     let source = 
 "
-function <T> test(value: T) -> T where T: TestInterface {
-    return value
-}
-
-test:<int>(100)
+type IntMap<T> = std::collection::HashMap<int, T>
 ";
 
     let allocator = Bump::new();

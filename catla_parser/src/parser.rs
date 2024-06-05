@@ -119,6 +119,7 @@ pub enum StatementAST<'allocator, 'input> {
     VariableDefine(VariableDefine<'allocator, 'input>),
     FunctionDefine(FunctionDefine<'allocator, 'input>),
     UserTypeDefine(UserTypeDefine<'allocator, 'input>),
+    TypeDefine(TypeDefine<'allocator, 'input>),
     Implements(Implements<'allocator, 'input>),
     DropStatement(DropStatement<'allocator, 'input>),
     Expression(Expression<'allocator, 'input>)
@@ -234,8 +235,9 @@ pub struct Implements<'allocator, 'input> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeDefine<'allocator, 'input> {
     pub name: LiteralResult<'allocator, 'input>,
-    pub define_type: TypeInfoResult<'allocator, 'input>,
-    pub original_type: TypeInfoResult<'allocator, 'input>,
+    pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
+    pub type_info: TypeInfoResult<'allocator, 'input>,
+    pub error_tokens: ErrorTokens<'allocator, 'input>,
     pub span: Range<usize>
 }
 

@@ -20,6 +20,9 @@ pub fn parse_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
             Err(attributes) => Ok(StatementAST::StatementAttributes(attributes))
         }
     }
+    if let Some(type_define) = parse_type_define(cursor) {
+        return Ok(StatementAST::TypeDefine(type_define));
+    }
     if let Some(implements) = parse_implements(cursor) {
         return Ok(StatementAST::Implements(implements));
     }
@@ -660,6 +663,37 @@ fn parse_user_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocato
     let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
     
     return Some(UserTypeDefine { attributes: statement_attributes.clone(), kind, name, generics_define, super_type_info, error_tokens, where_clause, block, span: span.elapsed(cursor) });
+}
+
+fn parse_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TypeDefine<'allocator, 'input>> {
+    let span = Span::start(cursor);
+    
+    if cursor.next().get_kind() != TokenKind::Type {
+        cursor.prev();
+        return None;
+    }
+
+    let name = parse_literal_result(cursor);
+
+    let mut error_tokens = Vec::new_in(cursor.allocator);
+
+    let generics_define = parse_generics_define(cursor);
+    if generics_define.is_none() {
+        error_tokens.push(recover_until_token_found(cursor, &[TokenKind::Equal, TokenKind::LineFeed]));
+    }
+
+    if cursor.next().get_kind() != TokenKind::Equal {
+        cursor.prev();
+        error_tokens.push(recover_until_token_found(cursor, &[TokenKind::Equal, TokenKind::LineFeed]));
+
+        if cursor.current().get_kind() == TokenKind::Equal {
+            cursor.next();
+        }
+    }
+
+    let type_info = parse_type_info_result(cursor);
+    
+    return Some(TypeDefine { name, generics_define, type_info, error_tokens, span: span.elapsed(cursor) });
 }
 
 fn parse_super_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<SuperTypeInfo<'allocator, 'input>> {

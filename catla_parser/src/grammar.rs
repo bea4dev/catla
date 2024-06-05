@@ -32,7 +32,7 @@ bnf_rules!{
     impl_interface      ::= "implements" [ generics_define ] type_info [ line_feed ] "for" [ line_feed ] type_info
                             [ line_feed ] [ where_clause ] block
 
-    type_define         ::= "type" type_info "=" type_info
+    type_define         ::= "type" literal [ generics_define ] "=" type_info
     
     generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
     generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]

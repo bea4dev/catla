@@ -58,6 +58,7 @@ impl_ast!{
     GenericsDefine<'_, '_>,
     GenericsElement<'_, '_>,
     UserTypeDefine<'_, '_>,
+    TypeDefine<'_, '_>,
     Implements<'_, '_>,
     Import<'_, '_>,
     ImportElements<'_, '_>,

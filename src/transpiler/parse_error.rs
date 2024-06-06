@@ -152,7 +152,7 @@ pub fn collect_parse_error_program(
             StatementAST::UserTypeDefine(data_struct_define) => {
                 collect_parse_error_only_parse_result_error(
                     &data_struct_define.name,
-                    Expected::DataStructName,
+                    Expected::UserTypeName,
                     0010,
                     errors,
                     context
@@ -184,6 +184,38 @@ pub fn collect_parse_error_program(
                     warnings,
                     context
                 );
+            },
+            StatementAST::TypeDefine(type_define) => {
+                collect_parse_error_only_parse_result_error(
+                    &type_define.name,
+                    Expected::UserTypeName,
+                    0053,
+                    errors,
+                    context
+                );
+
+                if let Some(generics_define) = &type_define.generics_define {
+                    collect_parse_error_generics_define(
+                        generics_define,
+                        errors,
+                        warnings,
+                        context
+                    );
+                }
+                
+                collect_parse_error_with_parse_result(
+                    &type_define.type_info,
+                    collect_parse_error_type_info,
+                    Expected::TypeInfo,
+                    0053,
+                    errors,
+                    warnings,
+                    context
+                );
+
+                for error_tokens in type_define.error_tokens.iter() {
+                    collect_error_tokens(error_tokens, Expected::Unnecessary, 0053, errors, context);
+                }
             },
             StatementAST::Implements(implements) => {
                 if let Some(generics_define) = &implements.generics_define {

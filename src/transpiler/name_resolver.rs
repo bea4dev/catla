@@ -229,6 +229,26 @@ pub(crate) fn name_resolve_program<'allocator>(
                     }
                 }
             },
+            StatementAST::TypeDefine(type_define) => {
+                if let Ok(name) = &type_define.name {
+                    let entity_id = EntityID::from(type_define);
+                    let define_info = DefineWithName {
+                        entity_id,
+                        span: name.span.clone(),
+                        define_kind: DefineKind::UserType
+                    };
+
+                    if let Some(already_exists) = name_environment.get_name_define_info(name.value, name_environments) {
+                        errors.push(NameAlreadyExists::new(
+                            define_info.span.clone(),
+                            already_exists.define_info.span.clone()
+                        ));
+                    } else {
+                        let name = String::from_str_in(name.value, allocator);
+                        name_environment.set_name_define_info(name, define_info);
+                    }
+                }
+            },
             _ => {}
         }
     }
@@ -416,18 +436,6 @@ pub(crate) fn name_resolve_program<'allocator>(
                     allocator
                 );
                 let entity_id = EntityID::from(data_struct_define);
-
-                if let Ok(name) = &data_struct_define.name {
-                    let define_info = DefineWithName {
-                        entity_id,
-                        span: data_struct_define.span.clone(),
-                        define_kind: DefineKind::UserType
-                    };
-                    name_environment.set_name_define_info(
-                        String::from_str_in(name.value, allocator),
-                        define_info
-                    );
-                }
                 name_environments.insert(entity_id, name_environment);
 
                 if let Some(generics_define) = &data_struct_define.generics_define {
@@ -471,6 +479,40 @@ pub(crate) fn name_resolve_program<'allocator>(
                 if let Some(block) = &data_struct_define.block.value {
                     name_resolve_block(
                         block,
+                        entity_id,
+                        name_environments,
+                        resolved_map,
+                        errors,
+                        warnings,
+                        allocator
+                    );
+                }
+            },
+            StatementAST::TypeDefine(type_define) => {
+                let name_environment = NameEnvironment::new(
+                    Some(current_environment_id),
+                    Some(EnvironmentSeparatorKind::UserTypeDefine),
+                    type_define.span.clone(),
+                    allocator
+                );
+                let entity_id = EntityID::from(type_define);
+                name_environments.insert(entity_id, name_environment);
+
+                if let Some(generics_define) = &type_define.generics_define {
+                    name_resolve_generics_define(
+                        generics_define,
+                        entity_id,
+                        name_environments,
+                        resolved_map,
+                        errors,
+                        warnings,
+                        allocator
+                    );
+                }
+
+                if let Ok(type_info) = &type_define.type_info {
+                    name_resolve_type_info(
+                        type_info,
                         entity_id,
                         name_environments,
                         resolved_map,

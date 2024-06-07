@@ -9,7 +9,7 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfoSet, LocalGenericID, Type, WhereBound, WithDefineInfo}, user_type_element_collector::get_type};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfoSet, LocalGenericID, Type, WithDefineInfo}, user_type_element_collector::get_type};
 
 
 
@@ -106,7 +106,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         };
 
         if register_bounds_check {
-            let where_bounds = ty.value.get_where_bounds_with_local_generic().unwrap();
+            let where_bounds = ty.value.get_where_bounds_with_replaced_generic().unwrap();
             for where_bound in where_bounds {
                 self.generic_bounds_checks.push(GenericsBoundCheck::Where {
                     type_span: ty.span.clone(),
@@ -182,7 +182,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
             &first_resolved.value,
             &first_resolved.span,
             &second_resolved.value,
-            &second_resolved.span
+            &second_resolved.span,
+            false
         )
     }
 
@@ -265,7 +266,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     &new_first_type,
                     first_span,
                     second_type,
-                    second_span
+                    second_span,
+                    false
                 )?;
                 Ok(implicit_convert)
             } else {
@@ -273,7 +275,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     first_type,
                     first_span,
                     second_type,
-                    second_span
+                    second_span,
+                    false
                 )?;
                 Ok(None)
             }
@@ -313,7 +316,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     first_type,
                     first_span,
                     &new_second_type,
-                    second_span
+                    second_span,
+                    false
                 )?;
                 Ok(implicit_convert)
             } else {
@@ -321,7 +325,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     first_type,
                     first_span,
                     second_type,
-                    second_span
+                    second_span,
+                    false
                 )?;
                 Ok(None)
             }
@@ -363,14 +368,16 @@ impl<'allocator> TypeEnvironment<'allocator> {
         first_type: &Type,
         first_span: &Range<usize>,
         second_type: &Type,
-        second_span: &Range<usize>
+        second_span: &Range<usize>,
+        allow_unknown: bool
     ) -> Result<(), TypeMismatchError> {
 
         let result = self.unify_type_recursive(
             first_type,
             first_span,
             second_type,
-            second_span
+            second_span,
+            allow_unknown
         );
 
         result.map_err(|mut err| {
@@ -394,41 +401,46 @@ impl<'allocator> TypeEnvironment<'allocator> {
         first_type: &Type,
         first_span: &Range<usize>,
         second_type: &Type,
-        second_span: &Range<usize>
+        second_span: &Range<usize>,
+        allow_unknown: bool
     ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
 
-        if let Type::LocalGeneric(first_generic_id) = first_type {
-            if second_type != &Type::Unknown {
-                let first_resolved_type = self.resolve_generic_type(*first_generic_id);
-
-                return if &first_resolved_type.1.value == &Type::Unknown {
-                    self.set_generic_type(first_resolved_type.0, Spanned::new(second_type.clone(), second_span.clone()));
-                    Ok(())
-                } else {
-                    self.unify_type_recursive(
-                        &first_resolved_type.1.value,
-                        &first_resolved_type.1.span,
-                        second_type,
-                        second_span
-                    )
-                };
+        if allow_unknown {
+            if first_type == &Type::Unknown || second_type == &Type::Unknown {
+                return Ok(());
             }
         }
-        if let Type::LocalGeneric(second_generic_id) = second_type {
-            if first_type != &Type::Unknown {
-                let second_resolved_type = self.resolve_generic_type(*second_generic_id);
 
-                return if &second_resolved_type.1.value == &Type::Unknown {
-                    self.set_generic_type(second_resolved_type.0, Spanned::new(first_type.clone(), first_span.clone()));
-                    Ok(())
-                } else {
-                    self.unify_type_recursive(
-                        first_type,
-                        first_span,
-                        &second_resolved_type.1.value,
-                        &second_resolved_type.1.span
-                    )
-                }
+        if let Type::LocalGeneric(first_generic_id) = first_type {
+            let first_resolved_type = self.resolve_generic_type(*first_generic_id);
+
+            return if &first_resolved_type.1.value == &Type::Unknown {
+                self.set_generic_type(first_resolved_type.0, Spanned::new(second_type.clone(), second_span.clone()));
+                Ok(())
+            } else {
+                self.unify_type_recursive(
+                    &first_resolved_type.1.value,
+                    &first_resolved_type.1.span,
+                    second_type,
+                    second_span,
+                    allow_unknown
+                )
+            };
+        }
+        if let Type::LocalGeneric(second_generic_id) = second_type {
+            let second_resolved_type = self.resolve_generic_type(*second_generic_id);
+
+            return if &second_resolved_type.1.value == &Type::Unknown {
+                self.set_generic_type(second_resolved_type.0, Spanned::new(first_type.clone(), first_span.clone()));
+                Ok(())
+            } else {
+                self.unify_type_recursive(
+                    first_type,
+                    first_span,
+                    &second_resolved_type.1.value,
+                    &second_resolved_type.1.span,
+                    allow_unknown
+                )
             }
         }
 
@@ -436,7 +448,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             Type::UserType { user_type_info: first_info, generics: first_generics } => {
                 if let Type::UserType { user_type_info: second_info, generics: second_generics } = second_type {
                     if first_info == second_info {
-                        self.unify_generics(first_generics, first_span, second_generics, second_span)?;
+                        self.unify_generics(first_generics, first_span, second_generics, second_span, allow_unknown)?;
                         true
                     } else {
                         false
@@ -448,7 +460,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             Type::Function { function_info: first_function_info, generics: first_generics } => {
                 if let Type::Function { function_info: second_function_info, generics: second_generics } = second_type {
                     if first_function_info == second_function_info {
-                        self.unify_generics(first_generics, first_span, second_generics, second_span)?;
+                        self.unify_generics(first_generics, first_span, second_generics, second_span, allow_unknown)?;
                         true
                     } else {
                         false
@@ -474,7 +486,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
                             &first.1.value,
                             &first.1.span,
                             &second.1.value,
-                            &second.1.span
+                            &second.1.span,
+                            allow_unknown
                         );
                     }
 
@@ -489,7 +502,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
                         &first_type,
                         first_span,
                         &second_type,
-                        second_span
+                        second_span,
+                        allow_unknown
                     )?;
                     true
                 } else {
@@ -502,13 +516,15 @@ impl<'allocator> TypeEnvironment<'allocator> {
                         &first_value_type,
                         first_span,
                         &second_value_type,
-                        second_span
+                        second_span,
+                        allow_unknown
                     );
                     let error_type_result = self.unify_type_recursive(
                         &first_error_type,
                         first_span,
                         &second_error_type,
-                        second_span
+                        second_span,
+                        allow_unknown
                     );
 
                     let mut errors = Vec::new();
@@ -546,7 +562,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
         first_generics: &Vec<Type>,
         first_span: &Range<usize>,
         second_generics: &Vec<Type>,
-        second_span: &Range<usize>
+        second_span: &Range<usize>,
+        allow_unknown: bool
     ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
 
         let mut errors = Vec::new();
@@ -556,7 +573,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 &first_generics[i],
                 first_span,
                 &second_generics[i],
-                second_span
+                second_span,
+                allow_unknown
             );
             
             if let Err(error) = result {
@@ -2402,15 +2420,19 @@ fn type_inference_primary_left<'allocator>(
                 span_start..span_end
             };
 
-            let user_type = type_environment.get_user_or_function_type_with_local_generic_id(
+            let mut user_type = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(user_type, user_type_span),
                 true
             );
 
+            if user_type.value.is_renamed_type() {
+                user_type.value = user_type.value.get_element_type_with_replaced_generic("type").unwrap().value;
+            }
+
             if let Type::UserType { user_type_info: _, generics: _ } = &user_type.value {
                 if let Ok(field_assigns) = &new_expression.field_assigns {
                     for field_assign in field_assigns.iter() {
-                        if let Some(element_type) = user_type.value.get_element_type_with_local_generic(field_assign.name.value) {
+                        if let Some(element_type) = user_type.value.get_element_type_with_replaced_generic(field_assign.name.value) {
                             type_environment.set_entity_type(
                                 EntityID::from(field_assign),
                                 Spanned::new(element_type.value, field_assign.name.span.clone())
@@ -2428,7 +2450,7 @@ fn type_inference_primary_left<'allocator>(
                                     generics_map,
                                     module_entity_type_map,
                                     implements_infos,
-                                    force_be_expression,
+                                    true,
                                     type_environment,
                                     implicit_convert_map,
                                     allocator,
@@ -2509,7 +2531,8 @@ fn type_inference_primary_left<'allocator>(
                     &Type::Bool,
                     &condition.get_span(),
                     &condition_type.value,
-                    &condition_type.span
+                    &condition_type.span,
+                    false
                 );
                 if result.is_err() {
                     type_environment.add_lazy_type_error_report(
@@ -2552,7 +2575,8 @@ fn type_inference_primary_left<'allocator>(
                                     &Type::Bool,
                                     &condition.get_span(),
                                     &condition_type.value,
-                                    &condition_type.span
+                                    &condition_type.span,
+                                    false
                                 );
                                 if result.is_err() {
                                     type_environment.add_lazy_type_error_report(
@@ -2761,14 +2785,16 @@ fn type_inference_blocks<'allocator>(
                             &first_type.value,
                             &first_type.span,
                             &value_type,
-                            &second_type.span
+                            &second_type.span,
+                            false
                         )
                     } else if let Type::Result { value, error: _ } = &second_type.value {
                         type_environment.unify_type(
                             &first_type.value,
                             &first_type.span,
                             &value,
-                            &second_type.span
+                            &second_type.span,
+                            false
                         )
                     } else {
                         unreachable!()
@@ -2832,7 +2858,7 @@ fn type_inference_primary_right<'allocator>(
         let literal_entity_id = EntityID::from(&second_expr.0);
         
         let element_name = second_expr.0.value;
-        let element_type = user_type.value.get_element_type_with_local_generic(element_name);
+        let element_type = user_type.value.get_element_type_with_replaced_generic(element_name);
 
         let mut pre_element_types = Vec::new_in(allocator);
         if let Some(element_type) = element_type {
@@ -2848,7 +2874,7 @@ fn type_inference_primary_right<'allocator>(
         for implementation in implementations {
             let element_type = implementation.implements_info.element_types.get(element_name);
             if let Some(element_type) = element_type {
-                let ty = Type::get_type_with_generics(
+                let ty = Type::get_type_with_replaced_generics(
                     &element_type.value,
                     &implementation.implements_info.generics,
                     &implementation.local_generics
@@ -2863,24 +2889,27 @@ fn type_inference_primary_right<'allocator>(
                             module_name: element_type.module_name.clone(),
                             span: element_type.span.clone()
                         },
-                        Some(WithDefineInfo {
-                            value: interface.value,
-                            module_name: implementation.implements_info.module_name.as_ref().clone(),
-                            span: interface.span
-                        })
+                        Some((
+                            WithDefineInfo {
+                                value: interface.value,
+                                module_name: implementation.implements_info.module_name.as_ref().clone(),
+                                span: interface.span
+                            },
+                            implementation.implements_info.where_bounds.clone()
+                        ))
                     )
                 );
             }
         }
 
         let mut element_types = Vec::new_in(allocator);
-        'root: for (element_type, interface) in pre_element_types {
+        'root: for (element_type, interface_and_where_bounds) in pre_element_types {
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(element_type.value, second_expr.0.span.clone()),
                 false
             ).value;
 
-            if let Some(where_bounds) = ty.get_where_bounds_with_local_generic() {
+            if let Some(where_bounds) = ty.get_where_bounds_with_replaced_generic() {
                 for where_bound in where_bounds {
                     for bound in where_bound.bounds.iter() {
                         if !implements_infos.is_implemented(
@@ -2902,7 +2931,7 @@ fn type_inference_primary_right<'allocator>(
                         module_name: element_type.module_name.clone(),
                         span: element_type.span.clone()
                     },
-                    interface
+                    interface_and_where_bounds
                 )
             );
         }
@@ -2929,7 +2958,7 @@ fn type_inference_primary_right<'allocator>(
                 };
                 errors.push(TranspileError::new(error));
             } else {
-                let where_bounds = element_types.last().unwrap().0.value.get_where_bounds_with_local_generic();
+                let where_bounds = element_types.last().unwrap().0.value.get_where_bounds_with_replaced_generic();
 
                 if let Some(where_bounds) = where_bounds {
                     for where_bound in where_bounds {
@@ -2941,8 +2970,16 @@ fn type_inference_primary_right<'allocator>(
                     }
                 }
 
-                if let Some(interface) = &element_types.last().unwrap().1 {
+                if let Some((interface, where_bounds)) = &element_types.last().unwrap().1 {
                     type_environment.impl_interface_generics_check.push((second_expr.0.span.clone(), interface.clone()));
+
+                    for where_bound in where_bounds.iter() {
+                        type_environment.generic_bounds_checks.push(GenericsBoundCheck::Where {
+                            type_span: second_expr.0.span.clone(),
+                            target_type: where_bound.target_type.clone(),
+                            bounds: where_bound.bounds.clone()
+                        });
+                    }
                 }
             }
             element_types.last().unwrap().0.value.clone()
@@ -3319,7 +3356,7 @@ fn type_inference_function_call<'allocator>(
                     context
                 );
 
-                if let Some(defined_arg_type) = function_type.get_indexed_element_type_with_local_generic(define_arg_index) {
+                if let Some(defined_arg_type) = function_type.get_indexed_element_type_with_replaced_generic(define_arg_index) {
                     type_environment.set_entity_type(
                         EntityID::from(ast),
                         Spanned::new(defined_arg_type, arg_expr.get_span())
@@ -3357,7 +3394,7 @@ fn type_inference_function_call<'allocator>(
             }
         }
 
-        let return_type = function_type.get_return_type_with_local_generic().unwrap();
+        let return_type = function_type.get_return_type_with_replaced_generic().unwrap();
 
         type_environment.set_entity_type(
             EntityID::from(ast),

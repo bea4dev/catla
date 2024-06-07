@@ -1145,6 +1145,22 @@ fn name_resolve_primary_left<'allocator>(
                     errors
                 );
             }
+
+            if let Ok(field_assigns) = &new_expression.field_assigns {
+                for field_assign in field_assigns.iter() {
+                    if let Ok(expression) = &field_assign.expression {
+                        name_resolve_expression(
+                            &expression,
+                            environment_id,
+                            name_environments,
+                            resolved_map,
+                            errors,
+                            warnings,
+                            allocator
+                        );
+                    }
+                }
+            }
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {
             let if_statement = &if_expression.if_statement;

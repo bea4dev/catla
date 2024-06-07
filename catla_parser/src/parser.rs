@@ -207,10 +207,10 @@ pub struct UserTypeDefine<'allocator, 'input> {
     pub span: Range<usize>
 }
 
-pub type UserTypeKind = Spanned<DataStructKindEnum>;
+pub type UserTypeKind = Spanned<UserTypeKindEnum>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DataStructKindEnum {
+pub enum UserTypeKindEnum {
     Class,
     Struct,
     Interface

@@ -635,9 +635,9 @@ fn parse_user_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocato
     let kind_span = kind_token.map(|token| { token.span.clone() });
 
     let kind = match kind_token.get_kind() {
-        TokenKind::Class     => UserTypeKind::new(DataStructKindEnum::Class, kind_span.unwrap()),
-        TokenKind::Struct    => UserTypeKind::new(DataStructKindEnum::Struct, kind_span.unwrap()),
-        TokenKind::Interface => UserTypeKind::new(DataStructKindEnum::Interface, kind_span.unwrap()),
+        TokenKind::Class     => UserTypeKind::new(UserTypeKindEnum::Class, kind_span.unwrap()),
+        TokenKind::Struct    => UserTypeKind::new(UserTypeKindEnum::Struct, kind_span.unwrap()),
+        TokenKind::Interface => UserTypeKind::new(UserTypeKindEnum::Interface, kind_span.unwrap()),
         _ => {
             cursor.prev();
             return None;

@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, UserTypeKindEnum};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -76,7 +76,44 @@ pub(crate) fn collect_user_type_program(
                         );
                     }
 
-                    let ty = Type::UserType{
+                    let ty = Type::UserType {
+                        user_type_info: Arc::new(data_struct_info),
+                        generics: Arc::new(Vec::new())
+                    };
+                    user_type_map.insert(type_name, ty);
+                }
+            },
+            StatementAST::TypeDefine(type_define) => {
+                if let Ok(name) = &type_define.name {
+                    let name = Spanned::new(name.value.to_string(), name.span.clone());
+                    let type_name = name.value.clone();
+
+                    let mut generics_define = Vec::new();
+                    let mut generics_define_span = None;
+                    if let Some(generics) = &type_define.generics_define {
+                        for element in generics.elements.iter() {
+                            let generic_type = Arc::new(GenericType {
+                                define_entity_id: EntityID::from(element),
+                                name: element.name.value.to_string(),
+                                bounds: FreezableMutex::new(Vec::new())
+                            });
+                            generics_define.push(generic_type);
+                        }
+                        generics_define_span = Some(generics.span.clone());
+                    }
+
+                    let data_struct_info = DataStructInfo {
+                        module_name: context.module_name.clone(),
+                        name,
+                        define_span: type_define.span.clone(),
+                        kind: UserTypeKindEnum::Struct,
+                        generics_define,
+                        generics_define_span,
+                        element_types: Mutex::new(FxHashMap::default()),
+                        where_bounds: Default::default()
+                    };
+
+                    let ty = Type::UserType {
                         user_type_info: Arc::new(data_struct_info),
                         generics: Arc::new(Vec::new())
                     };

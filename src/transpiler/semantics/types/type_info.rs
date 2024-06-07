@@ -1,7 +1,7 @@
 use std::{mem::swap, ops::Range, sync::{Arc, Mutex, MutexGuard, PoisonError}};
 
 use bumpalo::Bump;
-use catla_parser::parser::{DataStructKindEnum, Spanned};
+use catla_parser::parser::{Spanned, UserTypeKindEnum};
 use derivative::Derivative;
 use either::Either;
 use fxhash::FxHashMap;
@@ -36,12 +36,12 @@ pub enum Type {
 
 impl Type {
     
-    pub(crate) fn get_type_with_generics(ty: &Type, generics_define: &Vec<Arc<GenericType>>, local_generics: &Vec<Type>) -> Type {
+    pub(crate) fn get_type_with_replaced_generics(ty: &Type, generics_define: &Vec<Arc<GenericType>>, replace_generics: &Vec<Type>) -> Type {
         match ty {
             Type::UserType { user_type_info, generics } => {
                 let mut new_generics = Vec::with_capacity(generics.len());
                 for generic in generics.iter() {
-                    let ty = Type::get_type_with_generics(generic, generics_define, local_generics);
+                    let ty = Type::get_type_with_replaced_generics(generic, generics_define, replace_generics);
                     new_generics.push(ty);
                 }
 
@@ -50,26 +50,26 @@ impl Type {
             Type::Function { function_info, generics } => {
                 let mut new_generics = Vec::with_capacity(generics.len());
                 for generic in generics.iter() {
-                    let ty = Type::get_type_with_generics(generic, generics_define, local_generics);
+                    let ty = Type::get_type_with_replaced_generics(generic, generics_define, replace_generics);
                     new_generics.push(ty);
                 }
 
                 let mut argument_types = Vec::with_capacity(function_info.argument_types.len());
                 for argument_type in function_info.argument_types.iter() {
-                    let ty = Type::get_type_with_generics(argument_type, generics_define, local_generics);
+                    let ty = Type::get_type_with_replaced_generics(argument_type, generics_define, replace_generics);
                     argument_types.push(ty);
                 }
 
-                let return_type = Type::get_type_with_generics(
+                let return_type = Type::get_type_with_replaced_generics(
                     &function_info.return_type.value,
                     generics_define,
-                    local_generics
+                    replace_generics
                 );
 
                 let where_bounds = Type::get_where_bounds_with_generics(
                     &function_info.where_bounds.freeze_and_get(),
                     generics_define,
-                    local_generics
+                    replace_generics
                 );
 
                 let function_info = FunctionType {
@@ -86,17 +86,17 @@ impl Type {
             Type::Generic(generic) => {
                 // resolve generic id, if local generic exists
                 match generics_define.iter().position(|element| { element == generic }) {
-                    Some(index) => local_generics.get(index).cloned().unwrap_or(ty.clone()),
+                    Some(index) => replace_generics.get(index).cloned().unwrap_or(ty.clone()),
                     _ => ty.clone()
                 }
             },
             Type::Option(value_type) => {
-                let new_value_type = Type::get_type_with_generics(&value_type, generics_define, local_generics);
+                let new_value_type = Type::get_type_with_replaced_generics(&value_type, generics_define, replace_generics);
                 Type::Option(Arc::new(new_value_type))
             },
             Type::Result { value, error } => {
-                let new_value_type = Type::get_type_with_generics(value, generics_define, local_generics);
-                let new_error_type = Type::get_type_with_generics(error, generics_define, local_generics);
+                let new_value_type = Type::get_type_with_replaced_generics(value, generics_define, replace_generics);
+                let new_error_type = Type::get_type_with_replaced_generics(error, generics_define, replace_generics);
 
                 Type::Result { value: Arc::new(new_value_type), error: Arc::new(new_error_type) }
             },
@@ -111,14 +111,14 @@ impl Type {
     ) -> Vec<WhereBound> {
         let mut new_where_bounds = Vec::new();
         for where_bound in where_bounds.iter() {
-            let target_type = Type::get_type_with_generics(
+            let target_type = Type::get_type_with_replaced_generics(
                 &where_bound.target_type,
                 generics_define,
                 local_generics
             );
             let mut bounds = Vec::new();
             for bound in where_bound.bounds.iter() {
-                let ty = Type::get_type_with_generics(&bound.ty, generics_define, local_generics);
+                let ty = Type::get_type_with_replaced_generics(&bound.ty, generics_define, local_generics);
                 let bound = Bound { module_name: bound.module_name.clone(), span: bound.span.clone(), ty };
                 bounds.push(Arc::new(bound));
             }
@@ -127,7 +127,7 @@ impl Type {
         new_where_bounds
     }
 
-    pub(crate) fn get_element_type_with_local_generic(&self, name: &str) -> Option<WithDefineInfo<Type>> {
+    pub(crate) fn get_element_type_with_replaced_generic(&self, name: &str) -> Option<WithDefineInfo<Type>> {
         match self {
             Type::UserType { user_type_info, generics } => {
                 let element_type = {
@@ -137,7 +137,7 @@ impl Type {
 
                 element_type.map(|ty| {
                     ty.map(|ty| {
-                        Type::get_type_with_generics(&ty, &user_type_info.generics_define, generics)
+                        Type::get_type_with_replaced_generics(&ty, &user_type_info.generics_define, generics)
                     })
                 })
             },
@@ -145,7 +145,7 @@ impl Type {
         }
     }
 
-    pub(crate) fn get_where_bounds_with_local_generic(&self) -> Option<Vec<WhereBound>> {
+    pub(crate) fn get_where_bounds_with_replaced_generic(&self) -> Option<Vec<WhereBound>> {
         match self {
             Type::UserType { user_type_info, generics } => {
                 Some(Type::get_where_bounds_with_generics(
@@ -173,22 +173,22 @@ impl Type {
         }
     }
 
-    pub(crate) fn get_indexed_element_type_with_local_generic(&self, index: usize) -> Option<Type> {
+    pub(crate) fn get_indexed_element_type_with_replaced_generic(&self, index: usize) -> Option<Type> {
         match self {
             Type::Function { function_info, generics } => {
                 let element_type = function_info.argument_types.get(index);
 
-                element_type.map(|ty| { Type::get_type_with_generics(ty, &function_info.generics_define, generics) })
+                element_type.map(|ty| { Type::get_type_with_replaced_generics(ty, &function_info.generics_define, generics) })
             },
             _ => None
         }
     }
 
-    pub(crate) fn get_return_type_with_local_generic(&self) -> Option<Type> {
+    pub(crate) fn get_return_type_with_replaced_generic(&self) -> Option<Type> {
         match self {
             Type::Function { function_info, generics } => {
                 let return_type = &function_info.return_type.value;
-                Some(Type::get_type_with_generics(return_type, &function_info.generics_define, generics))
+                Some(Type::get_type_with_replaced_generics(return_type, &function_info.generics_define, generics))
             },
             _ => None
         }
@@ -249,6 +249,16 @@ impl Type {
         }
     }
 
+    pub(crate) fn is_renamed_type(&self) -> bool {
+        match self {
+            Type::UserType { user_type_info, generics: _ } => {
+                let element_types = user_type_info.element_types.lock().unwrap();
+                element_types.contains_key("type")
+            },
+            _ => false
+        }
+    }
+
 }
 
 
@@ -277,7 +287,7 @@ pub struct DataStructInfo {
     pub module_name: String,
     pub name: Spanned<String>,
     pub define_span: Range<usize>,
-    pub kind: DataStructKindEnum,
+    pub kind: UserTypeKindEnum,
     pub generics_define: Vec<Arc<GenericType>>,
     pub generics_define_span: Option<Range<usize>>,
     pub element_types: Mutex<FxHashMap<String, WithDefineInfo<Type>>>,
@@ -678,10 +688,6 @@ impl ImplementsInfoSet {
                 type_environment,
                 allow_unknown
             ) {
-                if implements_info.where_bounds.is_empty() {
-                    return true;
-                }
-
                 // init generic variables
                 let generics_define = &implements_info.generics;
                 let mut local_generics = Vec::new();
@@ -690,12 +696,12 @@ impl ImplementsInfoSet {
                     local_generics.push(Type::LocalGeneric(generic_id));
                 }
 
-                let impl_concrete = Type::get_type_with_generics(
+                let impl_concrete = Type::get_type_with_replaced_generics(
                     &implements_info.concrete.value,
                     generics_define,
                     &local_generics
                 );
-                let impl_interface = Type::get_type_with_generics(
+                let impl_interface = Type::get_type_with_replaced_generics(
                     &implements_info.interface.value,
                     generics_define,
                     &local_generics
@@ -709,13 +715,15 @@ impl ImplementsInfoSet {
                     &impl_concrete,
                     &(0..0),
                     &resolved_ty,
-                    &(0..0)
+                    &(0..0),
+                    allow_unknown
                 );
                 let result2 = type_environment.unify_type(
                     &impl_interface,
                     &(0..0),
                     &resolved_interface,
-                    &(0..0)
+                    &(0..0),
+                    allow_unknown
                 );
 
                 if result1.is_err() || result2.is_err() {
@@ -725,13 +733,13 @@ impl ImplementsInfoSet {
 
                 let mut is_satisfied = true;
                 'check: for where_bound in implements_info.where_bounds.iter() {
-                    let target_type = Type::get_type_with_generics(
+                    let target_type = Type::get_type_with_replaced_generics(
                         &where_bound.target_type,
                         generics_define,
                         &local_generics
                     );
                     for bound in where_bound.bounds.iter() {
-                        let bound_type = Type::get_type_with_generics(
+                        let bound_type = Type::get_type_with_replaced_generics(
                             &bound.ty,
                             generics_define,
                             &local_generics
@@ -805,12 +813,12 @@ impl ImplementsInfoSet {
                 local_generics.push(Type::LocalGeneric(generic_id));
             }
 
-            let impl_concrete = Type::get_type_with_generics(
+            let impl_concrete = Type::get_type_with_replaced_generics(
                 &implements_info.concrete.value,
                 generics_define,
                 &local_generics
             );
-            let impl_interface = Type::get_type_with_generics(
+            let impl_interface = Type::get_type_with_replaced_generics(
                 &implements_info.interface.value,
                 generics_define,
                 &local_generics
@@ -823,30 +831,26 @@ impl ImplementsInfoSet {
                 &impl_concrete,
                 &(0..0),
                 &resolved_ty,
-                &(0..0)
+                &(0..0),
+                true
             );
 
             if result.is_err() {
                 continue;
             }
 
-            let mut is_satisfied = true;
-            'check: for where_bound in implements_info.where_bounds.iter() {
-                let target_type = Type::get_type_with_generics(
-                    &where_bound.target_type,
-                    generics_define,
-                    &local_generics
-                );
-                for bound in where_bound.bounds.iter() {
-                    let bound_type = Type::get_type_with_generics(
-                        &bound.ty,
-                        generics_define,
-                        &local_generics
-                    );
+            let where_bounds = Type::get_where_bounds_with_generics(
+                &implements_info.where_bounds,
+                generics_define,
+                &local_generics
+            );
 
+            let mut is_satisfied = true;
+            'check: for where_bound in where_bounds.iter() {
+                for bound in where_bound.bounds.iter() {
                     if !self.is_implemented(
-                        &target_type,
-                        &bound_type,
+                        &where_bound.target_type,
+                        &bound.ty,
                         type_environment,
                         true
                     ) {
@@ -862,7 +866,7 @@ impl ImplementsInfoSet {
                     interface: Spanned::new(impl_interface, implements_info.interface.span.clone()),
                     concrete: Spanned::new(impl_concrete, implements_info.concrete.span.clone()),
                     module_name: implements_info.module_name.clone(),
-                    where_bounds: implements_info.where_bounds.clone(),
+                    where_bounds: Arc::new(where_bounds),
                     element_types: implements_info.element_types.clone()
                 };
 

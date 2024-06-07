@@ -26,14 +26,81 @@ pub(crate) fn collect_module_element_types_program(
     context: &TranspileModuleContext
 ) {
     for statement in ast.statements.iter() {
+        if let Ok(statement) = statement {
+            if let StatementAST::TypeDefine(type_define) = statement {
+                if let Ok(name) = &type_define.name {
+                    let user_type = user_type_map.get(name.value).unwrap().clone();
+
+                    if let Some(generics_define) = &type_define.generics_define {
+                        let generic_types = get_generic_type(
+                            generics_define,
+                            user_type_map,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            generics_map,
+                            errors,
+                            warnings,
+                            context
+                        );
+                        set_generics_bounds(&user_type, generic_types);
+                    }
+
+                    if let Some((_, implementation_element_map)) = owner_info.as_mut() {
+                        if let Some(implementation_element_map) = implementation_element_map {
+                            implementation_element_map.insert(
+                                name.value.to_string(),
+                                WithDefineInfo { value: user_type, module_name: context.module_name.clone(), span: name.span.clone() }
+                            );
+                        } else if let Type::UserType { user_type_info, generics: _ } = &user_type {
+                            let mut element_types = user_type_info.element_types.lock().unwrap();
+                            element_types.insert(
+                                name.value.to_string(),
+                                WithDefineInfo { value: user_type.clone(), module_name: context.module_name.clone(), span: name.span.clone() }
+                            );
+                        }
+                    }
+                }
+
+                let ty = if let Ok(type_info) = &type_define.type_info {
+                    Spanned::new(get_type(
+                        type_info,
+                        user_type_map,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        generics_map,
+                        errors,
+                        warnings,
+                        context
+                    ), type_info.span.clone())
+                } else {
+                    Spanned::new(Type::Unknown, type_define.span.clone())
+                };
+                
+                if let Ok(name) = &type_define.name {
+                    let defined_type = user_type_map.get(name.value).unwrap();
+                    if let Type::UserType { user_type_info, generics: _ } = defined_type {
+                        let mut element_types = user_type_info.element_types.lock().unwrap();
+                        element_types.insert(
+                            "type".to_string(),
+                            WithDefineInfo { value: ty.value, module_name: context.module_name.clone(), span: ty.span }
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    for statement in ast.statements.iter() {
         let statement = match statement {
             Ok(statement) => statement,
             _ => continue
         };
 
         if let Some((user_type, implementation_element_map)) = owner_info.as_mut() {
-            let user_type = *user_type;
-
             let element = match statement {
                 StatementAST::VariableDefine(field_define) => {
                     let type_info = match &field_define.type_tag {
@@ -233,25 +300,11 @@ pub(crate) fn collect_module_element_types_program(
                             context
                         );
                         
-                        // set generic bounds type
                         let user_type = user_type_map.get(name.value).unwrap().clone();
+                        
+                        set_generics_bounds(&user_type, generic_types);
+
                         if let Type::UserType{ user_type_info, generics: _ } = user_type {
-                            let size = user_type_info.generics_define.len();
-                            if size == generic_types.len() {
-                                for i in 0..size {
-                                    let generic_type_old = &user_type_info.generics_define[i];
-                                    let generic_type_new = &generic_types[i];
-
-                                    let mut bounds_old = generic_type_old.bounds.lock().unwrap();
-                                    let bounds_new = generic_type_new.bounds.lock().unwrap();
-                                    let mut bounds_new = bounds_new.clone();
-
-                                    if generic_type_old.define_entity_id == generic_type_new.define_entity_id {
-                                        mem::swap(bounds_old.deref_mut(), &mut bounds_new);
-                                    }
-                                }
-                            }
-
                             let where_bounds = get_where_bounds(
                                 &data_struct_define.where_clause,
                                 user_type_map,
@@ -552,6 +605,26 @@ pub(crate) fn collect_module_element_types_program(
                 }
             }
             _ => {}
+        }
+    }
+}
+
+fn set_generics_bounds(user_type: &Type, generic_types: Vec<Arc<GenericType>>) {
+    if let Type::UserType{ user_type_info, generics: _ } = user_type {
+        let size = user_type_info.generics_define.len();
+        if size == generic_types.len() {
+            for i in 0..size {
+                let generic_type_old = &user_type_info.generics_define[i];
+                let generic_type_new = &generic_types[i];
+
+                let mut bounds_old = generic_type_old.bounds.lock().unwrap();
+                let bounds_new = generic_type_new.bounds.lock().unwrap();
+                let mut bounds_new = bounds_new.clone();
+
+                if generic_type_old.define_entity_id == generic_type_new.define_entity_id {
+                    mem::swap(bounds_old.deref_mut(), &mut bounds_new);
+                }
+            }
         }
     }
 }
@@ -1570,10 +1643,10 @@ pub(crate) fn get_type(
                 let ty = match resolved.define_info.define_kind {
                     DefineKind::UserType => user_type_map.get(ast.path[0].value).unwrap().clone(),
                     DefineKind::Generics => {
-                        Type::Generic(generics_map.get(&EntityID::from(resolved.define_info.entity_id)).unwrap().clone())
+                        Type::Generic(generics_map.get(&resolved.define_info.entity_id).unwrap().clone())
                     },
                     DefineKind::Import => {
-                        let module_name = import_element_map.get(&EntityID::from(resolved.define_info.entity_id)).unwrap();
+                        let module_name = import_element_map.get(&resolved.define_info.entity_id).unwrap();
                         let user_type_map = module_user_type_map.get(module_name).unwrap();
                         match user_type_map.get(ast.path[0].value) {
                             Some(user_type) => user_type.clone(),
@@ -1705,7 +1778,12 @@ pub(crate) fn get_type(
         };
     }
 
-    type_info
+    // dereference renamed type
+    if type_info.is_renamed_type() {
+        type_info.get_element_type_with_replaced_generic("type").unwrap().value
+    } else {
+        type_info
+    }
 }
 
 fn get_generic_type<'allocator>(

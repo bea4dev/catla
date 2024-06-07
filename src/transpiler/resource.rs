@@ -42,7 +42,6 @@ impl TestSourceCodeProvider {
                     })
                 });
             }
-            println!("{}", &current_package_name);
         }
 
         let source_code = Arc::new(

@@ -17,15 +17,19 @@ fn main() {
 "
 import test::test_module2
 
-class TestClass<T> {
+class TestClazz<T> {
     let field: T?
 
-    function test() -> TestClass<T> {
+    function test() -> TestClazz<T> {
         return new TestClass {
             field: null
         }
     }
+
+    function a() -> T {}
 }
+
+type TestClass<T> = TestClazz<T>
 
 let a = new TestClass { field: 100.0 }
 let b = a.test().field
@@ -48,36 +52,47 @@ function <T, E> ok(value: T) -> T!<E> {
 function <T, E> error(error: E) -> T!<E> {}
 
 
-let g: int = new TestStruct { field: 100 }.test1()
+interface Nat {}
 
-struct TestStruct<T> {
-    let field: T
+struct Zero {}
+implements Nat for Zero {}
+
+struct Succ<N: Nat> {
+    let n: N
+}
+implements<N: Nat> Nat for Succ<N> {}
+
+interface Add<R: Nat, Answer: Nat> {
+    function add(r: R) -> Answer {}
 }
 
-interface TestInterface<U> {
-    function test1() -> U where U: TestInterface3 {}
+implements<N: Nat> Add<N, N> for Zero {
+    function add(r: N) -> N {}
 }
 
-interface TestInterface2<U> {
-    function test1() -> U {}
+implements<N: Nat, M: Nat, Sum: Nat> Add<N, Succ<Sum>> for Succ<M> where N: Add<M, Sum> {
+    function add(r: N) -> Succ<Sum> {}
 }
 
-interface TestInterface3 {}
+type One = Succ<Zero>
+type Two = Succ<One>
+type Three = Succ<Two>
+type Four = Succ<Three>
 
-implements<T> TestInterface3 for TestStruct<T> {}
+let zero = new Zero {}
+let one = new One { n: zero }
+let two = new Two { n: one }
 
-implements<T, U> TestInterface<U> for T {
-    function test1() -> U where U: TestInterface3 {}
-}
+let three: Three = one.add(two)
+let four: Four = two.add(two)
 
-implements<T, U> TestInterface2<U> for T {
-    function test1() -> U {}
-}
+let incorrect: Four = three.add(two)
+
 ";
 let source1 = 
 "
 ";
-
+//N = Succ<Succ<Zero>>, M = Zero, Sum = Succ<Succ<Succ<Zero>>>
     let settings = TranspileSettings {
         lang: "ja_JP".to_string(),
         num_threads: num_cpus::get()

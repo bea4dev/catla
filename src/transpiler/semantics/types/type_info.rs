@@ -442,7 +442,8 @@ impl ImplementsInfo {
     fn contains_target_type(
         self_type: &Type,
         ty: &Type,
-        implements_infos: &ImplementsInfoSet,
+        global_implements_info_set: &ImplementsInfoSet,
+        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         type_environment: &mut TypeEnvironment,
         allow_unknown: bool
     ) -> bool {
@@ -458,7 +459,8 @@ impl ImplementsInfo {
             return ImplementsInfo::contains_target_type(
                 self_type,
                 &ty.value,
-                implements_infos,
+                global_implements_info_set,
+                current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
             );
@@ -469,7 +471,8 @@ impl ImplementsInfo {
             return ImplementsInfo::contains_target_type(
                 &self_type.value,
                 ty,
-                implements_infos,
+                global_implements_info_set,
+                current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
             );
@@ -506,7 +509,8 @@ impl ImplementsInfo {
                             if !ImplementsInfo::contains_target_type(
                                 self_generic,
                                 generic,
-                                implements_infos,
+                                global_implements_info_set,
+                                current_scope_implements_info_set,
                                 type_environment,
                                 allow_unknown
                             ) {
@@ -518,7 +522,8 @@ impl ImplementsInfo {
                             if !ImplementsInfo::contains_target_type(
                                 &self_generic,
                                 generic,
-                                implements_infos,
+                                global_implements_info_set,
+                                current_scope_implements_info_set,
                                 type_environment,
                                 allow_unknown
                             ) {
@@ -537,7 +542,8 @@ impl ImplementsInfo {
                     if !ImplementsInfo::contains_target_type(
                         &self_function_info.return_type.value,
                         &function_info.return_type.value,
-                        implements_infos,
+                        global_implements_info_set,
+                        current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
                     ) {
@@ -555,7 +561,8 @@ impl ImplementsInfo {
                         if !ImplementsInfo::contains_target_type(
                             self_argument_type,
                             argument_type,
-                            implements_infos,
+                            global_implements_info_set,
+                            current_scope_implements_info_set,
                             type_environment,
                             allow_unknown
                         ) {
@@ -576,7 +583,8 @@ impl ImplementsInfo {
                             if ImplementsInfo::contains_target_type(
                                 &self_bound.ty,
                                 &bound.ty,
-                                implements_infos,
+                                global_implements_info_set,
+                                current_scope_implements_info_set,
                                 type_environment,
                                 allow_unknown
                             ) {
@@ -594,7 +602,13 @@ impl ImplementsInfo {
                 }
                 
                 for bound in self_generic_type.bounds.freeze_and_get().iter() {
-                    if !implements_infos.is_implemented(ty, &bound.ty, type_environment, allow_unknown) {
+                    if !global_implements_info_set.is_implemented(
+                        ty,
+                        &bound.ty,
+                        type_environment,
+                        current_scope_implements_info_set,
+                        allow_unknown
+                    ) {
                         return false;
                     }
                 }
@@ -606,7 +620,8 @@ impl ImplementsInfo {
                     ImplementsInfo::contains_target_type(
                         &self_value_type,
                         &value_type,
-                        implements_infos,
+                        global_implements_info_set,
+                        current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
                     )
@@ -619,13 +634,15 @@ impl ImplementsInfo {
                     ImplementsInfo::contains_target_type(
                         &self_value,
                         &value,
-                        implements_infos,
+                        global_implements_info_set,
+                        current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
                     ) && ImplementsInfo::contains_target_type(
                         &self_error,
                         &error,
-                        implements_infos,
+                        global_implements_info_set,
+                        current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
                     )
@@ -640,6 +657,7 @@ impl ImplementsInfo {
 }
 
 
+#[derive(Debug)]
 pub struct ImplementsInfoSet {
     implements_infos: Vec<ImplementsInfo>
 }
@@ -666,25 +684,38 @@ impl ImplementsInfoSet {
         ty: &Type,
         interface: &Type,
         type_environment: &mut TypeEnvironment,
+        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allow_unknown: bool
     ) -> bool {
-        for implements_info in self.implements_infos.iter() {
+
+        let empty_vec = Vec::new();
+        let iter = match current_scope_implements_info_set {
+            Some(scope_implements_info_set) => {
+                scope_implements_info_set.implements_infos.iter().chain(self.implements_infos.iter())
+            },
+            _ => self.implements_infos.iter().chain(empty_vec.iter())
+        };
+
+        for implements_info in iter {
             if (ImplementsInfo::contains_target_type(
                 &implements_info.interface.value,
                 interface,
                 self,
+                current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
             ) || ImplementsInfo::contains_target_type(
                 interface,
                 &implements_info.interface.value,
                 self,
+                current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
             )) && ImplementsInfo::contains_target_type(
                 &implements_info.concrete.value,
                 ty,
                 self,
+                current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
             ) {
@@ -692,7 +723,11 @@ impl ImplementsInfoSet {
                 let generics_define = &implements_info.generics;
                 let mut local_generics = Vec::new();
                 for _ in 0..generics_define.len() {
-                    let generic_id = type_environment.new_local_generic_id(0..0, None);
+                    let generic_id = type_environment.new_local_generic_id(
+                        0..0,
+                        None,
+                        &None
+                    );
                     local_generics.push(Type::LocalGeneric(generic_id));
                 }
 
@@ -749,6 +784,7 @@ impl ImplementsInfoSet {
                             &target_type,
                             &bound_type,
                             type_environment,
+                            current_scope_implements_info_set,
                             allow_unknown
                         ) {
                             is_satisfied = false;
@@ -770,11 +806,18 @@ impl ImplementsInfoSet {
         ty: &Type,
         bounds: &Vec<Arc<Bound>>,
         type_environment: &mut TypeEnvironment,
+        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allow_unknown: bool
     ) -> Result<(), Vec<Arc<Bound>>> {
         let mut not_satisfied_types = Vec::new();
         for bound in bounds.iter() {
-            if !self.is_implemented(ty, &bound.ty, type_environment, allow_unknown) {
+            if !self.is_implemented(
+                ty,
+                &bound.ty,
+                type_environment,
+                current_scope_implements_info_set,
+                allow_unknown
+            ) {
                 not_satisfied_types.push(bound.clone())
             }
         }
@@ -790,15 +833,25 @@ impl ImplementsInfoSet {
         &self,
         ty: &Type,
         type_environment: &mut TypeEnvironment,
+        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allocator: &'allocator Bump
     ) -> Vec<CollectedImplementation, &'allocator Bump> {
         let mut satisfied_implementations = Vec::new_in(allocator);
 
-        for implements_info in self.implements_infos.iter() {
+        let empty_vec = Vec::new();
+        let iter = match current_scope_implements_info_set {
+            Some(scope_implements_info_set) => {
+                scope_implements_info_set.implements_infos.iter().chain(self.implements_infos.iter())
+            },
+            _ => self.implements_infos.iter().chain(empty_vec.iter())
+        };
+
+        for implements_info in iter {
             if !ImplementsInfo::contains_target_type(
                 &implements_info.concrete.value,
                 ty,
                 self,
+                current_scope_implements_info_set,
                 type_environment,
                 true
             ) {
@@ -809,7 +862,7 @@ impl ImplementsInfoSet {
             let generics_define = &implements_info.generics;
             let mut local_generics = Vec::new();
             for _ in 0..generics_define.len() {
-                let generic_id = type_environment.new_local_generic_id(0..0, None);
+                let generic_id = type_environment.new_local_generic_id(0..0, None, &None);
                 local_generics.push(Type::LocalGeneric(generic_id));
             }
 
@@ -852,6 +905,7 @@ impl ImplementsInfoSet {
                         &where_bound.target_type,
                         &bound.ty,
                         type_environment,
+                        current_scope_implements_info_set,
                         true
                     ) {
                         is_satisfied = false;

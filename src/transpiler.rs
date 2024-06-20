@@ -207,6 +207,7 @@ async fn transpile_module(
         &generics_map,
         &module_entity_type_map,
         &merged_implements_infos,
+        &None,
         false,
         &mut type_environment,
         &mut implicit_convert_map,

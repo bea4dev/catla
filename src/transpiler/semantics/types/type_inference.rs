@@ -9,7 +9,7 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfoSet, LocalGenericID, Type, WithDefineInfo}, user_type_element_collector::get_type};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfoSet, LocalGenericID, Type, WhereBound, WithDefineInfo}, user_type_element_collector::get_type};
 
 
 
@@ -1065,6 +1065,13 @@ pub(crate) fn type_inference_program<'allocator>(
                 }
             },
             StatementAST::UserTypeDefine(data_struct_define) => {
+                if let Ok(name) = &data_struct_define.name {
+                    let user_type = user_type_map.get(name.value).unwrap();
+                    if let Type::UserType { user_type_info, generics: _ } = user_type {
+                        
+                    }
+                }
+
                 if let Some(block) = &data_struct_define.block.value {
                     let mut type_environment = TypeEnvironment::new(allocator);
 
@@ -1262,6 +1269,14 @@ pub(crate) fn type_inference_program<'allocator>(
     }
     
     builder.finish().print((&context.module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+}
+
+fn get_and_check_where_bounds_implements_info(
+    where_bounds: &Vec<WhereBound>,
+    current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
+    type_environment: &mut TypeEnvironment
+) -> Option<Arc<ImplementsInfoSet>>{
+
 }
 
 fn type_inference_expression<'allocator>(

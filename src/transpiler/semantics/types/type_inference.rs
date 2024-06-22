@@ -1,4 +1,4 @@
-use std::{alloc::Allocator, ops::Range, sync::Arc};
+use std::{alloc::Allocator, ops::{Deref, Range}, sync::Arc};
 
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
@@ -6,10 +6,11 @@ use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpr
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
+use toml::value;
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfoSet, LocalGenericID, Type, WhereBound, WithDefineInfo}, user_type_element_collector::get_type};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfo, ImplementsInfoSet, LocalGenericID, Type, WhereBound, WithDefineInfo}, user_type_element_collector::get_type};
 
 
 
@@ -73,9 +74,9 @@ impl<'allocator> TypeEnvironment<'allocator> {
         
         if let Some(generics_define) = generic_type {
             self.generic_bounds_checks.push(GenericsBoundCheck::Generics {
-                type_span,
-                ty: Type::LocalGeneric(generic_id),
-                generics_define,
+                type_span: type_span.clone(),
+                ty: Spanned::new(Type::LocalGeneric(generic_id), type_span),
+                generic_define: generics_define,
                 scope_implements_info_set: current_scope_implements_info_set.clone()
             });
         }
@@ -90,7 +91,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         register_bounds_check: bool
     ) -> Spanned<Type> {
         let generics_define = match &ty.value {
-            Type::UserType { user_type_info, generics: _ } => {
+            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
                 &user_type_info.generics_define
             },
             Type::Function { function_info, generics: _ } => {
@@ -112,8 +113,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
         let generics = Arc::new(generics);
 
         let ty = match &ty.value {
-            Type::UserType { user_type_info, generics: _ } => {
-                Spanned::new(Type::UserType { user_type_info: user_type_info.clone(), generics }, ty.span)
+            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
+                Spanned::new(Type::UserType { user_type_info: user_type_info.clone(), generics, generics_span: None }, ty.span)
             },
             Type::Function { function_info, generics: _ } => {
                 Spanned::new(Type::Function { function_info: function_info.clone(), generics }, ty.span)
@@ -126,7 +127,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             for where_bound in where_bounds {
                 self.generic_bounds_checks.push(GenericsBoundCheck::Where {
                     type_span: ty.span.clone(),
-                    target_type: where_bound.target_type,
+                    target_type: where_bound.target_type.value,
                     bounds: where_bound.bounds,
                     scope_implements_info_set: current_scope_implements_info_set.clone()
                 });
@@ -462,8 +463,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
 
         let eq = match first_type {
-            Type::UserType { user_type_info: first_info, generics: first_generics } => {
-                if let Type::UserType { user_type_info: second_info, generics: second_generics } = second_type {
+            Type::UserType { user_type_info: first_info, generics: first_generics, generics_span: _ } => {
+                if let Type::UserType { user_type_info: second_info, generics: second_generics, generics_span: _ } = second_type {
                     if first_info == second_info {
                         self.unify_generics(first_generics, first_span, second_generics, second_span, allow_unknown)?;
                         true
@@ -644,7 +645,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             Type::Float64 => "float64".to_string(),
             Type::Bool => "bool".to_string(),
             Type::Unit => "unit".to_string(),
-            Type::UserType { user_type_info, generics } => {
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
                 let mut name = user_type_info.name.value.clone();
                 self.add_generics_info(&mut name, generics);
                 name
@@ -685,12 +686,12 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
     pub fn resolve_type(&self, ty: &Type) -> Type {
         match ty {
-            Type::UserType { user_type_info, generics } => {
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
                 let mut new_generics = Vec::new();
                 for generic in generics.iter() {
                     new_generics.push(self.resolve_type(generic));
                 }
-                Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(new_generics) }
+                Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(new_generics), generics_span: None }
             },
             Type::Function { function_info, generics } => {
                 let mut new_generics = Vec::new();
@@ -757,13 +758,13 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 GenericsBoundCheck::Generics {
                     type_span,
                     ty,
-                    generics_define,
+                    generic_define: generics_define,
                     scope_implements_info_set
                 } => {
-                    let type_resolved = if let Type::LocalGeneric(generic_id) = ty {
+                    let type_resolved = if let Type::LocalGeneric(generic_id) = &ty.value {
                         self.resolve_generic_type(*generic_id).1
                     } else {
-                        Spanned::new(self.resolve_type(ty), type_span.clone())
+                        Spanned::new(self.resolve_type(&ty.value), ty.span.clone())
                     };
 
                     let result = global_implements_info_set.is_satisfied(
@@ -810,9 +811,9 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     );
 
                     if let Err(bounds) = result {
-                        let contains_unknown = bounds.iter()
+                        let bounds_contain_unknown = bounds.iter()
                             .any(|bound| { self.resolve_type(&bound.ty).contains_unknown() });
-                        if self.resolve_type(target_type).contains_unknown() || contains_unknown {
+                        if self.resolve_type(target_type).contains_unknown() || bounds_contain_unknown {
                             continue;
                         }
         
@@ -836,7 +837,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
     fn check_impl_interface_generics(&self, errors: &mut Vec<TranspileError>) {
         for (reference_span, interface) in self.impl_interface_generics_check.iter() {
-            if let Type::UserType { user_type_info: _, generics } = self.resolve_type(&interface.value) {
+            if let Type::UserType { user_type_info: _, generics, generics_span: _ } = self.resolve_type(&interface.value) {
                 let mut has_unknown = false;
                 for generic in generics.iter() {
                     if generic.contains_unknown() {
@@ -861,6 +862,56 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
     }
 
+    fn add_check_type_info_bounds(
+        &mut self,
+        ty: Spanned<Type>,
+        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>
+    ) {
+        if let Type::UserType { user_type_info, generics, generics_span } = &ty.value {
+            if user_type_info.generics_define.len() != generics.len() {
+                return;
+            }
+
+            let generics_span = generics_span.as_ref().map(|spans| {
+                if spans.len() == generics.len() {
+                    Some(spans)
+                } else {
+                    None
+                }
+            }).flatten();
+
+            for i in 0..generics.len() {
+                let generic_define = &user_type_info.generics_define[i];
+                let generic = &generics[i];
+
+                let generic_span = generics_span
+                    .map(|spans| { spans[i].clone() })
+                    .unwrap_or(ty.span.clone());
+
+                self.generic_bounds_checks.push(GenericsBoundCheck::Generics {
+                    type_span: ty.span.clone(),
+                    ty: Spanned::new(generic.clone(), generic_span.clone()),
+                    generic_define: generic_define.clone(),
+                    scope_implements_info_set: current_scope_implements_info_set.clone()
+                });
+
+                self.add_check_type_info_bounds(
+                    Spanned::new(generic.clone(), generic_span),
+                    current_scope_implements_info_set
+                );
+            }
+
+            for where_bound in ty.value.get_where_bounds_with_replaced_generic().unwrap_or(Vec::new()) {
+                self.generic_bounds_checks.push(GenericsBoundCheck::Where {
+                    type_span: ty.span.clone(),
+                    target_type: where_bound.target_type.value,
+                    bounds: where_bound.bounds,
+                    scope_implements_info_set: current_scope_implements_info_set.clone()
+                });
+            }
+        }
+    }
+
 }
 
 
@@ -875,8 +926,8 @@ pub(crate) enum ImplicitConvertKind {
 pub(crate) enum GenericsBoundCheck {
     Generics {
         type_span: Range<usize>,
-        ty: Type,
-        generics_define: Arc<GenericType>,
+        ty: Spanned<Type>,
+        generic_define: Arc<GenericType>,
         scope_implements_info_set: Option<Arc<ImplementsInfoSet>>
     },
     Where {
@@ -1065,10 +1116,30 @@ pub(crate) fn type_inference_program<'allocator>(
                 }
             },
             StatementAST::UserTypeDefine(data_struct_define) => {
-                if let Ok(name) = &data_struct_define.name {
+                let current_scope_implements_info_set = if let Ok(name) = &data_struct_define.name {
                     let user_type = user_type_map.get(name.value).unwrap();
-                    if let Type::UserType { user_type_info, generics: _ } = user_type {
-                        
+                    if let Type::UserType { user_type_info, generics: _, generics_span: _ } = user_type {
+                        get_and_check_where_bounds_implements_info(
+                            &user_type_info.where_bounds.freeze_and_get(),
+                            current_scope_implements_info_set,
+                            type_environment,
+                            context
+                        )
+                    } else {
+                        current_scope_implements_info_set.clone()
+                    }
+                } else {
+                    current_scope_implements_info_set.clone()
+                };
+
+                if let Some(super_type_info) = &data_struct_define.super_type_info {
+                    for type_info in super_type_info.type_infos.iter() {
+                        let super_type = module_entity_type_map.get(&EntityID::from(type_info)).unwrap();
+
+                        type_environment.add_check_type_info_bounds(
+                            Spanned::new(super_type.clone(), type_info.span.clone()),
+                            &current_scope_implements_info_set
+                        );
                     }
                 }
 
@@ -1085,7 +1156,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         generics_map,
                         module_entity_type_map,
                         global_implements_info_set,
-                        current_scope_implements_info_set,
+                        &current_scope_implements_info_set,
                         false,
                         &mut type_environment,
                         implicit_convert_map,
@@ -1096,6 +1167,60 @@ pub(crate) fn type_inference_program<'allocator>(
                     );
 
                     type_environment.collect_info(implicit_convert_map, global_implements_info_set, errors, warnings);
+                }
+            },
+            StatementAST::Implements(implements) => {
+                let implements_info  = global_implements_info_set.get(EntityID::from(implements));
+                let current_scope_implements_info_set = if let Some(implements_info) = implements_info {
+                    get_and_check_where_bounds_implements_info(
+                        &implements_info.where_bounds,
+                        current_scope_implements_info_set,
+                        type_environment,
+                        context
+                    )
+                } else {
+                    None
+                };
+                
+                if let Ok(target_type) = &implements.target_user_type {
+                    let concrete = module_entity_type_map.get(&EntityID::from(target_type)).unwrap();
+
+                    type_environment.add_check_type_info_bounds(
+                        Spanned::new(concrete.clone(), target_type.span.clone()),
+                        &current_scope_implements_info_set
+                    );
+                }
+
+                if let Ok(interface_info) = &implements.interface {
+                    let interface = module_entity_type_map.get(&EntityID::from(interface_info)).unwrap();
+
+                    type_environment.add_check_type_info_bounds(
+                        Spanned::new(interface.clone(), interface_info.span.clone()),
+                        &current_scope_implements_info_set
+                    );
+                }
+
+                if let Some(block) = &implements.block.value {
+                    type_inference_program(
+                        block.program,
+                        user_type_map,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        module_element_type_maps,
+                        generics_map,
+                        module_entity_type_map,
+                        global_implements_info_set,
+                        &current_scope_implements_info_set,
+                        force_be_expression,
+                        type_environment,
+                        implicit_convert_map,
+                        allocator,
+                        errors,
+                        warnings,
+                        context
+                    );
                 }
             },
             StatementAST::DropStatement(drop_statement) => {
@@ -1184,6 +1309,13 @@ pub(crate) fn type_inference_program<'allocator>(
                         }
                     }
                 };
+
+                if let Some(type_tag) = &variable_define.type_tag {
+                    type_environment.add_check_type_info_bounds(
+                        Spanned::new(tag_type.clone(), type_tag.span.clone()),
+                        current_scope_implements_info_set
+                    );
+                }
 
                 if &tag_type != &Type::Unknown {
                     let span = variable_define.name.clone()
@@ -1274,9 +1406,45 @@ pub(crate) fn type_inference_program<'allocator>(
 fn get_and_check_where_bounds_implements_info(
     where_bounds: &Vec<WhereBound>,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-    type_environment: &mut TypeEnvironment
-) -> Option<Arc<ImplementsInfoSet>>{
+    type_environment: &mut TypeEnvironment,
+    context: &TranspileModuleContext
+) -> Option<Arc<ImplementsInfoSet>> {
+    if where_bounds.is_empty() {
+        return current_scope_implements_info_set.clone();
+    }
 
+    let mut implements_infos = current_scope_implements_info_set.as_ref()
+        .map(|implements_info_set| { implements_info_set.implements_infos.clone() })
+        .unwrap_or(FxHashMap::default());
+
+    for where_bound in where_bounds.iter() {
+        let current_implements_info_set = Some(Arc::new(ImplementsInfoSet {
+            implements_infos: implements_infos.clone()
+        }));
+
+        type_environment.add_check_type_info_bounds(
+            where_bound.target_type.clone(),
+            &current_implements_info_set
+        );
+
+        for bound in where_bound.bounds.iter() {
+            type_environment.add_check_type_info_bounds(
+                Spanned::new(bound.ty.clone(), bound.span.clone()),
+                &current_implements_info_set
+            );
+
+            implements_infos.insert(bound.entity_id, ImplementsInfo {
+                generics: Arc::new(Vec::new()),
+                interface: Spanned::new(bound.ty.clone(), bound.span.clone()),
+                concrete: where_bound.target_type.clone(),
+                module_name: context.module_name.clone(),
+                where_bounds: Arc::new(Vec::new()),
+                element_types: Arc::new(FxHashMap::default())
+            });
+        }
+    }
+
+    Some(Arc::new(ImplementsInfoSet { implements_infos }))
 }
 
 fn type_inference_expression<'allocator>(
@@ -2062,6 +2230,26 @@ fn type_inference_primary<'allocator>(
                 ty
             );
 
+            if let Some(generics) = &second_expr.1 {
+                if let Ok(generics) = generics {
+                    type_inference_generics(
+                        generics,
+                        EntityID::from(&second_expr.0),
+                        user_type_map,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        generics_map,
+                        current_scope_implements_info_set,
+                        type_environment,
+                        errors,
+                        warnings,
+                        context
+                    );
+                }
+            }
+
             let mut mappings = Vec::new_in(allocator);
 
             let entity_id = if let Some(function_call) = &second_expr.2 {
@@ -2429,6 +2617,7 @@ fn type_inference_primary_left<'allocator>(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        current_scope_implements_info_set,
                         type_environment,
                         errors,
                         warnings,
@@ -2537,7 +2726,7 @@ fn type_inference_primary_left<'allocator>(
                 user_type.value = user_type.value.get_element_type_with_replaced_generic("type").unwrap().value;
             }
 
-            if let Type::UserType { user_type_info: _, generics: _ } = &user_type.value {
+            if let Type::UserType { user_type_info: _, generics: _, generics_span: _ } = &user_type.value {
                 if let Ok(field_assigns) = &new_expression.field_assigns {
                     for field_assign in field_assigns.iter() {
                         if let Some(element_type) = user_type.value.get_element_type_with_replaced_generic(field_assign.name.value) {
@@ -3011,7 +3200,7 @@ fn type_inference_primary_right<'allocator>(
                         Some((
                             WithDefineInfo {
                                 value: interface.value,
-                                module_name: implementation.implements_info.module_name.as_ref().clone(),
+                                module_name: implementation.implements_info.module_name.clone(),
                                 span: interface.span
                             },
                             implementation.implements_info.where_bounds.clone()
@@ -3033,7 +3222,7 @@ fn type_inference_primary_right<'allocator>(
                 for where_bound in where_bounds {
                     for bound in where_bound.bounds.iter() {
                         if !global_implements_info_set.is_implemented(
-                            &where_bound.target_type,
+                            &where_bound.target_type.value,
                             &bound.ty,
                             type_environment,
                             current_scope_implements_info_set,
@@ -3085,7 +3274,7 @@ fn type_inference_primary_right<'allocator>(
                     for where_bound in where_bounds {
                         type_environment.generic_bounds_checks.push(GenericsBoundCheck::Where {
                             type_span: second_expr.0.span.clone(),
-                            target_type: where_bound.target_type,
+                            target_type: where_bound.target_type.value,
                             bounds: where_bound.bounds,
                             scope_implements_info_set: current_scope_implements_info_set.clone()
                         });
@@ -3098,7 +3287,7 @@ fn type_inference_primary_right<'allocator>(
                     for where_bound in where_bounds.iter() {
                         type_environment.generic_bounds_checks.push(GenericsBoundCheck::Where {
                             type_span: second_expr.0.span.clone(),
-                            target_type: where_bound.target_type.clone(),
+                            target_type: where_bound.target_type.value.clone(),
                             bounds: where_bound.bounds.clone(),
                             scope_implements_info_set: current_scope_implements_info_set.clone()
                         });
@@ -3126,6 +3315,7 @@ fn type_inference_primary_right<'allocator>(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    current_scope_implements_info_set,
                     type_environment,
                     errors,
                     warnings,
@@ -3356,6 +3546,7 @@ fn type_inference_generics<'allocator>(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
+    current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     type_environment: &mut TypeEnvironment<'allocator>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -3363,7 +3554,7 @@ fn type_inference_generics<'allocator>(
 ) {
     let ty = type_environment.resolve_entity_type(previous);
     let generics = match &ty.value {
-        Type::UserType { user_type_info: _, generics } => generics,
+        Type::UserType { user_type_info: _, generics, generics_span: _ } => generics,
         Type::Function { function_info: _, generics } => generics,
         _ => {
             let error = InvalidSetGenericsTypeError {
@@ -3402,10 +3593,15 @@ fn type_inference_generics<'allocator>(
                 warnings,
                 context
             );
+
+            let ty = Spanned::new(ty.clone(), type_info.span.clone());
+
             type_environment.set_generic_type(
                 *generic_id,
-                Spanned::new(ty, type_info.span.clone())
+                ty.clone()
             );
+
+            type_environment.add_check_type_info_bounds(ty, current_scope_implements_info_set);
         }
     }
 }
@@ -3802,14 +3998,14 @@ impl LazyTypeReport for SimpleTypeError {
 struct ArgumentCountMismatchError {
     defined_count: usize,
     specified_count: usize,
-    defined_module: String,
+    defined_module: Arc<String>,
     defined_span: Range<usize>,
     specified_span: Range<usize>
 }
 
 impl TranspileReport for ArgumentCountMismatchError {
     fn print(&self, context: &TranspileModuleContext) {
-        let module_name = &context.module_name;
+        let module_name = context.module_name.deref();
         let text = &context.context.localized_text;
         let error_code = 0040;
         let key = ErrorMessageKey::new(error_code);
@@ -3831,7 +4027,7 @@ impl TranspileReport for ArgumentCountMismatchError {
         );
 
         builder.add_label(
-            Label::new((self.defined_module.clone(), self.defined_span.clone()))
+            Label::new((self.defined_module.deref().clone(), self.defined_span.clone()))
                 .with_color(Color::Yellow)
                 .with_message(
                     key.get_massage(text, ErrorMessageType::Label(1))
@@ -3852,7 +4048,7 @@ impl TranspileReport for ArgumentCountMismatchError {
 
         let source_list = vec![
             (module_name.clone(), context.source_code.code.as_str()),
-            (self.defined_module.clone(), defined_module_context.source_code.code.as_str())
+            (self.defined_module.deref().clone(), defined_module_context.source_code.code.as_str())
         ];
 
         builder.finish().print(sources(source_list)).unwrap();
@@ -3949,13 +4145,13 @@ impl TranspileReport for UnexpectedTypeErrorReport {
 struct BoundsNotSatisfiedError {
     span: Range<usize>,
     type_name: Spanned<String>,
-    bounds_module_name: String,
+    bounds_module_name: Arc<String>,
     not_satisfied_bounds: Vec<Spanned<String>>
 }
 
 impl TranspileReport for BoundsNotSatisfiedError {
     fn print(&self, context: &TranspileModuleContext) {
-        let module_name = &context.module_name;
+        let module_name = context.module_name.deref();
         let text = &context.context.localized_text;
         let key = ErrorMessageKey::new(BOUNDS_NOT_SATISFIED_ERROR);
 
@@ -3995,7 +4191,7 @@ impl TranspileReport for BoundsNotSatisfiedError {
             let bound_text = bound.value.clone().fg(Color::Yellow).to_string();
 
             builder.add_label(
-                Label::new((self.bounds_module_name.clone(), bound.span.clone()))
+                Label::new((self.bounds_module_name.deref().clone(), bound.span.clone()))
                     .with_color(Color::Yellow)
                     .with_message(
                         key.get_massage(text, ErrorMessageType::Label(2))
@@ -4019,7 +4215,7 @@ impl TranspileReport for BoundsNotSatisfiedError {
 
         let source_list = vec![
             (module_name.clone(), context.source_code.code.as_str()),
-            (self.bounds_module_name.clone(), bounds_module_context.source_code.code.as_str())
+            (self.bounds_module_name.deref().clone(), bounds_module_context.source_code.code.as_str())
         ];
 
         builder.finish().print(sources(source_list)).unwrap();
@@ -4028,13 +4224,13 @@ impl TranspileReport for BoundsNotSatisfiedError {
 
 struct WhereBoundsNotSatisfiedError {
     type_name: Spanned<String>,
-    bounds_module_name: String,
+    bounds_module_name: Arc<String>,
     not_satisfied_bounds: Vec<Spanned<String>>
 }
 
 impl TranspileReport for WhereBoundsNotSatisfiedError {
     fn print(&self, context: &TranspileModuleContext) {
-        let module_name = &context.module_name;
+        let module_name = context.module_name.deref();
         let text = &context.context.localized_text;
         let key = ErrorMessageKey::new(WHERE_BOUNDS_NOT_SATISFIED_ERROR);
 
@@ -4065,7 +4261,7 @@ impl TranspileReport for WhereBoundsNotSatisfiedError {
             let bound_text = bound.value.clone().fg(Color::Yellow).to_string();
 
             builder.add_label(
-                Label::new((self.bounds_module_name.clone(), bound.span.clone()))
+                Label::new((self.bounds_module_name.deref().clone(), bound.span.clone()))
                     .with_color(Color::Yellow)
                     .with_message(
                         key.get_massage(text, ErrorMessageType::Label(1))
@@ -4089,7 +4285,7 @@ impl TranspileReport for WhereBoundsNotSatisfiedError {
 
         let source_list = vec![
             (module_name.clone(), context.source_code.code.as_str()),
-            (self.bounds_module_name.clone(), bounds_module_context.source_code.code.as_str())
+            (self.bounds_module_name.deref().clone(), bounds_module_context.source_code.code.as_str())
         ];
 
         builder.finish().print(sources(source_list)).unwrap();
@@ -4133,7 +4329,7 @@ impl LazyTypeReport for NumberOfGenericsMismatchError {
         let expected_text = self.expected.to_string().fg(Color::Yellow).to_string();
 
         let (define_module_name, define_span) = match &self.ty.value {
-            Type::UserType { user_type_info, generics: _ } => {
+            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
                 (
                     user_type_info.module_name.clone(),
                     user_type_info.generics_define_span.clone()
@@ -4167,13 +4363,13 @@ struct NumberOfGenericsMismatchErrorReport {
     type_name: String,
     found_text: String,
     expected_text: String,
-    define_module_name: String,
+    define_module_name: Arc<String>,
     define_span: Range<usize>
 }
 
 impl TranspileReport for NumberOfGenericsMismatchErrorReport {
     fn print(&self, context: &TranspileModuleContext) {
-        let module_name = &context.module_name;
+        let module_name = context.module_name.deref();
         let text = &context.context.localized_text;
         let key = ErrorMessageKey::new(NUMBER_OF_GENERICS_MISMATCH_ERROR);
 
@@ -4194,7 +4390,7 @@ impl TranspileReport for NumberOfGenericsMismatchErrorReport {
         );
 
         builder.add_label(
-            Label::new((self.define_module_name.clone(), self.define_span.clone()))
+            Label::new((self.define_module_name.deref().clone(), self.define_span.clone()))
                 .with_color(Color::Yellow)
                 .with_message(
                     key.get_massage(text, ErrorMessageType::Label(1))
@@ -4216,7 +4412,7 @@ impl TranspileReport for NumberOfGenericsMismatchErrorReport {
 
         let source_list = vec![
             (module_name.clone(), context.source_code.code.as_str()),
-            (self.define_module_name.clone(), bounds_module_context.source_code.code.as_str())
+            (self.define_module_name.deref().clone(), bounds_module_context.source_code.code.as_str())
         ];
 
         builder.finish().print(sources(source_list)).unwrap();
@@ -4233,7 +4429,7 @@ struct DuplicatedElement {
 
 impl TranspileReport for DuplicatedElement {
     fn print(&self, context: &TranspileModuleContext) {
-        let module_name = &context.module_name;
+        let module_name = context.module_name.deref();
         let text = &context.context.localized_text;
         let key = ErrorMessageKey::new(DUPLICATED_ELEMENT_ERROR);
 
@@ -4262,7 +4458,7 @@ impl TranspileReport for DuplicatedElement {
         
         for found_element in self.found_elements.iter() {
             builder.add_label(
-                Label::new((found_element.module_name.clone(), found_element.span.clone()))
+                Label::new((found_element.module_name.deref().clone(), found_element.span.clone()))
                     .with_color(Color::Yellow)
                     .with_message(
                         key.get_massage(text, ErrorMessageType::Label(1))
@@ -4270,7 +4466,7 @@ impl TranspileReport for DuplicatedElement {
                     )
             );
 
-            module_names.push(found_element.module_name.clone());
+            module_names.push(found_element.module_name.deref().clone());
         }
 
         if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
@@ -4287,7 +4483,7 @@ impl TranspileReport for DuplicatedElement {
             .collect::<Vec<_>>();
 
         let source_list = module_list.iter()
-            .map(|context| { (context.module_name.clone(), context.source_code.code.as_str()) });
+            .map(|context| { (context.module_name.deref().clone(), context.source_code.code.as_str()) });
 
         builder.finish().print(sources(source_list)).unwrap();
     }
@@ -4303,7 +4499,7 @@ struct UnresolvedInterface {
 
 impl TranspileReport for UnresolvedInterface {
     fn print(&self, context: &TranspileModuleContext) {
-        let module_name = &context.module_name;
+        let module_name = context.module_name.deref();
         let text = &context.context.localized_text;
         let key = ErrorMessageKey::new(UNRESOLVED_INTERFACE);
 
@@ -4327,7 +4523,7 @@ impl TranspileReport for UnresolvedInterface {
         );
         
         builder.add_label(
-            Label::new((self.implementation.module_name.clone(), self.implementation.span.clone()))
+            Label::new((self.implementation.module_name.deref().clone(), self.implementation.span.clone()))
                 .with_color(Color::Yellow)
                 .with_message(
                     key.get_massage(text, ErrorMessageType::Label(1))
@@ -4346,7 +4542,7 @@ impl TranspileReport for UnresolvedInterface {
 
         let source_list = vec![
             (module_name.clone(), context.source_code.code.as_str()),
-            (impl_module_context.module_name.clone(), impl_module_context.source_code.code.as_str())
+            (impl_module_context.module_name.deref().clone(), impl_module_context.source_code.code.as_str())
         ];
 
         builder.finish().print(sources(source_list)).unwrap();

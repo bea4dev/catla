@@ -11,7 +11,8 @@ use crate::transpiler::component::EntityID;
 use super::type_inference::TypeEnvironment;
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq, Eq)]
 pub enum Type {
     Int8,
     Int16,
@@ -25,7 +26,12 @@ pub enum Type {
     Float64,
     Bool,
     Unit,
-    UserType { user_type_info: Arc<DataStructInfo>, generics: Arc<Vec<Type>> },
+    UserType {
+        user_type_info: Arc<DataStructInfo>,
+        generics: Arc<Vec<Type>>,
+        #[derivative(PartialEq="ignore")]
+        generics_span: Option<Arc<Vec<Range<usize>>>>
+    },
     Function{ function_info: Arc<FunctionType>, generics: Arc<Vec<Type>> },
     Generic(Arc<GenericType>),
     LocalGeneric(LocalGenericID),
@@ -38,14 +44,14 @@ impl Type {
     
     pub(crate) fn get_type_with_replaced_generics(ty: &Type, generics_define: &Vec<Arc<GenericType>>, replace_generics: &Vec<Type>) -> Type {
         match ty {
-            Type::UserType { user_type_info, generics } => {
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
                 let mut new_generics = Vec::with_capacity(generics.len());
                 for generic in generics.iter() {
                     let ty = Type::get_type_with_replaced_generics(generic, generics_define, replace_generics);
                     new_generics.push(ty);
                 }
 
-                Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(new_generics) }
+                Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(new_generics), generics_span: None }
             },
             Type::Function { function_info, generics } => {
                 let mut new_generics = Vec::with_capacity(generics.len());
@@ -112,24 +118,29 @@ impl Type {
         let mut new_where_bounds = Vec::new();
         for where_bound in where_bounds.iter() {
             let target_type = Type::get_type_with_replaced_generics(
-                &where_bound.target_type,
+                &where_bound.target_type.value,
                 generics_define,
                 local_generics
             );
             let mut bounds = Vec::new();
             for bound in where_bound.bounds.iter() {
                 let ty = Type::get_type_with_replaced_generics(&bound.ty, generics_define, local_generics);
-                let bound = Bound { module_name: bound.module_name.clone(), span: bound.span.clone(), ty };
+                let bound = Bound {
+                    module_name: bound.module_name.clone(),
+                    span: bound.span.clone(),
+                    ty,
+                    entity_id: bound.entity_id
+                };
                 bounds.push(Arc::new(bound));
             }
-            new_where_bounds.push(WhereBound { target_type, bounds })
+            new_where_bounds.push(WhereBound {target_type: Spanned::new(target_type, where_bound.target_type.span.clone()), bounds })
         }
         new_where_bounds
     }
 
     pub(crate) fn get_element_type_with_replaced_generic(&self, name: &str) -> Option<WithDefineInfo<Type>> {
         match self {
-            Type::UserType { user_type_info, generics } => {
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
                 let element_type = {
                     let element_type_map = user_type_info.element_types.lock().unwrap();
                     element_type_map.get(name).cloned()
@@ -147,7 +158,7 @@ impl Type {
 
     pub(crate) fn get_where_bounds_with_replaced_generic(&self) -> Option<Vec<WhereBound>> {
         match self {
-            Type::UserType { user_type_info, generics } => {
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
                 Some(Type::get_where_bounds_with_generics(
                     &user_type_info.where_bounds.freeze_and_get(),
                     &user_type_info.generics_define,
@@ -196,11 +207,11 @@ impl Type {
 
     pub(crate) fn as_original_type(&self) -> Type {
         match self {
-            Type::UserType { user_type_info, generics: _ } => {
+            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
                 let generics = user_type_info.generics_define.iter()
                     .map(|generics_define| { Type::Generic(generics_define.clone()) })
                     .collect();
-                Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(generics) }
+                Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(generics), generics_span: None }
             },
             Type::Function { function_info, generics: _ } => {
                 let generics = function_info.generics_define.iter()
@@ -214,7 +225,7 @@ impl Type {
 
     pub(crate) fn contains_unknown(&self) -> bool {
         match self {
-            Type::UserType { user_type_info, generics } => {
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
                 let contains_unknown = user_type_info.generics_define.iter().any(|generics_define| {
                     generics_define.bounds.freeze_and_get().iter().any(|bound| {
                         bound.ty.contains_unknown()
@@ -251,7 +262,7 @@ impl Type {
 
     pub(crate) fn is_renamed_type(&self) -> bool {
         match self {
-            Type::UserType { user_type_info, generics: _ } => {
+            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
                 let element_types = user_type_info.element_types.lock().unwrap();
                 element_types.contains_key("type")
             },
@@ -284,7 +295,7 @@ pub static PRIMITIVE_TYPE_NAMES: &[&str] = &[
 
 #[derive(Debug)]
 pub struct DataStructInfo {
-    pub module_name: String,
+    pub module_name: Arc<String>,
     pub name: Spanned<String>,
     pub define_span: Range<usize>,
     pub kind: UserTypeKindEnum,
@@ -357,7 +368,7 @@ impl<T: Default> Clone for FreezableMutex<T> {
 #[derive(Debug, Clone)]
 pub struct WithDefineInfo<T> {
     pub value: T,
-    pub module_name: String,
+    pub module_name: Arc<String>,
     pub span: Range<usize>
 }
 
@@ -390,15 +401,16 @@ impl Eq for GenericType {}
 
 #[derive(Debug)]
 pub struct WhereBound {
-    pub target_type: Type,
+    pub target_type: Spanned<Type>,
     pub bounds: Vec<Arc<Bound>>
 }
 
 #[derive(Debug)]
 pub struct Bound {
-    pub module_name: String,
+    pub module_name: Arc<String>,
     pub span: Range<usize>,
-    pub ty: Type
+    pub ty: Type,
+    pub entity_id: EntityID
 }
 
 #[derive(Derivative)]
@@ -416,7 +428,7 @@ pub struct FunctionType {
 
 #[derive(Debug, Clone)]
 pub struct FunctionDefineInfo {
-    pub module_name: String,
+    pub module_name: Arc<String>,
     pub generics_define_span: Option<Range<usize>>,
     pub arguments_span: Range<usize>,
     pub span: Range<usize>
@@ -491,8 +503,8 @@ impl ImplementsInfo {
             Type::Float64 => ty == &Type::Float64,
             Type::Bool => ty == &Type::Bool,
             Type::Unit => ty == &Type::Unit,
-            Type::UserType { user_type_info: self_user_type_info, generics: self_generics } => {
-                if let Type::UserType { user_type_info, generics } = ty {
+            Type::UserType { user_type_info: self_user_type_info, generics: self_generics, generics_span: _ } => {
+                if let Type::UserType { user_type_info, generics, generics_span: _ } = ty {
                     if self_user_type_info != user_type_info {
                         return false;
                     }
@@ -659,7 +671,7 @@ impl ImplementsInfo {
 
 #[derive(Debug)]
 pub struct ImplementsInfoSet {
-    implements_infos: Vec<ImplementsInfo>
+    pub(crate) implements_infos: FxHashMap<EntityID, ImplementsInfo>
 }
 
 
@@ -667,12 +679,16 @@ impl ImplementsInfoSet {
     
     pub fn new() -> Self {
         Self {
-            implements_infos: vec![]
+            implements_infos: FxHashMap::default()
         }
     }
 
-    pub fn add(&mut self, implements_info: ImplementsInfo) {
-        self.implements_infos.push(implements_info);
+    pub fn insert(&mut self, entity_id: EntityID, implements_info: ImplementsInfo) {
+        self.implements_infos.insert(entity_id, implements_info);
+    }
+
+    pub fn get(&self, entity_id: EntityID) -> Option<&ImplementsInfo> {
+        self.implements_infos.get(&entity_id)
     }
 
     pub fn merge(&mut self, other: &ImplementsInfoSet) {
@@ -688,12 +704,27 @@ impl ImplementsInfoSet {
         allow_unknown: bool
     ) -> bool {
 
-        let empty_vec = Vec::new();
+        if let Type::Generic(generic) = ty {
+            for bound in generic.bounds.freeze_and_get().iter() {
+                if ImplementsInfo::contains_target_type(
+                    interface,
+                    &bound.ty,
+                    self,
+                    current_scope_implements_info_set,
+                    type_environment,
+                    allow_unknown
+                ) {
+                    return true;
+                }
+            }
+        }
+
+        let empty_map = FxHashMap::default();
         let iter = match current_scope_implements_info_set {
             Some(scope_implements_info_set) => {
-                scope_implements_info_set.implements_infos.iter().chain(self.implements_infos.iter())
+                scope_implements_info_set.implements_infos.values().chain(self.implements_infos.values())
             },
-            _ => self.implements_infos.iter().chain(empty_vec.iter())
+            _ => self.implements_infos.values().chain(empty_map.values())
         };
 
         for implements_info in iter {
@@ -769,7 +800,7 @@ impl ImplementsInfoSet {
                 let mut is_satisfied = true;
                 'check: for where_bound in implements_info.where_bounds.iter() {
                     let target_type = Type::get_type_with_replaced_generics(
-                        &where_bound.target_type,
+                        &where_bound.target_type.value,
                         generics_define,
                         &local_generics
                     );
@@ -838,12 +869,12 @@ impl ImplementsInfoSet {
     ) -> Vec<CollectedImplementation, &'allocator Bump> {
         let mut satisfied_implementations = Vec::new_in(allocator);
 
-        let empty_vec = Vec::new();
+        let empty_map = FxHashMap::default();
         let iter = match current_scope_implements_info_set {
             Some(scope_implements_info_set) => {
-                scope_implements_info_set.implements_infos.iter().chain(self.implements_infos.iter())
+                scope_implements_info_set.implements_infos.values().chain(self.implements_infos.values())
             },
-            _ => self.implements_infos.iter().chain(empty_vec.iter())
+            _ => self.implements_infos.values().chain(empty_map.values())
         };
 
         for implements_info in iter {
@@ -902,7 +933,7 @@ impl ImplementsInfoSet {
             'check: for where_bound in where_bounds.iter() {
                 for bound in where_bound.bounds.iter() {
                     if !self.is_implemented(
-                        &where_bound.target_type,
+                        &where_bound.target_type.value,
                         &bound.ty,
                         type_environment,
                         current_scope_implements_info_set,

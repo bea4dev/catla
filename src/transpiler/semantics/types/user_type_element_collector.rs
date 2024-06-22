@@ -53,7 +53,7 @@ pub(crate) fn collect_module_element_types_program(
                                 name.value.to_string(),
                                 WithDefineInfo { value: user_type, module_name: context.module_name.clone(), span: name.span.clone() }
                             );
-                        } else if let Type::UserType { user_type_info, generics: _ } = &user_type {
+                        } else if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &user_type {
                             let mut element_types = user_type_info.element_types.lock().unwrap();
                             element_types.insert(
                                 name.value.to_string(),
@@ -82,7 +82,7 @@ pub(crate) fn collect_module_element_types_program(
                 
                 if let Ok(name) = &type_define.name {
                     let defined_type = user_type_map.get(name.value).unwrap();
-                    if let Type::UserType { user_type_info, generics: _ } = defined_type {
+                    if let Type::UserType { user_type_info, generics: _, generics_span: _ } = defined_type {
                         let mut element_types = user_type_info.element_types.lock().unwrap();
                         element_types.insert(
                             "type".to_string(),
@@ -168,7 +168,7 @@ pub(crate) fn collect_module_element_types_program(
                         element.0.value.to_string(),
                         WithDefineInfo { value: element.1, module_name: context.module_name.clone(), span: element.0.span }
                     );
-                } else if let Type::UserType{ user_type_info: data_struct_info, generics: _ } = user_type {
+                } else if let Type::UserType{ user_type_info: data_struct_info, generics: _, generics_span: _ } = user_type {
                     let mut element_map = data_struct_info.element_types.lock().unwrap();
                     element_map.insert(
                         element.0.value.to_string(),
@@ -304,7 +304,7 @@ pub(crate) fn collect_module_element_types_program(
                         
                         set_generics_bounds(&user_type, generic_types);
 
-                        if let Type::UserType{ user_type_info, generics: _ } = user_type {
+                        if let Type::UserType{ user_type_info, generics: _, generics_span: _ } = user_type {
                             let where_bounds = get_where_bounds(
                                 &data_struct_define.where_clause,
                                 user_type_map,
@@ -324,7 +324,7 @@ pub(crate) fn collect_module_element_types_program(
 
                     if let Some(super_type_info) = &data_struct_define.super_type_info {
                         let concrete = user_type_map.get(name.value).unwrap().clone();
-                        let generics = if let Type::UserType { user_type_info, generics: _ } = &concrete {
+                        let generics = if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &concrete {
                             Arc::new(user_type_info.generics_define.clone())
                         } else {
                             Arc::new(Vec::new())
@@ -343,16 +343,17 @@ pub(crate) fn collect_module_element_types_program(
                                 warnings,
                                 context
                             );
+                            module_entity_type_map.insert(EntityID::from(type_info), interface.clone());
 
                             let implements_info = ImplementsInfo {
                                 generics: generics.clone(),
                                 interface: Spanned::new(interface, type_info.span.clone()),
                                 concrete: Spanned::new(concrete.clone(), name.span.clone()),
-                                module_name: Arc::new(context.module_name.clone()),
+                                module_name: context.module_name.clone(),
                                 where_bounds: Arc::new(Vec::new()),
                                 element_types: Arc::new(FxHashMap::default())
                             };
-                            implements_infos.add(implements_info);
+                            implements_infos.insert(EntityID::from(type_info), implements_info);
                         }
                     }
 
@@ -377,7 +378,7 @@ pub(crate) fn collect_module_element_types_program(
                 }
             },
             StatementAST::Implements(implements) => {
-                let implements_info = if let Ok(interface) = &implements.interface {
+                let implements_info = if let Ok(interface_info) = &implements.interface {
                     if let Ok(target_type) = &implements.target_user_type {
                         let generics = implements.generics_define.as_ref().map(|define| {
                             get_generic_type(
@@ -396,7 +397,7 @@ pub(crate) fn collect_module_element_types_program(
                         let generics = Arc::new(generics);
 
                         let interface = Spanned::new(get_type(
-                            interface,
+                            interface_info,
                             user_type_map,
                             import_element_map,
                             name_resolved_map,
@@ -406,7 +407,8 @@ pub(crate) fn collect_module_element_types_program(
                             errors,
                             warnings,
                             context
-                        ), interface.span.clone());
+                        ), interface_info.span.clone());
+                        module_entity_type_map.insert(EntityID::from(interface_info), interface.value.clone());
 
                         let concrete = Spanned::new(get_type(
                             target_type,
@@ -420,6 +422,7 @@ pub(crate) fn collect_module_element_types_program(
                             warnings,
                             context
                         ), target_type.span.clone());
+                        module_entity_type_map.insert(EntityID::from(target_type), concrete.value.clone());
 
                         let where_bounds = get_where_bounds(
                             &implements.where_clause,
@@ -438,7 +441,7 @@ pub(crate) fn collect_module_element_types_program(
                             generics,
                             interface,
                             concrete,
-                            module_name: Arc::new(context.module_name.clone()),
+                            module_name: context.module_name.clone(),
                             where_bounds: Arc::new(where_bounds),
                             element_types: Arc::new(FxHashMap::default())
                         })
@@ -476,7 +479,7 @@ pub(crate) fn collect_module_element_types_program(
                         where_bounds: implements_info.where_bounds,
                         element_types: Arc::new(element_types)
                     };
-                    implements_infos.add(implements_info);
+                    implements_infos.insert(EntityID::from(implements), implements_info);
                 } else {
                     if let Some(block) = &implements.block.value {
                         collect_module_element_types_program(
@@ -610,7 +613,7 @@ pub(crate) fn collect_module_element_types_program(
 }
 
 fn set_generics_bounds(user_type: &Type, generic_types: Vec<Arc<GenericType>>) {
-    if let Type::UserType{ user_type_info, generics: _ } = user_type {
+    if let Type::UserType{ user_type_info, generics: _, generics_span: _ } = user_type {
         let size = user_type_info.generics_define.len();
         if size == generic_types.len() {
             for i in 0..size {
@@ -787,7 +790,7 @@ fn get_function_type_and_name<'allocator>(
     }
 }
 
-fn get_where_bounds(
+pub(crate) fn get_where_bounds(
     ast: &Option<WhereClause>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
@@ -832,10 +835,14 @@ fn get_where_bounds(
                 bounds.push(Arc::new(Bound {
                     module_name: context.module_name.clone(),
                     span: bound.span.clone(),
-                    ty
+                    ty,
+                    entity_id: EntityID::from(bound)
                 }));
             }
-            where_bounds.push(WhereBound { target_type, bounds });
+            where_bounds.push(WhereBound {
+                target_type: Spanned::new(target_type, element.target_type.span.clone()),
+                bounds
+            });
         }
         where_bounds
     } else {
@@ -1696,6 +1703,7 @@ pub(crate) fn get_type(
 
     if let Some(generics_ast) = &ast.generics {
         let mut generics_types = Vec::new();
+        let mut generics_span = Vec::new();
         for element in generics_ast.elements.iter() {
             let ty = get_type(
                 element,
@@ -1710,11 +1718,16 @@ pub(crate) fn get_type(
                 context
             );
             generics_types.push(ty);
+            generics_span.push(element.span.clone());
         }
 
         type_info = match &type_info {
-            Type::UserType { user_type_info: data_struct_info, generics: _ } => {
-                Type::UserType { user_type_info: data_struct_info.clone(), generics: Arc::new(generics_types) }
+            Type::UserType { user_type_info: data_struct_info, generics: _, generics_span: _ } => {
+                Type::UserType {
+                    user_type_info: data_struct_info.clone(),
+                    generics: Arc::new(generics_types),
+                    generics_span: Some(Arc::new(generics_span))
+                }
             },
             Type::Function { function_info, generics: _ } => {
                 Type::Function { function_info: function_info.clone(), generics: Arc::new(generics_types) }
@@ -1821,7 +1834,8 @@ fn get_generic_type<'allocator>(
             bounds.push(Arc::new(Bound {
                 module_name: context.module_name.clone(),
                 span: bound.span.clone(),
-                ty
+                ty,
+                entity_id: EntityID::from(bound)
             }));
         }
 

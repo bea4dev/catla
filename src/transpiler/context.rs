@@ -84,7 +84,7 @@ pub fn try_create_module_context(context: &Arc<TranspileContext>, module_name: &
 
     let module_context = Arc::new(TranspileModuleContext {
         source_code,
-        module_name: module_name.clone(),
+        module_name: Arc::new(module_name.clone()),
         context: context.clone(),
         user_type_future: SharedManualFuture::new(),
         module_element_type_future: SharedManualFuture::new(),
@@ -104,7 +104,7 @@ pub struct TranspileSettings {
 
 pub struct TranspileModuleContext {
     pub source_code: Arc<SourceCode>,
-    pub module_name: String,
+    pub module_name: Arc<String>,
     pub context: Arc<TranspileContext>,
     pub user_type_future: SharedManualFuture<FxHashMap<String, Type>>,
     pub module_element_type_future: SharedManualFuture<FxHashMap<String, Type>>,

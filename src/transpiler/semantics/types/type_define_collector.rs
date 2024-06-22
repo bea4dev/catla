@@ -78,7 +78,8 @@ pub(crate) fn collect_user_type_program(
 
                     let ty = Type::UserType {
                         user_type_info: Arc::new(data_struct_info),
-                        generics: Arc::new(Vec::new())
+                        generics: Arc::new(Vec::new()),
+                        generics_span: None
                     };
                     user_type_map.insert(type_name, ty);
                 }
@@ -115,7 +116,8 @@ pub(crate) fn collect_user_type_program(
 
                     let ty = Type::UserType {
                         user_type_info: Arc::new(data_struct_info),
-                        generics: Arc::new(Vec::new())
+                        generics: Arc::new(Vec::new()),
+                        generics_span: None
                     };
                     user_type_map.insert(type_name, ty);
                 }

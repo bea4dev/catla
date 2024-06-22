@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::Range};
+use std::{collections::BTreeMap, ops::{Deref, Range}, sync::Arc};
 
 use ariadne::{sources, Color, Label, Report, ReportKind, Source};
 use indexmap::IndexMap;
@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use super::{context::TranspileModuleContext, error::TranspileReport};
 
 pub(crate) struct AdviceReport {
-    elements: IndexMap<String, Vec<Advice>>
+    elements: IndexMap<Arc<String>, Vec<Advice>>
 }
 
 impl AdviceReport {
@@ -15,7 +15,7 @@ impl AdviceReport {
         return Self { elements: IndexMap::new() }
     }
 
-    pub(crate) fn add_advice(&mut self, module_name: String, advice: Advice) {
+    pub(crate) fn add_advice(&mut self, module_name: Arc<String>, advice: Advice) {
         let elements = self.elements.entry(module_name).or_insert_with(|| vec![]);
         elements.push(advice);
     }
@@ -38,7 +38,7 @@ impl TranspileReport for AdviceReport {
             Advice::Remove { span } => span.start,
         };
 
-        let mut builder = Report::build(ReportKind::Custom("  > Advice", advice_color), &context.module_name, position)
+        let mut builder = Report::build(ReportKind::Custom("  > Advice", advice_color), context.module_name.deref().clone(), position)
             .with_message(text.get_text("advice.message"));
 
         let mut source_list = Vec::new();
@@ -124,7 +124,7 @@ impl TranspileReport for AdviceReport {
                         let advice_label_span_end = advice_span_end - (add.len() - ceil_whitespace(add, add.len()));
 
                         builder.add_label(
-                            Label::new((module_name.clone(), advice_label_span_start..advice_label_span_end))
+                            Label::new((module_name.deref().clone(), advice_label_span_start..advice_label_span_end))
                                 .with_message(text.get_text(message_key))
                                 .with_color(advice_color)
                         );
@@ -134,7 +134,7 @@ impl TranspileReport for AdviceReport {
                     },
                     Advice::Remove { span } => {
                         builder.add_label(
-                            Label::new((module_name.clone(), advice_source_position..(advice_source_position + (span.len()))))
+                            Label::new((module_name.deref().clone(), advice_source_position..(advice_source_position + (span.len()))))
                                 .with_message(text.get_text("advice.remove_label"))
                                 .with_color(Color::Rgb(252, 233, 79))
                         )
@@ -145,7 +145,7 @@ impl TranspileReport for AdviceReport {
             }
             new_source += &span_source[span_source_position..span_source.len()];
 
-            source_list.push((module_context.module_name.clone(), new_source));
+            source_list.push((module_context.module_name.deref().clone(), new_source));
         }
         
         builder.set_note(text.get_text("advice.note"));

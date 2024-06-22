@@ -29,7 +29,7 @@ impl TranspileError {
         Self(Box::new(report), AdviceReport::new())
     }
 
-    pub(crate) fn add_advice(&mut self, module_name: String, advice: Advice) {
+    pub(crate) fn add_advice(&mut self, module_name: Arc<String>, advice: Advice) {
         self.1.add_advice(module_name, advice);
     }
 
@@ -50,7 +50,7 @@ impl TranspileWarning {
         Self(Box::new(report), AdviceReport::new())
     }
 
-    pub(crate) fn add_advice(&mut self, module_name: String, advice: Advice) {
+    pub(crate) fn add_advice(&mut self, module_name: Arc<String>, advice: Advice) {
         self.1.add_advice(module_name, advice);
     }
 

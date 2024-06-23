@@ -52,41 +52,18 @@ function <T, E> ok(value: T) -> T!<E> {
 function <T, E> error(error: E) -> T!<E> {}
 
 
-interface Nat {}
-
-struct Zero {}
-implements Nat for Zero {}
-
-struct Succ<N: Nat> {
-    let n: N
-}
-implements<N: Nat> Nat for Succ<N> {}
-
-interface Add<R: Nat, Answer: Nat> {
-    function add(r: R) -> Answer {}
+interface TestInterface1 {}
+interface TestInterface2 {
+    function test() -> int {}
 }
 
-implements<N: Nat> Add<N, N> for Zero {
-    function add(r: N) -> N {}
+implements<T: TestInterface1> TestInterface2 for T {
+    function test() -> int {}
 }
 
-implements<N: Nat, M: Nat, Sum: Nat> Add<N, Succ<Sum>> for Succ<M> where N: Add<M, Sum> {
-    function add(r: N) -> Succ<Sum> {}
+function <T: TestInterface1> aaa(i: T) {
+    let a = i.test()
 }
-
-type One = Succ<Zero>
-type Two = Succ<One>
-type Three = Succ<Two>
-type Four = Succ<Three>
-
-let zero = new Zero {}
-let one = new One { n: zero }
-let two = new Two { n: one }
-
-let three: Three = one.add(two)
-let four: Four = two.add(two)
-
-let incorrect: Four = three.add(two)
 
 ";
 let source1 = 

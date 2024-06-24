@@ -54,15 +54,15 @@ function <T, E> error(error: E) -> T!<E> {}
 
 interface TestInterface1 {}
 interface TestInterface2 {
-    function test() -> int {}
+    function test2() -> int {}
 }
 
-implements<T: TestInterface1> TestInterface2 for T {
-    function test() -> int {}
+implements<T> TestInterface2 for T where T: TestInterface1 {
+    function test2() -> int {}
 }
 
-function <T: TestInterface1> aaa(i: T) {
-    let a = i.test()
+function <T> aaa(i: T) where T: TestInterface1 {
+    let a = i.test2()
 }
 
 ";

@@ -1088,6 +1088,13 @@ pub(crate) fn type_inference_program<'allocator>(
                         );
                     }
 
+                    let current_scope_implements_info_set = get_and_check_where_bounds_implements_info(
+                        &function_info.where_bounds.freeze_and_get(),
+                        current_scope_implements_info_set,
+                        &mut type_environment,
+                        context
+                    );
+
                     if let Some(block) = &function_define.block.value {
                         type_inference_program(
                             block.program,
@@ -1100,7 +1107,7 @@ pub(crate) fn type_inference_program<'allocator>(
                             generics_map,
                             module_entity_type_map,
                             global_implements_info_set,
-                            current_scope_implements_info_set,
+                            &current_scope_implements_info_set,
                             false,
                             &mut type_environment,
                             implicit_convert_map,

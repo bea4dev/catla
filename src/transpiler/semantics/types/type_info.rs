@@ -705,6 +705,17 @@ impl ImplementsInfoSet {
     ) -> bool {
 
         let resolved_ty = type_environment.resolve_type(ty);
+
+        if ImplementsInfo::contains_target_type(
+            interface,
+            &resolved_ty,
+            self,
+            current_scope_implements_info_set,
+            type_environment,
+            allow_unknown
+        ) {
+            return true;
+        }
         
         if let Type::Generic(generic) = resolved_ty {
             for bound in generic.bounds.freeze_and_get().iter() {

@@ -65,6 +65,10 @@ function <T> aaa(i: T) where T: TestInterface1 {
     let a = i.test2()
 }
 
+function bbb(i: TestInterface1) {
+    aaa(i)
+}
+
 ";
 let source1 = 
 "

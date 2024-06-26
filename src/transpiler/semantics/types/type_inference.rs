@@ -1139,13 +1139,33 @@ pub(crate) fn type_inference_program<'allocator>(
                 };
 
                 if let Some(super_type_info) = &data_struct_define.super_type_info {
+                    let mut implements_infos = current_scope_implements_info_set.as_ref()
+                        .map(|implements_infos| { implements_infos.implements_infos.clone() })
+                        .unwrap_or(FxHashMap::default());
+
                     for type_info in super_type_info.type_infos.iter() {
+                        let current_scope_implements_info_set = Some(Arc::new(ImplementsInfoSet {
+                            implements_infos: implements_infos.clone(),
+                        }));
+
                         let super_type = module_entity_type_map.get(&EntityID::from(type_info)).unwrap();
 
                         type_environment.add_check_type_info_bounds(
                             Spanned::new(super_type.clone(), type_info.span.clone()),
                             &current_scope_implements_info_set
                         );
+
+                        if let Ok(name) = &data_struct_define.name {
+                            let user_type = user_type_map.get(name.value).unwrap();
+                            implements_infos.insert(EntityID::from(type_info), ImplementsInfo {
+                                generics: Arc::new(Vec::new()),
+                                interface: Spanned::new(super_type.clone(), type_info.span.clone()),
+                                concrete: Spanned::new(user_type.clone(), name.span.clone()),
+                                module_name: context.module_name.clone(),
+                                where_bounds: Arc::new(Vec::new()),
+                                element_types: Arc::new(FxHashMap::default())
+                            });
+                        }
                     }
                 }
 

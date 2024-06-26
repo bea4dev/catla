@@ -66,7 +66,7 @@ function <T> aaa(i: T) where T: TestInterface1 {
 }
 
 function bbb(i: TestInterface1) {
-    aaa(i)
+    let a = i.test2()
 }
 
 ";

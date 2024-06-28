@@ -5,6 +5,8 @@ use proc_macro_regex::regex;
 // If the specified grammar is ambiguous, compilation is aborted with conflict.
 // Usage : https://github.com/bea4dev/bnf_rules
 bnf_rules!{
+    #[generate_code = false]
+
     source              ::= program
 
     program             ::= [ statement ] { end_of_statement [ statement ] }
@@ -15,7 +17,8 @@ bnf_rules!{
 
     function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments
                             [ function_type_tag ] [ line_feed ] [ where_clause ] block
-    function_arguments  ::= "(" [ line_feed ] [ function_argument [ line_feed ] ] { "," [ line_feed ] [ function_argument ] } ")"
+    function_arguments  ::= "(" [ line_feed ] [ ( this_mutability | function_argument) [ line_feed ] ] { "," [ line_feed ] [ function_argument ] } ")"
+    this_mutability     ::= ( "var" | "let" ) "this"
     function_argument   ::= literal type_tag
 
     where_clause        ::= "where" [ line_feed ] [ where_element ] { "," [ line_feed ] [ where_element ] }
@@ -23,7 +26,7 @@ bnf_rules!{
 
     memory_manage_attr  ::= "new" | "drop" | "mutex"
 
-    statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" }
+    statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" | "implements" }
 
     user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define [ line_feed ] ]
                             [ super_type_info ] [ where_clause ] block

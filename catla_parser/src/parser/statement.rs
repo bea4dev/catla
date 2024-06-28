@@ -464,6 +464,31 @@ fn parse_function_arguments<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
     };
 
     skip(cursor, &[TokenKind::LineFeed]);
+    
+    let current_kind = cursor.current().get_kind();
+    let this_mutability = if current_kind == TokenKind::Let || current_kind == TokenKind::Var {
+        let let_or_var = cursor.next().unwrap();
+        let is_var = match current_kind {
+            TokenKind::Var => true,
+            TokenKind::Let => false,
+            _ => unreachable!()
+        };
+        let is_var = Spanned::new(is_var, let_or_var.span.clone());
+
+        let this_token_kind = cursor.current().get_kind();
+        let this_token = cursor.next().cloned();
+        let this_span = if this_token_kind == TokenKind::This {
+            skip(cursor, &[TokenKind::LineFeed]);
+            Ok(this_token.unwrap().span.clone())
+        } else {
+            cursor.prev();
+            Err(unexpected_token_error(&cursor.allocator, cursor.current()))
+        };
+        
+        Some(ThisMutability { is_var, this_span })
+    } else {
+        None
+    };
 
     let mut arguments = Vec::new_in(cursor.allocator);
     let mut error_tokens = Vec::new_in(cursor.allocator);
@@ -518,7 +543,7 @@ fn parse_function_arguments<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
         }
     };
 
-    return FunctionArguments { paren_left, arguments, error_tokens, paren_right, span: span.elapsed(cursor) };
+    return FunctionArguments { paren_left, this_mutability, arguments, error_tokens, paren_right, span: span.elapsed(cursor) };
 }
 
 pub fn parse_function_argument<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<FunctionArgument<'allocator, 'input>> {

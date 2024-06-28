@@ -149,7 +149,8 @@ pub enum StatementAttributeKind {
     Suspend,
     Native,
     Acyclic,
-    Open
+    Open,
+    Implements
 }
 
 pub type MemoryManageAttribute = Spanned<MemoryManageAttributeKind>;
@@ -173,10 +174,17 @@ pub type FunctionArgumentResult<'allocator, 'input> = ParseResult<'allocator, 'i
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionArguments<'allocator, 'input> {
     pub paren_left: ParseResult<'allocator, 'input, ()>,
+    pub this_mutability: Option<ThisMutability<'allocator, 'input>>,
     pub arguments: Vec<FunctionArgument<'allocator, 'input>, &'allocator Bump>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub paren_right: ParseResult<'allocator, 'input, ()>,
     pub span: Range<usize>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThisMutability<'allocator, 'input> {
+    pub is_var: Spanned<bool>,
+    pub this_span: ParseResult<'allocator, 'input, Range<usize>>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

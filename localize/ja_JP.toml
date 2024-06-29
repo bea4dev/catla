@@ -24,6 +24,7 @@ if_statement_or_block = "if式もしくはブロックが必要です"
 type_info = "型情報が必要です"
 greater_than = "括弧を'>'で閉じる必要があります"
 field_assign = "フィールドの初期化式が必要です"
+this = "'let'もしくは'var'の後には'this'が必要です"
 
 [advice]
 message = "以下のように修正すると解決できるかもしれません"
@@ -244,3 +245,9 @@ note = "インターフェースの実装を参照する場合にはインター
 [error.0053]
 message = "型名定義の記述形式が正しくありません"
 label_0 = ""
+[error.0054]
+message = "this可変性の記述方法が正しくありません"
+label_0 = ""
+[error.0055]
+message = "this可変性が記述されていません"
+label_0 = "メソッドにはthis可変性の明記が必要です"

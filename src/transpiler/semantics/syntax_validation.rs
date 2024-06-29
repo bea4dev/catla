@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, ContainsAttribute, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, StatementAttributeKind};
 use either::Either::{Left, Right};
 
 use crate::transpiler::{advice::{create_space_indent, get_column, Advice}, context::TranspileModuleContext, error::SimpleError, TranspileError, TranspileWarning};
@@ -14,7 +14,7 @@ const ERROR_STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT: usize = 0026;
 pub(crate) fn validate_syntax_program(
     ast: Program,
     context: &TranspileModuleContext,
-    data_struct_environment_span: Option<Range<usize>>,
+    user_type_environment_span: Option<Range<usize>>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>
 ) {
@@ -24,7 +24,7 @@ pub(crate) fn validate_syntax_program(
             _ => continue
         };
         
-        if let Some(data_struct_span) = &data_struct_environment_span {
+        if let Some(data_struct_span) = &user_type_environment_span {
             let (is_valid, span) = match statement {
                 StatementAST::Assignment(assignment) => (false, assignment.span.clone()),
                 StatementAST::Exchange(exchange) => (false, exchange.span.clone()),
@@ -117,6 +117,27 @@ pub(crate) fn validate_syntax_program(
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
+                if user_type_environment_span.is_some()
+                    && !function_define.attributes.contains(StatementAttributeKind::Static)
+                    && function_define.args.this_mutability.is_none() {
+                    
+                    let mut error = TranspileError::new(SimpleError::new(
+                        0055,
+                        function_define.args.span.clone(),
+                        vec![],
+                        vec![(function_define.args.span.clone(), Color::Red)]
+                    ));
+                    error.add_advice(
+                        context.module_name.clone(),
+                        Advice::Add {
+                            add: "var this".to_string(),
+                            position: function_define.args.span.start + 1,
+                            message_override: None
+                        }
+                    );
+                    errors.push(error);
+                }
+
                 if let Some(block) = &function_define.block.value {
                     validate_syntax_program(
                         block.program,

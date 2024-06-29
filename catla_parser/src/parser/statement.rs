@@ -246,12 +246,13 @@ fn parse_statement_attributes<'allocator, 'input>(cursor: &mut TokenCursor<'allo
             _ => break
         };
         let attribute_kind = match next.kind {
-            TokenKind::Static  => StatementAttributeKind::Static,
-            TokenKind::Private => StatementAttributeKind::Private,
-            TokenKind::Suspend => StatementAttributeKind::Suspend,
-            TokenKind::Native  => StatementAttributeKind::Native,
-            TokenKind::Acyclic => StatementAttributeKind::Acyclic,
-            TokenKind::Open    => StatementAttributeKind::Open,
+            TokenKind::Static   => StatementAttributeKind::Static,
+            TokenKind::Private  => StatementAttributeKind::Private,
+            TokenKind::Suspend  => StatementAttributeKind::Suspend,
+            TokenKind::Native   => StatementAttributeKind::Native,
+            TokenKind::Acyclic  => StatementAttributeKind::Acyclic,
+            TokenKind::Open     => StatementAttributeKind::Open,
+            TokenKind::Override => StatementAttributeKind::Override,
             _ => {
                 cursor.prev();
                 break;

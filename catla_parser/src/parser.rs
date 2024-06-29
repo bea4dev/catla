@@ -2,7 +2,7 @@ pub mod statement;
 pub mod expression;
 pub mod types;
 
-use std::ops::Range;
+use std::{alloc::Allocator, ops::Range};
 use either::Either;
 use crate::{lexer::{Token, Lexer, TokenKind}, util::parser_utils::{bump_vec, impl_ast}};
 
@@ -150,7 +150,7 @@ pub enum StatementAttributeKind {
     Native,
     Acyclic,
     Open,
-    Implements
+    Override
 }
 
 pub type MemoryManageAttribute = Spanned<MemoryManageAttributeKind>;
@@ -908,5 +908,16 @@ impl<'allocator, 'input> MergedExtend for Vec<Token<'input>, &'allocator Bump> {
         if !cancel {
             self.extend(other)
         }
+    }
+}
+
+
+pub trait ContainsAttribute {
+    fn contains(&self, kind: StatementAttributeKind) -> bool;
+}
+
+impl<A: Allocator> ContainsAttribute for Vec<StatementAttribute, A> {
+    fn contains(&self, kind: StatementAttributeKind) -> bool {
+        self.iter().any(|attribute| { attribute.value == kind })
     }
 }

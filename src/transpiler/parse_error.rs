@@ -111,6 +111,15 @@ pub fn collect_parse_error_program(
                     errors,
                     context
                 );
+                if let Some(this_mutability) = &arguments.this_mutability {
+                    collect_parse_error_only_parse_result_error(
+                        &this_mutability.this_span,
+                        Expected::This,
+                        0054,
+                        errors,
+                        context
+                    );
+                }
                 for argument in arguments.arguments.iter() {
                     collect_parse_error_type_tag(&argument.type_tag, errors, warnings, context);
                 }

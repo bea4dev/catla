@@ -20,13 +20,13 @@ import test::test_module2
 class TestClazz<T> {
     let field: T?
 
-    function test() -> TestClazz<T> {
+    function test(let this) -> TestClazz<T> {
         return new TestClass {
             field: null
         }
     }
 
-    function a() -> T {}
+    function a(let this) -> T {}
 }
 
 type TestClass<T> = TestClazz<T>
@@ -54,11 +54,11 @@ function <T, E> error(error: E) -> T!<E> {}
 
 interface TestInterface1 {}
 interface TestInterface2 {
-    function test2() -> int {}
+    function test2(let this) -> int {}
 }
 
 implements<T> TestInterface2 for T where T: TestInterface1 {
-    function test2() -> int {}
+    function test2(let this) -> int {}
 }
 
 function <T> aaa(i: T) where T: TestInterface1 {

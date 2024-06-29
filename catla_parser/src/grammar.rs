@@ -26,7 +26,7 @@ bnf_rules!{
 
     memory_manage_attr  ::= "new" | "drop" | "mutex"
 
-    statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" | "implements" }
+    statement_attribute ::= { "static" | "private" | "suspend" | "native" | "acyclic" | "open" | "override" }
 
     user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define [ line_feed ] ]
                             [ super_type_info ] [ where_clause ] block
@@ -64,7 +64,7 @@ bnf_rules!{
     primary             ::= primary_left { primary_right }
     primary_left        ::= ( simple_primary [ ":" generics_info ] [ function_call ] | new_expression | if_expression | loop_expression ) [ mapping_operator ]
     primary_right       ::= ( "." | "::" ) [ line_feed ] ( literal [ ":" generics_info ] [ function_call ] | mapping_operator )
-    simple_primary      ::= "(" expression ")" | literal | "null" | "true" | "false"
+    simple_primary      ::= "(" expression ")" | literal | "null" | "true" | "false" | "this" | "This"
     mapping_operator    ::= "?" | "?" "!" | "!" | "!" "!" | ( "?" | "!" ) ":" block
 
     if_expression       ::= if_statement { "else" ( if_statement | block ) }
@@ -95,7 +95,7 @@ bnf_rules!{
 
 regex!(pub number_literal_regex r"^\d+(\.\d+)?$");
 
-
+#[allow(dead_code)]
 fn literal_tokenizer(source: &Vec<char>, mut current_position: usize) -> usize {
     let mut iteration_count = 0;
     loop {
@@ -112,6 +112,7 @@ fn literal_tokenizer(source: &Vec<char>, mut current_position: usize) -> usize {
     return iteration_count; 
 }
 
+#[allow(dead_code)]
 fn line_feed_tokenizer(source: &Vec<char>, mut current_position: usize) -> usize {
     let mut iteration_count = 0;
     loop {

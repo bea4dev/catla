@@ -12,7 +12,11 @@ fn test() {
 
     let source = 
 "
-type IntMap<T> = std::collection::HashMap<int, T>
+class TestClass {
+    override function test(var this) {}
+}
+
+function test() {}
 ";
 
     let allocator = Bump::new();

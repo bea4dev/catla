@@ -73,7 +73,7 @@ function bbb(i: TestInterface1) {
 let source1 = 
 "
 ";
-//N = Succ<Succ<Zero>>, M = Zero, Sum = Succ<Succ<Succ<Zero>>>
+
     let settings = TranspileSettings {
         lang: "ja_JP".to_string(),
         num_threads: num_cpus::get()

@@ -208,6 +208,7 @@ async fn transpile_module(
         &module_entity_type_map,
         &merged_implements_infos,
         &None,
+        &Vec::new(),
         false,
         &mut type_environment,
         &mut implicit_convert_map,

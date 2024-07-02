@@ -951,6 +951,7 @@ pub(crate) fn type_inference_program<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
+    implements_interfaces: &Vec<Type>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
@@ -1108,6 +1109,7 @@ pub(crate) fn type_inference_program<'allocator>(
                             module_entity_type_map,
                             global_implements_info_set,
                             &current_scope_implements_info_set,
+                            &Vec::new(),
                             false,
                             &mut type_environment,
                             implicit_convert_map,
@@ -1138,6 +1140,8 @@ pub(crate) fn type_inference_program<'allocator>(
                     current_scope_implements_info_set.clone()
                 };
 
+                let mut implements_interfaces = Vec::new();
+
                 if let Some(super_type_info) = &data_struct_define.super_type_info {
                     let mut implements_infos = current_scope_implements_info_set.as_ref()
                         .map(|implements_infos| { implements_infos.implements_infos.clone() })
@@ -1149,6 +1153,8 @@ pub(crate) fn type_inference_program<'allocator>(
                         }));
 
                         let super_type = module_entity_type_map.get(&EntityID::from(type_info)).unwrap();
+
+                        implements_interfaces.push(super_type.clone());
 
                         type_environment.add_check_type_info_bounds(
                             Spanned::new(super_type.clone(), type_info.span.clone()),
@@ -1183,6 +1189,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_entity_type_map,
                         global_implements_info_set,
                         &current_scope_implements_info_set,
+                        &implements_interfaces,
                         false,
                         &mut type_environment,
                         implicit_convert_map,
@@ -1217,8 +1224,12 @@ pub(crate) fn type_inference_program<'allocator>(
                     );
                 }
 
+                let mut implements_interfaces = Vec::new();
+                
                 if let Ok(interface_info) = &implements.interface {
                     let interface = module_entity_type_map.get(&EntityID::from(interface_info)).unwrap();
+
+                    implements_interfaces.push(interface.clone());
 
                     type_environment.add_check_type_info_bounds(
                         Spanned::new(interface.clone(), interface_info.span.clone()),
@@ -1239,6 +1250,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         module_entity_type_map,
                         global_implements_info_set,
                         &current_scope_implements_info_set,
+                        &implements_interfaces,
                         force_be_expression,
                         type_environment,
                         implicit_convert_map,
@@ -1629,6 +1641,7 @@ fn type_inference_expression<'allocator>(
                             module_entity_type_map,
                             global_implements_info_set,
                             current_scope_implements_info_set,
+                            &Vec::new(),
                             false,
                             type_environment,
                             implicit_convert_map,
@@ -2957,6 +2970,7 @@ fn type_inference_primary_left<'allocator>(
                     module_entity_type_map,
                     global_implements_info_set,
                     current_scope_implements_info_set,
+                    &Vec::new(),
                     force_be_expression,
                     type_environment,
                     implicit_convert_map,
@@ -3039,6 +3053,7 @@ fn type_inference_blocks<'allocator>(
                 module_entity_type_map,
                 global_implements_info_set,
                 current_scope_implements_info_set,
+                &Vec::new(),
                 force_be_expression,
                 type_environment,
                 implicit_convert_map,
@@ -3078,6 +3093,7 @@ fn type_inference_blocks<'allocator>(
             module_entity_type_map,
             global_implements_info_set,
             current_scope_implements_info_set,
+            &Vec::new(),
             force_be_expression,
             type_environment,
             implicit_convert_map,
@@ -3517,6 +3533,7 @@ fn type_inference_mapping_operator<'allocator>(
             module_entity_type_map,
             global_implements_info_set,
             current_scope_implements_info_set,
+            &Vec::new(),
             true,
             type_environment,
             implicit_convert_map,

@@ -9,7 +9,7 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfo, ImplementsInfoSet, LocalGenericID, Type, WhereBound, WithDefineInfo}, user_type_element_collector::get_type};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, GenericType, ImplementsInfo, ImplementsInfoSet, LocalGenericID, OverrideElementsEnvironment, Type, WhereBound, WithDefineInfo}, user_type_element_collector::get_type};
 
 
 
@@ -951,7 +951,7 @@ pub(crate) fn type_inference_program<'allocator>(
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-    implements_interfaces: &Vec<Type>,
+    implements_interfaces: &Vec<Spanned<Type>>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
@@ -962,6 +962,8 @@ pub(crate) fn type_inference_program<'allocator>(
 ) {
     let mut has_type = false;
     let mut var_type_and_spans = Vec::new_in(allocator);
+
+    let mut override_elements_environment = OverrideElementsEnvironment::new(implements_interfaces);
 
     for i in 0..ast.statements.len() {
         let statement = match &ast.statements[i] {
@@ -1154,7 +1156,7 @@ pub(crate) fn type_inference_program<'allocator>(
 
                         let super_type = module_entity_type_map.get(&EntityID::from(type_info)).unwrap();
 
-                        implements_interfaces.push(super_type.clone());
+                        implements_interfaces.push(Spanned::new(super_type.clone(), type_info.span.clone()));
 
                         type_environment.add_check_type_info_bounds(
                             Spanned::new(super_type.clone(), type_info.span.clone()),
@@ -1229,7 +1231,7 @@ pub(crate) fn type_inference_program<'allocator>(
                 if let Ok(interface_info) = &implements.interface {
                     let interface = module_entity_type_map.get(&EntityID::from(interface_info)).unwrap();
 
-                    implements_interfaces.push(interface.clone());
+                    implements_interfaces.push(Spanned::new(interface.clone(), interface_info.span.clone()));
 
                     type_environment.add_check_type_info_bounds(
                         Spanned::new(interface.clone(), interface_info.span.clone()),

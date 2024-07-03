@@ -156,6 +156,25 @@ impl Type {
         }
     }
 
+    pub(crate) fn get_elements_with_replaced_generic(&self) -> Vec<(String, WithDefineInfo<Type>)> {
+        match self {
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
+                let element_types = {
+                    let element_type_map = user_type_info.element_types.lock().unwrap();
+                    element_type_map.iter().map(|(name, ty)| { (name.clone(), ty.clone()) }).collect::<Vec<_>>()
+                };
+
+                element_types.into_iter().map(|(name, ty)| {
+                    let ty = ty.map(|ty| {
+                        Type::get_type_with_replaced_generics(&ty, &user_type_info.generics_define, generics)
+                    });
+                    (name, ty)
+                }).collect()
+            },
+            _ => Vec::new()
+        }
+    }
+
     pub(crate) fn get_where_bounds_with_replaced_generic(&self) -> Option<Vec<WhereBound>> {
         match self {
             Type::UserType { user_type_info, generics, generics_span: _ } => {
@@ -984,4 +1003,53 @@ impl ImplementsInfoSet {
 pub(crate) struct CollectedImplementation {
     pub implements_info: ImplementsInfo,
     pub local_generics: Vec<Type>
+}
+
+
+pub(crate) struct OverrideElementsEnvironment {
+    elements: Vec<(Spanned<Type>, String, WithDefineInfo<Type>)>,
+    is_found_flags: Vec<bool>
+}
+
+impl OverrideElementsEnvironment {
+    
+    pub fn new(implements_interfaces: &Vec<Spanned<Type>>) -> Self {
+        let mut elements = Vec::new();
+        for interface in implements_interfaces.iter() {
+            for element in interface.value.get_elements_with_replaced_generic() {
+                elements.push((interface.clone(), element.0, element.1));
+            }
+        }
+        
+        Self {
+            elements,
+            is_found_flags: Vec::new()
+        }
+    }
+
+    /// TODO : impl fast type compare
+    /// Actually, type_environment is not requierd.
+    pub fn check(&mut self, element_type: &Type, type_environment: &mut TypeEnvironment) -> bool {
+        for ((_, _, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
+            if type_environment.unify_type(
+                &ty.value,
+                &(0..0),
+                element_type,
+                &(0..0),
+                true
+            ).is_ok() {
+                *is_found = true;
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn collect_not_impl(self) -> Vec<(Spanned<Type>, String, WithDefineInfo<Type>)> {
+        self.elements.into_iter().zip(self.is_found_flags.into_iter())
+            .filter(|(_, is_found)| { *is_found })
+            .map(|(element, _)| { element })
+            .collect()
+    }
+
 }

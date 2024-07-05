@@ -482,7 +482,13 @@ impl<'allocator> TypeEnvironment<'allocator> {
                         false
                     } else {
                         for (first, second) in first_function_info.argument_types.iter().zip(second_function_info.argument_types.iter()) {
-                            
+                            self.unify_type_recursive(
+                                first,
+                                first_span,
+                                second,
+                                second_span,
+                                allow_unknown
+                            )?;
                         }
 
                         self.unify_generics(first_generics, first_span, second_generics, second_span, allow_unknown)?;

@@ -1020,10 +1020,11 @@ impl OverrideElementsEnvironment {
                 elements.push((interface.clone(), element.0, element.1));
             }
         }
+        let length = elements.len();
         
         Self {
             elements,
-            is_found_flags: Vec::new()
+            is_found_flags: vec![false; length]
         }
     }
 
@@ -1032,6 +1033,9 @@ impl OverrideElementsEnvironment {
     /// Actually, type_environment is not requierd.
     pub fn check(&mut self, element_name: &str, element_type: &Type, type_environment: &mut TypeEnvironment) -> bool {
         for ((_, name, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
+            dbg!(name, element_name);
+            dbg!(&ty.value, element_type);
+            
             if name == element_name && type_environment.unify_type(
                 &ty.value,
                 &(0..0),

@@ -130,15 +130,13 @@ pub enum StatementAST<'allocator, 'input> {
 pub struct FunctionDefine<'allocator, 'input> {
     pub attributes: Vec<StatementAttribute, &'allocator Bump>,
     pub generics_define: Option<GenericsDefine<'allocator, 'input>>,
-    pub name: FunctionName<'allocator, 'input>,
+    pub name: LiteralResult<'allocator, 'input>,
     pub args: FunctionArguments<'allocator, 'input>,
     pub type_tag: Option<TypeTag<'allocator, 'input>>,
     pub where_clause: Option<WhereClause<'allocator, 'input>>,
     pub block: BlockRecovered<'allocator, 'input>,
     pub span: Range<usize>
 }
-
-pub type FunctionName<'allocator, 'input> = ParseResult<'allocator, 'input, Either<Literal<'input>, MemoryManageAttribute>>;
 
 pub type StatementAttribute = Spanned<StatementAttributeKind>;
 
@@ -151,15 +149,6 @@ pub enum StatementAttributeKind {
     Acyclic,
     Open,
     Override
-}
-
-pub type MemoryManageAttribute = Spanned<MemoryManageAttributeKind>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MemoryManageAttributeKind {
-    New,
-    Drop,
-    Mutex
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -912,12 +901,21 @@ impl<'allocator, 'input> MergedExtend for Vec<Token<'input>, &'allocator Bump> {
 }
 
 
-pub trait ContainsAttribute {
+pub trait StatementAttributes {
     fn contains(&self, kind: StatementAttributeKind) -> bool;
+    fn get_span(&self, kind: StatementAttributeKind) -> Option<Range<usize>>;
 }
 
-impl<A: Allocator> ContainsAttribute for Vec<StatementAttribute, A> {
+impl<A: Allocator> StatementAttributes for Vec<StatementAttribute, A> {
+    
     fn contains(&self, kind: StatementAttributeKind) -> bool {
         self.iter().any(|attribute| { attribute.value == kind })
     }
+
+    fn get_span(&self, kind: StatementAttributeKind) -> Option<Range<usize>> {
+        self.iter()
+            .find(|attribute| { attribute.value == kind })
+            .map(|attribute| { attribute.span.clone() })
+    }
+
 }

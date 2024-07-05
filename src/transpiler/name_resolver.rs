@@ -188,24 +188,22 @@ pub(crate) fn name_resolve_program<'allocator>(
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
-                if let Ok(function_name) = &function_define.name {
-                    if let Left(name) = function_name {
-                        let entity_id = EntityID::from(function_define);
-                        let define_info = DefineWithName {
-                            entity_id,
-                            span: name.span.clone(),
-                            define_kind: DefineKind::Function
-                        };
+                if let Ok(name) = &function_define.name {
+                    let entity_id = EntityID::from(function_define);
+                    let define_info = DefineWithName {
+                        entity_id,
+                        span: name.span.clone(),
+                        define_kind: DefineKind::Function
+                    };
 
-                        if let Some(already_exists) = name_environment.get_name_define_info(name.value, name_environments) {
-                            errors.push(NameAlreadyExists::new(
-                                define_info.span.clone(),
-                                already_exists.define_info.span.clone()
-                            ));
-                        } else {
-                            let name = String::from_str_in(name.value, allocator);
-                            name_environment.set_name_define_info(name, define_info);
-                        }
+                    if let Some(already_exists) = name_environment.get_name_define_info(name.value, name_environments) {
+                        errors.push(NameAlreadyExists::new(
+                            define_info.span.clone(),
+                            already_exists.define_info.span.clone()
+                        ));
+                    } else {
+                        let name = String::from_str_in(name.value, allocator);
+                        name_environment.set_name_define_info(name, define_info);
                     }
                 }
             },

@@ -58,7 +58,7 @@ interface TestInterface2 {
 }
 
 implements<T> TestInterface2 for T where T: TestInterface1 {
-    function test2(let this) -> int {}
+    override function test2(let this) -> int {}
 }
 
 function <T> aaa(i: T) where T: TestInterface1 {

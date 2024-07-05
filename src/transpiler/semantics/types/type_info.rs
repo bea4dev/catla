@@ -1027,11 +1027,12 @@ impl OverrideElementsEnvironment {
         }
     }
 
-    /// TODO : impl fast type compare
+    /// * TODO : impl fast type compare
+    /// 
     /// Actually, type_environment is not requierd.
-    pub fn check(&mut self, element_type: &Type, type_environment: &mut TypeEnvironment) -> bool {
-        for ((_, _, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
-            if type_environment.unify_type(
+    pub fn check(&mut self, element_name: &str, element_type: &Type, type_environment: &mut TypeEnvironment) -> bool {
+        for ((_, name, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
+            if name == element_name && type_environment.unify_type(
                 &ty.value,
                 &(0..0),
                 element_type,

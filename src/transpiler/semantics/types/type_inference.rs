@@ -2,7 +2,7 @@ use std::{alloc::Allocator, ops::{Deref, Range}, sync::Arc};
 
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, StatementAttributes, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind};
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -22,6 +22,8 @@ const NUMBER_OF_GENERICS_MISMATCH_ERROR: usize = 0048;
 const WHERE_BOUNDS_NOT_SATISFIED_ERROR: usize = 0050;
 const DUPLICATED_ELEMENT_ERROR: usize = 0051;
 const UNRESOLVED_INTERFACE: usize = 0052;
+const NO_OVERRIDE_TARGET_ERROR: usize = 0056;
+const INVALID_OVERRIDE_ERROR: usize = 0057;
 
 
 pub(crate) struct TypeEnvironment<'allocator> {
@@ -476,11 +478,15 @@ impl<'allocator> TypeEnvironment<'allocator> {
             },
             Type::Function { function_info: first_function_info, generics: first_generics } => {
                 if let Type::Function { function_info: second_function_info, generics: second_generics } = second_type {
-                    if first_function_info == second_function_info {
+                    if first_function_info.argument_types.len() != second_function_info.argument_types.len() {
+                        false
+                    } else {
+                        for (first, second) in first_function_info.argument_types.iter().zip(second_function_info.argument_types.iter()) {
+                            
+                        }
+
                         self.unify_generics(first_generics, first_span, second_generics, second_span, allow_unknown)?;
                         true
-                    } else {
-                        false
                     }
                 } else {
                     false
@@ -1074,6 +1080,38 @@ pub(crate) fn type_inference_program<'allocator>(
             },
             StatementAST::FunctionDefine(function_define) => {
                 let function_type = module_entity_type_map.get(&EntityID::from(function_define)).unwrap();
+
+                if let Ok(name) = &function_define.name {
+                    if function_define.attributes.contains(StatementAttributeKind::Override) {
+                        let override_span = function_define.attributes.get_span(StatementAttributeKind::Override).unwrap();
+
+                        if implements_interfaces.is_empty() {
+                            let mut error = TranspileError::new(SimpleError::new(
+                                INVALID_OVERRIDE_ERROR,
+                                override_span.clone(),
+                                vec![],
+                                vec![(override_span.clone(), Color::Red)]
+                            ));
+                            error.add_advice(
+                                context.module_name.clone(),
+                                Advice::Remove { span: override_span }
+                            );
+                            errors.push(error);
+                        } else if !override_elements_environment.check(name.value, function_type, type_environment) {
+                            let interface_span_start = implements_interfaces.first().unwrap().span.start;
+                            let interface_span_end = implements_interfaces.last().unwrap().span.end;
+                            let interface_span = interface_span_start..interface_span_end;
+
+                            let error = TranspileError::new(SimpleError::new(
+                                NO_OVERRIDE_TARGET_ERROR,
+                                override_span.clone(),
+                                vec![],
+                                vec![(override_span, Color::Red), (interface_span, Color::Yellow)]
+                            ));
+                            errors.push(error);
+                        }
+                    }
+                }
 
                 if let Type::Function { function_info, generics: _ } = function_type {
                     let mut type_environment = TypeEnvironment::new_with_return_type(

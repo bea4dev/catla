@@ -321,10 +321,9 @@ fn parse_function_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
     let name_kind = name_token.get_kind();
 
     let name = match name_kind {
-        TokenKind::Literal => Ok(Either::Left(Spanned::new(name_token.unwrap().text, name_token.unwrap().span.clone()))),
-        TokenKind::New     => Ok(Either::Right(Spanned::new(MemoryManageAttributeKind::New, name_token.unwrap().span.clone()))),
-        TokenKind::Drop    => Ok(Either::Right(Spanned::new(MemoryManageAttributeKind::Drop, name_token.unwrap().span.clone()))),
-        TokenKind::Mutex   => Ok(Either::Right(Spanned::new(MemoryManageAttributeKind::Mutex, name_token.unwrap().span.clone()))),
+        TokenKind::Literal | TokenKind::New | TokenKind::Drop | TokenKind::Mutex => {
+            Ok(Spanned::new(name_token.unwrap().text, name_token.unwrap().span.clone()))
+        },
         _ => Err(unexpected_token_error(allocator, name_token))
     };
 

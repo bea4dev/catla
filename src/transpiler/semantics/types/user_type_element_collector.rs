@@ -1,7 +1,7 @@
 use std::{mem, ops::DerefMut, sync::Arc};
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MemoryManageAttributeKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo, WhereClause};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo, WhereClause};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -771,21 +771,7 @@ fn get_function_type_and_name<'allocator>(
     module_entity_type_map.insert(EntityID::from(ast), function_type.clone());
 
     match &ast.name {
-        Ok(name) => {
-            let name = match name {
-                Either::Left(name) => name.clone(),
-                Either::Right(attribute) => {
-                    attribute.clone().map(|value| {
-                        match value {
-                            MemoryManageAttributeKind::New => "new",
-                            MemoryManageAttributeKind::Drop => "drop",
-                            MemoryManageAttributeKind::Mutex => "mutex",
-                        }
-                    })
-                },
-            };
-            Some((name, function_type))
-        },
+        Ok(name) => Some((name.clone(), function_type)),
         _ => None
     }
 }

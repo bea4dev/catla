@@ -223,6 +223,23 @@ impl Type {
             _ => None
         }
     }
+    
+    pub(crate) fn replace_method_instance_type(&self, instance_type: &Type) -> Type {
+        match self {
+            Type::Function { function_info, generics } => {
+                let mut new_function_type = function_info.as_ref().clone();
+                if !new_function_type.argument_types.is_empty() {
+                    new_function_type.argument_types[0] = instance_type.clone();
+                }
+
+                Type::Function {
+                    function_info: Arc::new(new_function_type),
+                    generics: generics.clone()
+                }
+            },
+            _ => self.clone()
+        }
+    }
 
     pub(crate) fn as_original_type(&self) -> Type {
         match self {
@@ -433,7 +450,7 @@ pub struct Bound {
 }
 
 #[derive(Derivative)]
-#[derivative(Debug, PartialEq, Eq)]
+#[derivative(Debug, PartialEq, Eq, Clone)]
 pub struct FunctionType {
     pub is_extension: bool,
     pub generics_define: Vec<Arc<GenericType>>,
@@ -1032,14 +1049,13 @@ impl OverrideElementsEnvironment {
     /// 
     /// Actually, type_environment is not requierd.
     pub fn check(&mut self, element_name: &str, element_type: &Type, type_environment: &mut TypeEnvironment) -> bool {
-        for ((_, name, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
-            dbg!(name, element_name);
-            dbg!(&ty.value, element_type);
-            
+        for ((interface, name, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
+            let element_type = element_type.replace_method_instance_type(&interface.value);
+
             if name == element_name && type_environment.unify_type(
                 &ty.value,
                 &(0..0),
-                element_type,
+                &element_type,
                 &(0..0),
                 true
             ).is_ok() {

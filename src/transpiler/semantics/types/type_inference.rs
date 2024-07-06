@@ -1175,15 +1175,15 @@ pub(crate) fn type_inference_program<'allocator>(
                     if let Type::UserType { user_type_info, generics: _, generics_span: _ } = user_type {
                         get_and_check_where_bounds_implements_info(
                             &user_type_info.where_bounds.freeze_and_get(),
-                            current_scope_implements_info_set,
+                            &None,
                             type_environment,
                             context
                         )
                     } else {
-                        current_scope_implements_info_set.clone()
+                        None
                     }
                 } else {
-                    current_scope_implements_info_set.clone()
+                    None
                 };
 
                 let mut implements_interfaces = Vec::new();
@@ -1253,7 +1253,7 @@ pub(crate) fn type_inference_program<'allocator>(
                 let current_scope_implements_info_set = if let Some(implements_info) = implements_info {
                     get_and_check_where_bounds_implements_info(
                         &implements_info.where_bounds,
-                        current_scope_implements_info_set,
+                        &None,
                         type_environment,
                         context
                     )

@@ -531,7 +531,9 @@ pub enum SimplePrimary<'allocator, 'input> {
     Identifier(Literal<'input>),
     NullKeyword(Range<usize>),
     TrueKeyword(Range<usize>),
-    FalseKeyword(Range<usize>)
+    FalseKeyword(Range<usize>),
+    ThisKeyword(Literal<'input>),
+    LargeThisKeyword(Literal<'input>)
 }
 
 impl SimplePrimary<'_, '_> {
@@ -543,7 +545,9 @@ impl SimplePrimary<'_, '_> {
             SimplePrimary::Identifier(literal) => literal.span.clone(),
             SimplePrimary::NullKeyword(span) => span.clone(),
             SimplePrimary::TrueKeyword(span) => span.clone(),
-            SimplePrimary::FalseKeyword(span) => span.clone()
+            SimplePrimary::FalseKeyword(span) => span.clone(),
+            SimplePrimary::ThisKeyword(literal) => literal.span.clone(),
+            SimplePrimary::LargeThisKeyword(literal) => literal.span.clone()
         }
     }
 }
@@ -792,6 +796,13 @@ fn parse_literal<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input
                 None
             }
         },
+        _ => None
+    }
+}
+
+fn parse_as_literal<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Literal<'input>> {
+    return match cursor.next() {
+        Some(next) => Some(Spanned::new(next.text, next.span.clone())),
         _ => None
     }
 }

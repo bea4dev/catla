@@ -77,14 +77,14 @@ bnf_rules!{
 
     function_call       ::= "(" [ [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
 
-    new_expression      ::= "new" [ "acyclic" ] literal { "::" [ line_feed ] literal } field_assign
+    new_expression      ::= "new" [ "acyclic" ] ( literal | "This" ) { "::" [ line_feed ] literal } field_assign
     field_assign        ::= "{" [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] } "}"
 
     return_expression   ::= "return" [ expression ]
 
     type_tag            ::= ":" type_info
     function_type_tag   ::= "->" type_info
-    type_info           ::= literal { "::" [ line_feed ] literal } [ generics_info ] { type_attribute }
+    type_info           ::= ( literal | "This" ) { "::" [ line_feed ] literal } [ generics_info ] { type_attribute }
     type_attribute      ::= "?" | ( "!" [ generics_info ] )
     generics_info       ::= "<" [ line_feed ] [ type_info [ line_feed ] ] { "," [ line_feed ] [ type_info [ line_feed ] ] } ">"
 

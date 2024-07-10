@@ -2,7 +2,7 @@ use std::{alloc::Allocator, ops::{Deref, Range}, sync::Arc};
 
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, StatementAttributes, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum};
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -63,6 +63,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         &mut self,
         type_span: Range<usize>,
         generic_type: Option<Arc<GenericType>>,
+        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>
     ) -> LocalGenericID {
         self.current_generics_id += 1;
@@ -78,6 +79,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 type_span: type_span.clone(),
                 ty: Spanned::new(Type::LocalGeneric(generic_id), type_span),
                 generic_define: generics_define,
+                scope_this_type: current_scope_this_type.clone(),
                 scope_implements_info_set: current_scope_implements_info_set.clone()
             });
         }
@@ -88,6 +90,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
     pub fn get_user_or_function_type_with_local_generic_id(
         &mut self,
         ty: Spanned<Type>,
+        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         register_bounds_check: bool
     ) -> Spanned<Type> {
@@ -107,6 +110,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             let generic_id = self.new_local_generic_id(
                 ty.span.clone(),
                 Some(generics_define.clone()),
+                current_scope_this_type,
                 current_scope_implements_info_set
             );
             generics.push(Type::LocalGeneric(generic_id));
@@ -130,6 +134,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     type_span: ty.span.clone(),
                     target_type: where_bound.target_type.value,
                     bounds: where_bound.bounds,
+                    scope_this_type: current_scope_this_type.clone(),
                     scope_implements_info_set: current_scope_implements_info_set.clone()
                 });
             }
@@ -691,6 +696,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             Type::Result { value, error } => {
                 format!("{}!<{}>", self.get_type_display_string(value), self.get_type_display_string(error))
             },
+            Type::This => "This".to_string(),
             Type::Unknown => "unknown".to_string()
         }
     }
@@ -770,6 +776,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     type_span,
                     ty,
                     generic_define: generics_define,
+                    scope_this_type,
                     scope_implements_info_set
                 } => {
                     let type_resolved = if let Type::LocalGeneric(generic_id) = &ty.value {
@@ -782,6 +789,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
                         &type_resolved.value,
                         &generics_define.bounds.freeze_and_get(),
                         self,
+                        scope_this_type,
                         scope_implements_info_set,
                         false
                     );
@@ -811,12 +819,14 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     type_span,
                     target_type,
                     bounds,
+                    scope_this_type,
                     scope_implements_info_set
                 } => {
                     let result = global_implements_info_set.is_satisfied(
                         target_type,
                         bounds,
                         self,
+                        scope_this_type,
                         scope_implements_info_set,
                         false
                     );
@@ -876,6 +886,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
     fn add_check_type_info_bounds(
         &mut self,
         ty: Spanned<Type>,
+        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>
     ) {
         if let Type::UserType { user_type_info, generics, generics_span } = &ty.value {
@@ -903,11 +914,13 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     type_span: ty.span.clone(),
                     ty: Spanned::new(generic.clone(), generic_span.clone()),
                     generic_define: generic_define.clone(),
+                    scope_this_type: current_scope_this_type.clone(),
                     scope_implements_info_set: current_scope_implements_info_set.clone()
                 });
 
                 self.add_check_type_info_bounds(
                     Spanned::new(generic.clone(), generic_span),
+                    current_scope_this_type,
                     current_scope_implements_info_set
                 );
             }
@@ -917,6 +930,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     type_span: ty.span.clone(),
                     target_type: where_bound.target_type.value,
                     bounds: where_bound.bounds,
+                    scope_this_type: current_scope_this_type.clone(),
                     scope_implements_info_set: current_scope_implements_info_set.clone()
                 });
             }
@@ -939,12 +953,14 @@ pub(crate) enum GenericsBoundCheck {
         type_span: Range<usize>,
         ty: Spanned<Type>,
         generic_define: Arc<GenericType>,
+        scope_this_type: Type,
         scope_implements_info_set: Option<Arc<ImplementsInfoSet>>
     },
     Where {
         type_span: Range<usize>,
         target_type: Type,
         bounds: Vec<Arc<Bound>>,
+        scope_this_type: Type,
         scope_implements_info_set: Option<Arc<ImplementsInfoSet>>
     }
 }
@@ -962,6 +978,7 @@ pub(crate) fn type_inference_program<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     implements_interfaces: &Vec<Spanned<Type>>,
     force_be_expression: bool,
@@ -996,6 +1013,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     false,
                     type_environment,
@@ -1017,6 +1035,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         generics_map,
                         module_entity_type_map,
                         global_implements_info_set,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         true,
                         type_environment,
@@ -1046,6 +1065,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     false,
                     type_environment,
@@ -1067,6 +1087,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         generics_map,
                         module_entity_type_map,
                         global_implements_info_set,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         false,
                         type_environment,
@@ -1137,6 +1158,7 @@ pub(crate) fn type_inference_program<'allocator>(
 
                     let current_scope_implements_info_set = get_and_check_where_bounds_implements_info(
                         &function_info.where_bounds.freeze_and_get(),
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         &mut type_environment,
                         context
@@ -1154,6 +1176,7 @@ pub(crate) fn type_inference_program<'allocator>(
                             generics_map,
                             module_entity_type_map,
                             global_implements_info_set,
+                            current_scope_this_type,
                             &current_scope_implements_info_set,
                             &Vec::new(),
                             false,
@@ -1169,26 +1192,54 @@ pub(crate) fn type_inference_program<'allocator>(
                     type_environment.collect_info(implicit_convert_map, global_implements_info_set, errors, warnings);
                 }
             },
-            StatementAST::UserTypeDefine(data_struct_define) => {
-                let current_scope_implements_info_set = if let Ok(name) = &data_struct_define.name {
-                    let user_type = user_type_map.get(name.value).unwrap();
-                    if let Type::UserType { user_type_info, generics: _, generics_span: _ } = user_type {
-                        get_and_check_where_bounds_implements_info(
-                            &user_type_info.where_bounds.freeze_and_get(),
-                            &None,
-                            type_environment,
-                            context
-                        )
-                    } else {
-                        None
-                    }
+            StatementAST::UserTypeDefine(user_type_define) => {
+                let user_type = if let Ok(name) = &user_type_define.name {
+                    user_type_map.get(name.value).unwrap().clone()
+                } else {
+                    Type::Unknown
+                };
+
+                let this_type = if user_type_define.kind.value == UserTypeKindEnum::Interface {
+                    Type::This
+                } else {
+                    user_type.clone()
+                };
+
+                let mut current_scope_implements_info_set = if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &user_type {
+                    get_and_check_where_bounds_implements_info(
+                        &user_type_info.where_bounds.freeze_and_get(),
+                        &this_type,
+                        &None,
+                        type_environment,
+                        context
+                    )
                 } else {
                     None
                 };
 
+                if user_type_define.kind.value == UserTypeKindEnum::Interface {
+                    if let Ok(name) = &user_type_define.name {
+                        let mut implements_info_set = current_scope_implements_info_set.as_ref()
+                            .map(|implements_info_set| { implements_info_set.deref().clone() })
+                            .unwrap_or_default();
+                        implements_info_set.insert(
+                            EntityID::from(user_type_define),
+                            ImplementsInfo {
+                                generics: Arc::new(Vec::new()),
+                                interface: Spanned::new(user_type.clone(), name.span.clone()),
+                                concrete: Spanned::new(Type::This, name.span.clone()),
+                                module_name: context.module_name.clone(),
+                                where_bounds: Arc::new(Vec::new()),
+                                element_types: Arc::new(FxHashMap::default())
+                            }
+                        );
+                        current_scope_implements_info_set = Some(Arc::new(implements_info_set));
+                    }
+                }
+
                 let mut implements_interfaces = Vec::new();
 
-                if let Some(super_type_info) = &data_struct_define.super_type_info {
+                if let Some(super_type_info) = &user_type_define.super_type_info {
                     let mut implements_infos = current_scope_implements_info_set.as_ref()
                         .map(|implements_infos| { implements_infos.implements_infos.clone() })
                         .unwrap_or(FxHashMap::default());
@@ -1204,10 +1255,11 @@ pub(crate) fn type_inference_program<'allocator>(
 
                         type_environment.add_check_type_info_bounds(
                             Spanned::new(super_type.clone(), type_info.span.clone()),
+                            &this_type,
                             &current_scope_implements_info_set
                         );
 
-                        if let Ok(name) = &data_struct_define.name {
+                        if let Ok(name) = &user_type_define.name {
                             let user_type = user_type_map.get(name.value).unwrap();
                             implements_infos.insert(EntityID::from(type_info), ImplementsInfo {
                                 generics: Arc::new(Vec::new()),
@@ -1221,7 +1273,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     }
                 }
 
-                if let Some(block) = &data_struct_define.block.value {
+                if let Some(block) = &user_type_define.block.value {
                     let mut type_environment = TypeEnvironment::new(allocator);
 
                     type_inference_program(
@@ -1234,6 +1286,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         generics_map,
                         module_entity_type_map,
                         global_implements_info_set,
+                        &this_type,
                         &current_scope_implements_info_set,
                         &implements_interfaces,
                         false,
@@ -1249,10 +1302,17 @@ pub(crate) fn type_inference_program<'allocator>(
                 }
             },
             StatementAST::Implements(implements) => {
+                let concrete = if let Ok(target_type) = &implements.target_user_type {
+                    module_entity_type_map.get(&EntityID::from(target_type)).unwrap().clone()
+                } else {
+                    Type::Unknown
+                };
+
                 let implements_info  = global_implements_info_set.get(EntityID::from(implements));
                 let current_scope_implements_info_set = if let Some(implements_info) = implements_info {
                     get_and_check_where_bounds_implements_info(
                         &implements_info.where_bounds,
+                        &concrete,
                         &None,
                         type_environment,
                         context
@@ -1262,10 +1322,9 @@ pub(crate) fn type_inference_program<'allocator>(
                 };
                 
                 if let Ok(target_type) = &implements.target_user_type {
-                    let concrete = module_entity_type_map.get(&EntityID::from(target_type)).unwrap();
-
                     type_environment.add_check_type_info_bounds(
                         Spanned::new(concrete.clone(), target_type.span.clone()),
+                        &concrete,
                         &current_scope_implements_info_set
                     );
                 }
@@ -1279,6 +1338,7 @@ pub(crate) fn type_inference_program<'allocator>(
 
                     type_environment.add_check_type_info_bounds(
                         Spanned::new(interface.clone(), interface_info.span.clone()),
+                        &concrete,
                         &current_scope_implements_info_set
                     );
                 }
@@ -1295,6 +1355,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         generics_map,
                         module_entity_type_map,
                         global_implements_info_set,
+                        &concrete,
                         &current_scope_implements_info_set,
                         &implements_interfaces,
                         force_be_expression,
@@ -1320,6 +1381,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         generics_map,
                         module_entity_type_map,
                         global_implements_info_set,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         false,
                         type_environment,
@@ -1346,6 +1408,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     force_be_expression,
                     type_environment,
@@ -1397,6 +1460,7 @@ pub(crate) fn type_inference_program<'allocator>(
                 if let Some(type_tag) = &variable_define.type_tag {
                     type_environment.add_check_type_info_bounds(
                         Spanned::new(tag_type.clone(), type_tag.span.clone()),
+                        current_scope_this_type,
                         current_scope_implements_info_set
                     );
                 }
@@ -1425,6 +1489,7 @@ pub(crate) fn type_inference_program<'allocator>(
                             generics_map,
                             module_entity_type_map,
                             global_implements_info_set,
+                            current_scope_this_type,
                             current_scope_implements_info_set,
                             true,
                             type_environment,
@@ -1489,6 +1554,7 @@ pub(crate) fn type_inference_program<'allocator>(
 
 fn get_and_check_where_bounds_implements_info(
     where_bounds: &Vec<WhereBound>,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     type_environment: &mut TypeEnvironment,
     context: &TranspileModuleContext
@@ -1508,12 +1574,14 @@ fn get_and_check_where_bounds_implements_info(
 
         type_environment.add_check_type_info_bounds(
             where_bound.target_type.clone(),
+            current_scope_this_type,
             &current_implements_info_set
         );
 
         for bound in where_bound.bounds.iter() {
             type_environment.add_check_type_info_bounds(
                 Spanned::new(bound.ty.clone(), bound.span.clone()),
+                current_scope_this_type,
                 &current_implements_info_set
             );
 
@@ -1542,6 +1610,7 @@ fn type_inference_expression<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
@@ -1566,6 +1635,7 @@ fn type_inference_expression<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 force_be_expression,
                 type_environment,
@@ -1592,6 +1662,7 @@ fn type_inference_expression<'allocator>(
                         generics_map,
                         module_entity_type_map,
                         global_implements_info_set,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         force_be_expression,
                         type_environment,
@@ -1633,6 +1704,7 @@ fn type_inference_expression<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     true,
                     type_environment,
@@ -1664,6 +1736,7 @@ fn type_inference_expression<'allocator>(
                             generics_map,
                             module_entity_type_map,
                             global_implements_info_set,
+                            current_scope_this_type,
                             current_scope_implements_info_set,
                             true,
                             type_environment,
@@ -1686,6 +1759,7 @@ fn type_inference_expression<'allocator>(
                             generics_map,
                             module_entity_type_map,
                             global_implements_info_set,
+                            current_scope_this_type,
                             current_scope_implements_info_set,
                             &Vec::new(),
                             false,
@@ -1714,6 +1788,7 @@ fn type_inference_and_expression<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
@@ -1736,6 +1811,7 @@ fn type_inference_and_expression<'allocator>(
         generics_map,
         module_entity_type_map,
         global_implements_info_set,
+        current_scope_this_type,
         current_scope_implements_info_set,
         force_be_expression,
         type_environment,
@@ -1762,6 +1838,7 @@ fn type_inference_and_expression<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 force_be_expression,
                 type_environment,
@@ -1802,6 +1879,7 @@ fn type_inference_eqne_expression<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
@@ -1824,6 +1902,7 @@ fn type_inference_eqne_expression<'allocator>(
         generics_map,
         module_entity_type_map,
         global_implements_info_set,
+        current_scope_this_type,
         current_scope_implements_info_set,
         force_be_expression,
         type_environment,
@@ -1850,6 +1929,7 @@ fn type_inference_eqne_expression<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 force_be_expression,
                 type_environment,
@@ -1890,6 +1970,7 @@ fn type_inference_compare_expression<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
@@ -1912,6 +1993,7 @@ fn type_inference_compare_expression<'allocator>(
         generics_map,
         module_entity_type_map,
         global_implements_info_set,
+        current_scope_this_type,
         current_scope_implements_info_set,
         force_be_expression,
         type_environment,
@@ -1938,6 +2020,7 @@ fn type_inference_compare_expression<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 force_be_expression,
                 type_environment,
@@ -1978,6 +2061,7 @@ fn type_inference_add_or_sub_expression<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
@@ -2000,6 +2084,7 @@ fn type_inference_add_or_sub_expression<'allocator>(
         generics_map,
         module_entity_type_map,
         global_implements_info_set,
+        current_scope_this_type,
         current_scope_implements_info_set,
         force_be_expression,
         type_environment,
@@ -2026,6 +2111,7 @@ fn type_inference_add_or_sub_expression<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 force_be_expression,
                 type_environment,
@@ -2066,6 +2152,7 @@ fn type_inference_mul_or_div_expression<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
@@ -2088,6 +2175,7 @@ fn type_inference_mul_or_div_expression<'allocator>(
         generics_map,
         module_entity_type_map,
         global_implements_info_set,
+        current_scope_this_type,
         current_scope_implements_info_set,
         force_be_expression,
         type_environment,
@@ -2114,6 +2202,7 @@ fn type_inference_mul_or_div_expression<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 force_be_expression,
                 type_environment,
@@ -2154,6 +2243,7 @@ fn type_inference_factor<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
@@ -2175,6 +2265,7 @@ fn type_inference_factor<'allocator>(
             generics_map,
             module_entity_type_map,
             global_implements_info_set,
+            current_scope_this_type,
             current_scope_implements_info_set,
             force_be_expression,
             type_environment,
@@ -2209,6 +2300,7 @@ fn type_inference_primary<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
@@ -2306,6 +2398,7 @@ fn type_inference_primary<'allocator>(
             
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(ty, second_expr.0.span.clone()),
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 true
             );
@@ -2326,6 +2419,7 @@ fn type_inference_primary<'allocator>(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         type_environment,
                         errors,
@@ -2351,6 +2445,7 @@ fn type_inference_primary<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     type_environment,
                     implicit_convert_map,
@@ -2384,6 +2479,7 @@ fn type_inference_primary<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     type_environment,
                     implicit_convert_map,
@@ -2417,6 +2513,7 @@ fn type_inference_primary<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     type_environment,
                     implicit_convert_map,
@@ -2482,6 +2579,7 @@ fn type_inference_primary<'allocator>(
             generics_map,
             module_entity_type_map,
             global_implements_info_set,
+            current_scope_this_type,
             current_scope_implements_info_set,
             force_be_expression,
             type_environment,
@@ -2507,6 +2605,7 @@ fn type_inference_primary<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 implicit_convert_map,
@@ -2545,6 +2644,7 @@ fn type_inference_primary_left<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
@@ -2571,6 +2671,7 @@ fn type_inference_primary_left<'allocator>(
                             generics_map,
                             module_entity_type_map,
                             global_implements_info_set,
+                            current_scope_this_type,
                             current_scope_implements_info_set,
                             force_be_expression,
                             type_environment,
@@ -2631,6 +2732,7 @@ fn type_inference_primary_left<'allocator>(
 
                                 let ty = type_environment.get_user_or_function_type_with_local_generic_id(
                                     Spanned::new(ty, identifier.span.clone()),
+                                    current_scope_this_type,
                                     current_scope_implements_info_set,
                                     true
                                 );
@@ -2670,6 +2772,7 @@ fn type_inference_primary_left<'allocator>(
                     let generic_id = type_environment.new_local_generic_id(
                         null_keyword_span.clone(),
                         None,
+                        current_scope_this_type,
                         current_scope_implements_info_set
                     );
                     type_environment.set_entity_type(
@@ -2688,6 +2791,18 @@ fn type_inference_primary_left<'allocator>(
                         EntityID::from(&simple.0),
                         Spanned::new(Type::Bool, keyword_span.clone())
                     );
+                },
+                SimplePrimary::ThisKeyword(literal) => {
+                    type_environment.set_entity_type(
+                        EntityID::from(&simple.0),
+                        Spanned::new(current_scope_this_type.clone(), literal.span.clone())
+                    );
+                },
+                SimplePrimary::LargeThisKeyword(literal) => {
+                    type_environment.set_entity_type(
+                        EntityID::from(&simple.0),
+                        Spanned::new(current_scope_this_type.clone(), literal.span.clone())
+                    );
                 }
             }
 
@@ -2702,6 +2817,7 @@ fn type_inference_primary_left<'allocator>(
                         module_user_type_map,
                         module_element_type_map,
                         generics_map,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         type_environment,
                         errors,
@@ -2725,6 +2841,7 @@ fn type_inference_primary_left<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     type_environment,
                     implicit_convert_map,
@@ -2803,6 +2920,7 @@ fn type_inference_primary_left<'allocator>(
 
             let mut user_type = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(user_type, user_type_span),
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 true
             );
@@ -2832,6 +2950,7 @@ fn type_inference_primary_left<'allocator>(
                                     generics_map,
                                     module_entity_type_map,
                                     global_implements_info_set,
+                                    current_scope_this_type,
                                     current_scope_implements_info_set,
                                     true,
                                     type_environment,
@@ -2899,6 +3018,7 @@ fn type_inference_primary_left<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     force_be_expression,
                     type_environment,
@@ -2944,6 +3064,7 @@ fn type_inference_primary_left<'allocator>(
                                     generics_map,
                                     module_entity_type_map,
                                     global_implements_info_set,
+                                    current_scope_this_type,
                                     current_scope_implements_info_set,
                                     force_be_expression,
                                     type_environment,
@@ -2992,6 +3113,7 @@ fn type_inference_primary_left<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 force_be_expression,
                 type_environment,
@@ -3015,6 +3137,7 @@ fn type_inference_primary_left<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     &Vec::new(),
                     force_be_expression,
@@ -3042,6 +3165,7 @@ fn type_inference_primary_left<'allocator>(
             generics_map,
             module_entity_type_map,
             global_implements_info_set,
+            current_scope_this_type,
             current_scope_implements_info_set,
             type_environment,
             implicit_convert_map,
@@ -3076,6 +3200,7 @@ fn type_inference_blocks<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     force_be_expression: bool,
     type_environment: &mut TypeEnvironment<'allocator>,
@@ -3098,6 +3223,7 @@ fn type_inference_blocks<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 &Vec::new(),
                 force_be_expression,
@@ -3138,6 +3264,7 @@ fn type_inference_blocks<'allocator>(
             generics_map,
             module_entity_type_map,
             global_implements_info_set,
+            current_scope_this_type,
             current_scope_implements_info_set,
             &Vec::new(),
             force_be_expression,
@@ -3239,6 +3366,7 @@ fn type_inference_primary_right<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     type_environment: &mut TypeEnvironment<'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
@@ -3263,6 +3391,7 @@ fn type_inference_primary_right<'allocator>(
         let implementations = global_implements_info_set.collect_satisfied_implementations(
             &user_type.value,
             type_environment,
+            current_scope_this_type,
             current_scope_implements_info_set,
             allocator
         );
@@ -3302,6 +3431,7 @@ fn type_inference_primary_right<'allocator>(
         'root: for (element_type, interface_and_where_bounds) in pre_element_types {
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(element_type.value, second_expr.0.span.clone()),
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 false
             ).value;
@@ -3313,6 +3443,7 @@ fn type_inference_primary_right<'allocator>(
                             &where_bound.target_type.value,
                             &bound.ty,
                             type_environment,
+                            current_scope_this_type,
                             current_scope_implements_info_set,
                             true
                         ) {
@@ -3364,6 +3495,7 @@ fn type_inference_primary_right<'allocator>(
                             type_span: second_expr.0.span.clone(),
                             target_type: where_bound.target_type.value,
                             bounds: where_bound.bounds,
+                            scope_this_type: current_scope_this_type.clone(),
                             scope_implements_info_set: current_scope_implements_info_set.clone()
                         });
                     }
@@ -3377,6 +3509,7 @@ fn type_inference_primary_right<'allocator>(
                             type_span: second_expr.0.span.clone(),
                             target_type: where_bound.target_type.value.clone(),
                             bounds: where_bound.bounds.clone(),
+                            scope_this_type: current_scope_this_type.clone(),
                             scope_implements_info_set: current_scope_implements_info_set.clone()
                         });
                     }
@@ -3403,6 +3536,7 @@ fn type_inference_primary_right<'allocator>(
                     module_user_type_map,
                     module_element_type_map,
                     generics_map,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     type_environment,
                     errors,
@@ -3426,6 +3560,7 @@ fn type_inference_primary_right<'allocator>(
                 generics_map,
                 module_entity_type_map,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 implicit_convert_map,
@@ -3473,6 +3608,7 @@ fn type_inference_primary_right<'allocator>(
             generics_map,
             module_entity_type_map,
             global_implements_info_set,
+            current_scope_this_type,
             current_scope_implements_info_set,
             type_environment,
             implicit_convert_map,
@@ -3507,6 +3643,7 @@ fn type_inference_mapping_operator<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     type_environment: &mut TypeEnvironment<'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
@@ -3578,6 +3715,7 @@ fn type_inference_mapping_operator<'allocator>(
             generics_map,
             module_entity_type_map,
             global_implements_info_set,
+            current_scope_this_type,
             current_scope_implements_info_set,
             &Vec::new(),
             true,
@@ -3635,6 +3773,7 @@ fn type_inference_generics<'allocator>(
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     type_environment: &mut TypeEnvironment<'allocator>,
     errors: &mut Vec<TranspileError>,
@@ -3690,7 +3829,11 @@ fn type_inference_generics<'allocator>(
                 ty.clone()
             );
 
-            type_environment.add_check_type_info_bounds(ty, current_scope_implements_info_set);
+            type_environment.add_check_type_info_bounds(
+                ty,
+                current_scope_this_type,
+                current_scope_implements_info_set
+            );
         }
     }
 }
@@ -3708,6 +3851,7 @@ fn type_inference_function_call<'allocator>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &FxHashMap<EntityID, Type>,
     global_implements_info_set: &ImplementsInfoSet,
+    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     type_environment: &mut TypeEnvironment<'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
@@ -3760,6 +3904,7 @@ fn type_inference_function_call<'allocator>(
                     generics_map,
                     module_entity_type_map,
                     global_implements_info_set,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     true,
                     type_environment,

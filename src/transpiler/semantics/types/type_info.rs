@@ -37,6 +37,7 @@ pub enum Type {
     LocalGeneric(LocalGenericID),
     Option(Arc<Type>),
     Result { value: Arc<Type>, error: Arc<Type> },
+    This,
     Unknown
 }
 
@@ -491,6 +492,7 @@ impl ImplementsInfo {
         self_type: &Type,
         ty: &Type,
         global_implements_info_set: &ImplementsInfoSet,
+        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         type_environment: &mut TypeEnvironment,
         allow_unknown: bool
@@ -508,6 +510,7 @@ impl ImplementsInfo {
                 self_type,
                 &ty.value,
                 global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
@@ -520,6 +523,29 @@ impl ImplementsInfo {
                 &self_type.value,
                 ty,
                 global_implements_info_set,
+                current_scope_this_type,
+                current_scope_implements_info_set,
+                type_environment,
+                allow_unknown
+            );
+        }
+        if let Type::This = ty {
+            return ImplementsInfo::contains_target_type(
+                self_type,
+                current_scope_this_type,
+                global_implements_info_set,
+                current_scope_this_type,
+                current_scope_implements_info_set,
+                type_environment,
+                allow_unknown
+            );
+        }
+        if let Type::This = self_type {
+            return ImplementsInfo::contains_target_type(
+                current_scope_this_type,
+                ty,
+                global_implements_info_set,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
@@ -558,6 +584,7 @@ impl ImplementsInfo {
                                 self_generic,
                                 generic,
                                 global_implements_info_set,
+                                current_scope_this_type,
                                 current_scope_implements_info_set,
                                 type_environment,
                                 allow_unknown
@@ -571,6 +598,7 @@ impl ImplementsInfo {
                                 &self_generic,
                                 generic,
                                 global_implements_info_set,
+                                current_scope_this_type,
                                 current_scope_implements_info_set,
                                 type_environment,
                                 allow_unknown
@@ -591,6 +619,7 @@ impl ImplementsInfo {
                         &self_function_info.return_type.value,
                         &function_info.return_type.value,
                         global_implements_info_set,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
@@ -610,6 +639,7 @@ impl ImplementsInfo {
                             self_argument_type,
                             argument_type,
                             global_implements_info_set,
+                            current_scope_this_type,
                             current_scope_implements_info_set,
                             type_environment,
                             allow_unknown
@@ -632,6 +662,7 @@ impl ImplementsInfo {
                                 &self_bound.ty,
                                 &bound.ty,
                                 global_implements_info_set,
+                                current_scope_this_type,
                                 current_scope_implements_info_set,
                                 type_environment,
                                 allow_unknown
@@ -654,6 +685,7 @@ impl ImplementsInfo {
                         ty,
                         &bound.ty,
                         type_environment,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         allow_unknown
                     ) {
@@ -669,6 +701,7 @@ impl ImplementsInfo {
                         &self_value_type,
                         &value_type,
                         global_implements_info_set,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
@@ -683,6 +716,7 @@ impl ImplementsInfo {
                         &self_value,
                         &value,
                         global_implements_info_set,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
@@ -690,6 +724,7 @@ impl ImplementsInfo {
                         &self_error,
                         &error,
                         global_implements_info_set,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
@@ -698,6 +733,7 @@ impl ImplementsInfo {
                     false
                 }
             },
+            Type::This => unreachable!(),
             Type::Unknown => false
         }
     }
@@ -705,7 +741,7 @@ impl ImplementsInfo {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct ImplementsInfoSet {
     pub(crate) implements_infos: FxHashMap<EntityID, ImplementsInfo>
 }
@@ -736,6 +772,7 @@ impl ImplementsInfoSet {
         ty: &Type,
         interface: &Type,
         type_environment: &mut TypeEnvironment,
+        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allow_unknown: bool
     ) -> bool {
@@ -746,6 +783,7 @@ impl ImplementsInfoSet {
             interface,
             &resolved_ty,
             self,
+            current_scope_this_type,
             current_scope_implements_info_set,
             type_environment,
             allow_unknown
@@ -759,6 +797,7 @@ impl ImplementsInfoSet {
                     interface,
                     &bound.ty,
                     self,
+                    current_scope_this_type,
                     current_scope_implements_info_set,
                     type_environment,
                     allow_unknown
@@ -781,6 +820,7 @@ impl ImplementsInfoSet {
                 &implements_info.interface.value,
                 interface,
                 self,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
@@ -788,6 +828,7 @@ impl ImplementsInfoSet {
                 interface,
                 &implements_info.interface.value,
                 self,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
@@ -795,6 +836,7 @@ impl ImplementsInfoSet {
                 &implements_info.concrete.value,
                 ty,
                 self,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
@@ -806,6 +848,7 @@ impl ImplementsInfoSet {
                     let generic_id = type_environment.new_local_generic_id(
                         0..0,
                         None,
+                        current_scope_this_type,
                         &None
                     );
                     local_generics.push(Type::LocalGeneric(generic_id));
@@ -864,6 +907,7 @@ impl ImplementsInfoSet {
                             &target_type,
                             &bound_type,
                             type_environment,
+                            current_scope_this_type,
                             current_scope_implements_info_set,
                             allow_unknown
                         ) {
@@ -886,6 +930,7 @@ impl ImplementsInfoSet {
         ty: &Type,
         bounds: &Vec<Arc<Bound>>,
         type_environment: &mut TypeEnvironment,
+        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allow_unknown: bool
     ) -> Result<(), Vec<Arc<Bound>>> {
@@ -895,6 +940,7 @@ impl ImplementsInfoSet {
                 ty,
                 &bound.ty,
                 type_environment,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 allow_unknown
             ) {
@@ -913,6 +959,7 @@ impl ImplementsInfoSet {
         &self,
         ty: &Type,
         type_environment: &mut TypeEnvironment,
+        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allocator: &'allocator Bump
     ) -> Vec<CollectedImplementation, &'allocator Bump> {
@@ -931,6 +978,7 @@ impl ImplementsInfoSet {
                 &implements_info.concrete.value,
                 ty,
                 self,
+                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 true
@@ -942,7 +990,12 @@ impl ImplementsInfoSet {
             let generics_define = &implements_info.generics;
             let mut local_generics = Vec::new();
             for _ in 0..generics_define.len() {
-                let generic_id = type_environment.new_local_generic_id(0..0, None, &None);
+                let generic_id = type_environment.new_local_generic_id(
+                    0..0,
+                    None,
+                    current_scope_this_type,
+                    &None
+                );
                 local_generics.push(Type::LocalGeneric(generic_id));
             }
 
@@ -985,6 +1038,7 @@ impl ImplementsInfoSet {
                         &where_bound.target_type.value,
                         &bound.ty,
                         type_environment,
+                        current_scope_this_type,
                         current_scope_implements_info_set,
                         true
                     ) {

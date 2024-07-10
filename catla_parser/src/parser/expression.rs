@@ -375,10 +375,12 @@ fn parse_simple_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
             Some(SimplePrimary::Expression { expression, error_tokens, span: span.elapsed(cursor) })
         },
-        TokenKind::Literal => Some(SimplePrimary::Identifier(parse_literal(cursor).unwrap())),
-        TokenKind::Null    => Some(SimplePrimary::NullKeyword(cursor.next().unwrap().span.clone())),
-        TokenKind::True    => Some(SimplePrimary::TrueKeyword(cursor.next().unwrap().span.clone())),
-        TokenKind::False   => Some(SimplePrimary::FalseKeyword(cursor.next().unwrap().span.clone())),
+        TokenKind::Literal   => Some(SimplePrimary::Identifier(parse_literal(cursor).unwrap())),
+        TokenKind::Null      => Some(SimplePrimary::NullKeyword(cursor.next().unwrap().span.clone())),
+        TokenKind::True      => Some(SimplePrimary::TrueKeyword(cursor.next().unwrap().span.clone())),
+        TokenKind::False     => Some(SimplePrimary::FalseKeyword(cursor.next().unwrap().span.clone())),
+        TokenKind::This      => Some(SimplePrimary::ThisKeyword(parse_as_literal(cursor).unwrap())),
+        TokenKind::LargeThis => Some(SimplePrimary::LargeThisKeyword(parse_as_literal(cursor).unwrap())),
         _ => None
     }
 }

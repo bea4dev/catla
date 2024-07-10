@@ -4,6 +4,7 @@ use async_recursion::async_recursion;
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 use fxhash::FxHashMap;
+use semantics::types::type_info::Type;
 
 use crate::transpiler::semantics::types::{import_module_collector::collect_import_module_program, type_inference::{type_inference_program, TypeEnvironment}, user_type_element_collector::collect_module_element_types_program};
 
@@ -207,6 +208,7 @@ async fn transpile_module(
         &generics_map,
         &module_entity_type_map,
         &merged_implements_infos,
+        &Type::Unknown,
         &None,
         &Vec::new(),
         false,

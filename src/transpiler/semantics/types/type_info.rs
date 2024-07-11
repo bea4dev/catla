@@ -326,7 +326,8 @@ pub static PRIMITIVE_TYPE_NAMES: &[&str] = &[
     "float32",
     "float64",
     "bool",
-    "unit"
+    "unit",
+    "This"
 ];
 
 
@@ -874,6 +875,7 @@ impl ImplementsInfoSet {
                     &(0..0),
                     &resolved_ty,
                     &(0..0),
+                    current_scope_this_type,
                     allow_unknown
                 );
                 let result2 = type_environment.unify_type(
@@ -881,6 +883,7 @@ impl ImplementsInfoSet {
                     &(0..0),
                     &resolved_interface,
                     &(0..0),
+                    current_scope_this_type,
                     allow_unknown
                 );
 
@@ -1018,6 +1021,7 @@ impl ImplementsInfoSet {
                 &(0..0),
                 &resolved_ty,
                 &(0..0),
+                current_scope_this_type,
                 true
             );
 
@@ -1099,10 +1103,13 @@ impl OverrideElementsEnvironment {
         }
     }
 
-    /// * TODO : impl fast type compare
-    /// 
-    /// Actually, type_environment is not requierd.
-    pub fn check(&mut self, element_name: &str, element_type: &Type, type_environment: &mut TypeEnvironment) -> bool {
+    pub fn check(
+        &mut self,
+        element_name: &str,
+        element_type: &Type,
+        concrete_type: &Type,
+        type_environment: &mut TypeEnvironment
+    ) -> bool {
         for ((interface, name, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
             let element_type = element_type.replace_method_instance_type(&interface.value);
 
@@ -1111,6 +1118,7 @@ impl OverrideElementsEnvironment {
                 &(0..0),
                 &element_type,
                 &(0..0),
+                concrete_type,
                 true
             ).is_ok() {
                 *is_found = true;

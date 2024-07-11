@@ -1681,6 +1681,7 @@ pub(crate) fn get_type(
                     "float64" => Type::Float64,
                     "bool" => Type::Bool,
                     "unit" => Type::Unit,
+                    "This" => Type::This,
                     _ => Type::Unknown
                 }
             }

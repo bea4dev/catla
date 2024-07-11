@@ -2,7 +2,7 @@ use bumpalo::Bump;
 
 use crate::lexer::TokenKind;
 
-use super::{TokenCursor, TypeTag, Generics, TypeInfo, TypeInfoResult, unexpected_token_error, Span, GetTokenKind, TypeTagKindEnum, TypeTagKind, parse_literal, TypeAttribute, TypeAttributeEnum, skip, read_until_token_found};
+use super::{parse_as_literal, parse_literal, read_until_token_found, skip, unexpected_token_error, Generics, GetTokenKind, Span, TokenCursor, TypeAttribute, TypeAttributeEnum, TypeInfo, TypeInfoResult, TypeTag, TypeTagKind, TypeTagKindEnum};
 
 
 pub fn parse_type_tag<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TypeTag<'allocator, 'input>> {
@@ -28,6 +28,11 @@ pub fn parse_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
     let span = Span::start(cursor);
 
     let mut path = Vec::new_in(cursor.allocator);
+
+    if cursor.current().get_kind() == TokenKind::LargeThis {
+        path.push(parse_as_literal(cursor).unwrap());
+    }
+
     loop {
         let literal = match parse_literal(cursor) {
             Some(literal) => literal,

@@ -54,11 +54,11 @@ function <T, E> error(error: E) -> T!<E> {}
 
 interface TestInterface1 {}
 interface TestInterface2 {
-    function test2(let this) -> int {}
+    function test2(let this) -> This {}
 }
 
 implements<T> TestInterface2 for T where T: TestInterface1 {
-    override function test2(let this) -> int {}
+    override function test2(let this) -> TestInterface2 {}
 }
 
 function <T> aaa(i: T) where T: TestInterface1 {

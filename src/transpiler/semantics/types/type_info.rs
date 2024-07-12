@@ -51,6 +51,17 @@ impl Type {
                     let ty = Type::get_type_with_replaced_generics(generic, generics_define, replace_generics);
                     new_generics.push(ty);
                 }
+                
+                let user_type_info = DataStructInfo {
+                    module_name: user_type_info.module_name.clone(),
+                    name: user_type_info.name.clone(),
+                    define_span: user_type_info.define_span.clone(),
+                    kind: user_type_info.kind,
+                    generics_define: user_type_info.generics_define.clone(),
+                    generics_define_span: todo!(),
+                    element_types: todo!(),
+                    where_bounds: todo!(),
+                };
 
                 Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(new_generics), generics_span: None }
             },
@@ -78,10 +89,14 @@ impl Type {
                     generics_define,
                     replace_generics
                 );
+                
+                let generics_define = function_info.generics_define.iter()
+                    .map(|generic_define| { Arc::new(generic_define.replace_generic(generics_define, replace_generics)) })
+                    .collect();
 
                 let function_info = FunctionType {
                     is_extension: function_info.is_extension,
-                    generics_define: function_info.generics_define.clone(),
+                    generics_define,
                     argument_types,
                     return_type: Spanned::new(return_type, function_info.return_type.span.clone()),
                     define_info: function_info.define_info.clone(),
@@ -108,6 +123,18 @@ impl Type {
                 Type::Result { value: Arc::new(new_value_type), error: Arc::new(new_error_type) }
             },
             _ => ty.clone()
+        }
+    }
+    
+    pub(crate) fn replace_generics(&self) -> Type {
+        match self {
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
+                Type::get_type_with_replaced_generics(self, &user_type_info.generics_define, generics)
+            },
+            Type::Function { function_info, generics } => {
+                Type::get_type_with_replaced_generics(self, &function_info.generics_define, generics)
+            },
+            _ => self.clone()
         }
     }
 
@@ -175,22 +202,14 @@ impl Type {
             _ => Vec::new()
         }
     }
-
-    pub(crate) fn get_where_bounds_with_replaced_generic(&self) -> Option<Vec<WhereBound>> {
+    
+    pub(crate) fn get_where_bounds(&self) -> Option<Arc<Vec<WhereBound>>> {
         match self {
-            Type::UserType { user_type_info, generics, generics_span: _ } => {
-                Some(Type::get_where_bounds_with_generics(
-                    &user_type_info.where_bounds.freeze_and_get(),
-                    &user_type_info.generics_define,
-                    generics
-                ))
+            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
+                Some(user_type_info.where_bounds.freeze_and_get())
             },
-            Type::Function { function_info, generics } => {
-                Some(Type::get_where_bounds_with_generics(
-                    &function_info.where_bounds.freeze_and_get(),
-                    &function_info.generics_define,
-                    generics
-                ))
+            Type::Function { function_info, generics: _ } => {
+                Some(function_info.where_bounds.freeze_and_get())
             },
             _ => None
         }
@@ -426,8 +445,42 @@ impl<T> WithDefineInfo<T> {
 #[derive(Debug)]
 pub struct GenericType {
     pub(crate) define_entity_id: EntityID,
-    pub name: String,
+    pub name: Arc<String>,
     pub bounds: FreezableMutex<Vec<Arc<Bound>>>
+}
+
+impl GenericType {
+    
+    fn get_bounds_with_replaced_generic(
+        &self,
+        generics_define: &Vec<Arc<GenericType>>,
+        replace_generics: &Vec<Type>
+    ) -> Vec<Arc<Bound>> {
+        let mut bounds = Vec::new();
+        for bound in self.bounds.freeze_and_get().iter() {
+            let ty = Type::get_type_with_replaced_generics(&bound.ty, generics_define, replace_generics);
+            bounds.push(Arc::new(Bound {
+                module_name: bound.module_name.clone(),
+                span: bound.span.clone(),
+                ty,
+                entity_id: bound.entity_id
+            }));
+        }
+        bounds
+    }
+    
+    pub(crate) fn replace_generic(
+        &self,
+        generics_define: &Vec<Arc<GenericType>>,
+        replace_generics: &Vec<Type>
+    ) -> GenericType {
+        GenericType {
+            define_entity_id: self.define_entity_id,
+            name: self.name.clone(),
+            bounds: FreezableMutex::new(self.get_bounds_with_replaced_generic(generics_define, replace_generics))
+        }
+    }
+    
 }
 
 impl PartialEq for GenericType {
@@ -846,12 +899,7 @@ impl ImplementsInfoSet {
                 let generics_define = &implements_info.generics;
                 let mut local_generics = Vec::new();
                 for _ in 0..generics_define.len() {
-                    let generic_id = type_environment.new_local_generic_id(
-                        0..0,
-                        None,
-                        current_scope_this_type,
-                        &None
-                    );
+                    let generic_id = type_environment.new_local_generic_id(0..0);
                     local_generics.push(Type::LocalGeneric(generic_id));
                 }
 
@@ -993,12 +1041,7 @@ impl ImplementsInfoSet {
             let generics_define = &implements_info.generics;
             let mut local_generics = Vec::new();
             for _ in 0..generics_define.len() {
-                let generic_id = type_environment.new_local_generic_id(
-                    0..0,
-                    None,
-                    current_scope_this_type,
-                    &None
-                );
+                let generic_id = type_environment.new_local_generic_id( 0..0);
                 local_generics.push(Type::LocalGeneric(generic_id));
             }
 
@@ -1121,6 +1164,15 @@ impl OverrideElementsEnvironment {
                 concrete_type,
                 true
             ).is_ok() {
+                // check bounds
+                if let Type::Function { function_info: first_function_info, generics: _ } = &ty.value {
+                    if let Type::Function { function_info: second_function_info, generics: _ } = &element_type {
+                        for first_where_bounds in first_function_info.where_bounds.freeze_and_get().iter() {
+                            
+                        }
+                    }
+                }
+                
                 *is_found = true;
                 return true;
             }

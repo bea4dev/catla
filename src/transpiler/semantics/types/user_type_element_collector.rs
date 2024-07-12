@@ -1828,7 +1828,7 @@ fn get_generic_type<'allocator>(
 
         let generic = Arc::new(GenericType {
             define_entity_id: entity_id,
-            name: element.name.value.to_string(),
+            name: Arc::new(element.name.value.to_string()),
             bounds: FreezableMutex::new(bounds),
         });
 

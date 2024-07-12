@@ -61,10 +61,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
     pub fn new_local_generic_id(
         &mut self,
-        type_span: Range<usize>,
-        generic_type: Option<Arc<GenericType>>,
-        current_scope_this_type: &Type,
-        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>
+        type_span: Range<usize>
     ) -> LocalGenericID {
         self.current_generics_id += 1;
         let generic_id = LocalGenericID(self.current_generics_id);
@@ -73,16 +70,6 @@ impl<'allocator> TypeEnvironment<'allocator> {
             generic_id,
             Either::Right(Spanned::new(Type::Unknown, type_span.clone()))
         );
-        
-        if let Some(generics_define) = generic_type {
-            self.generic_bounds_checks.push(GenericsBoundCheck::Generics {
-                type_span: type_span.clone(),
-                ty: Spanned::new(Type::LocalGeneric(generic_id), type_span),
-                generic_define: generics_define,
-                scope_this_type: current_scope_this_type.clone(),
-                scope_implements_info_set: current_scope_implements_info_set.clone()
-            });
-        }
         
         generic_id
     }
@@ -106,34 +93,53 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
         let number_of_generics = generics_define.len();
         let mut generics = Vec::with_capacity(number_of_generics);
-        for generics_define in generics_define.iter() {
-            let generic_id = self.new_local_generic_id(
-                ty.span.clone(),
-                Some(generics_define.clone()),
-                current_scope_this_type,
-                current_scope_implements_info_set
-            );
+        for _ in 0..number_of_generics {
+            let generic_id = self.new_local_generic_id( ty.span.clone());
             generics.push(Type::LocalGeneric(generic_id));
         }
         let generics = Arc::new(generics);
 
         let ty = match &ty.value {
             Type::UserType { user_type_info, generics: _, generics_span: _ } => {
-                Spanned::new(Type::UserType { user_type_info: user_type_info.clone(), generics, generics_span: None }, ty.span)
+                let new_type = Type::UserType { user_type_info: user_type_info.clone(), generics: generics.clone(), generics_span: None };
+                let new_type = Type::get_type_with_replaced_generics(&new_type, generics_define, &generics);
+                Spanned::new(new_type, ty.span)
             },
             Type::Function { function_info, generics: _ } => {
-                Spanned::new(Type::Function { function_info: function_info.clone(), generics }, ty.span)
+                let new_type = Type::Function { function_info: function_info.clone(), generics: generics.clone() };
+                let new_type = Type::get_type_with_replaced_generics(&new_type, generics_define, &generics);
+                Spanned::new(new_type, ty.span)
             },
             _ => unreachable!()
         };
+        
+        let generics_define = match &ty.value {
+            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
+                &user_type_info.generics_define
+            },
+            Type::Function { function_info, generics: _ } => {
+                &function_info.generics_define
+            },
+            _ => return ty.clone()
+        };
+        
+        for (generic_define, local_generic) in generics_define.iter().zip(generics.iter()) {
+            self.generic_bounds_checks.push(GenericsBoundCheck::Generics {
+                type_span: ty.span.clone(),
+                ty: Spanned::new(local_generic.clone(), ty.span.clone()),
+                generic_define: generic_define.clone(),
+                scope_this_type: current_scope_this_type.clone(),
+                scope_implements_info_set: current_scope_implements_info_set.clone()
+            });
+        }
 
         if register_bounds_check {
-            let where_bounds = ty.value.get_where_bounds_with_replaced_generic().unwrap();
-            for where_bound in where_bounds {
+            let where_bounds = ty.value.get_where_bounds().unwrap();
+            for where_bound in where_bounds.iter() {
                 self.generic_bounds_checks.push(GenericsBoundCheck::Where {
                     type_span: ty.span.clone(),
-                    target_type: where_bound.target_type.value,
-                    bounds: where_bound.bounds,
+                    target_type: where_bound.target_type.value.clone(),
+                    bounds: where_bound.bounds.clone(),
                     scope_this_type: current_scope_this_type.clone(),
                     scope_implements_info_set: current_scope_implements_info_set.clone()
                 });
@@ -758,7 +764,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
                 name
             },
-            Type::Generic(generic_type) => generic_type.name.clone(),
+            Type::Generic(generic_type) => generic_type.name.deref().clone(),
             Type::LocalGeneric(generic_id) => {
                 self.get_type_display_string(&self.resolve_generic_type(*generic_id).1.value)
             },
@@ -959,6 +965,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
         current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>
     ) {
+        let ty = ty.map(|ty| { ty.replace_generics() });
+        
         if let Type::UserType { user_type_info, generics, generics_span } = &ty.value {
             if user_type_info.generics_define.len() != generics.len() {
                 return;
@@ -995,14 +1003,16 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 );
             }
 
-            for where_bound in ty.value.get_where_bounds_with_replaced_generic().unwrap_or(Vec::new()) {
-                self.generic_bounds_checks.push(GenericsBoundCheck::Where {
-                    type_span: ty.span.clone(),
-                    target_type: where_bound.target_type.value,
-                    bounds: where_bound.bounds,
-                    scope_this_type: current_scope_this_type.clone(),
-                    scope_implements_info_set: current_scope_implements_info_set.clone()
-                });
+            if let Some(where_bounds) = ty.value.get_where_bounds() {
+                for where_bound in where_bounds.iter() {
+                    self.generic_bounds_checks.push(GenericsBoundCheck::Where {
+                        type_span: ty.span.clone(),
+                        target_type: where_bound.target_type.value.clone(),
+                        bounds: where_bound.bounds.clone(),
+                        scope_this_type: current_scope_this_type.clone(),
+                        scope_implements_info_set: current_scope_implements_info_set.clone()
+                    });
+                }
             }
         }
     }
@@ -2874,10 +2884,7 @@ fn type_inference_primary_left<'allocator>(
                 },
                 SimplePrimary::NullKeyword(null_keyword_span) => {
                     let generic_id = type_environment.new_local_generic_id(
-                        null_keyword_span.clone(),
-                        None,
-                        current_scope_this_type,
-                        current_scope_implements_info_set
+                        null_keyword_span.clone()
                     );
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
@@ -3546,8 +3553,8 @@ fn type_inference_primary_right<'allocator>(
                 false
             ).value;
 
-            if let Some(where_bounds) = ty.get_where_bounds_with_replaced_generic() {
-                for where_bound in where_bounds {
+            if let Some(where_bounds) = ty.get_where_bounds() {
+                for where_bound in where_bounds.iter() {
                     for bound in where_bound.bounds.iter() {
                         if !global_implements_info_set.is_implemented(
                             &where_bound.target_type.value,
@@ -3597,14 +3604,14 @@ fn type_inference_primary_right<'allocator>(
                 };
                 errors.push(TranspileError::new(error));
             } else {
-                let where_bounds = element_types.last().unwrap().0.value.get_where_bounds_with_replaced_generic();
+                let where_bounds = element_types.last().unwrap().0.value.get_where_bounds();
 
                 if let Some(where_bounds) = where_bounds {
-                    for where_bound in where_bounds {
+                    for where_bound in where_bounds.iter() {
                         type_environment.generic_bounds_checks.push(GenericsBoundCheck::Where {
                             type_span: second_expr.0.span.clone(),
-                            target_type: where_bound.target_type.value,
-                            bounds: where_bound.bounds,
+                            target_type: where_bound.target_type.value.clone(),
+                            bounds: where_bound.bounds.clone(),
                             scope_this_type: current_scope_this_type.clone(),
                             scope_implements_info_set: current_scope_implements_info_set.clone()
                         });

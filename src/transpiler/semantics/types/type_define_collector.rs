@@ -49,7 +49,7 @@ pub(crate) fn collect_user_type_program(
                         for element in generics.elements.iter() {
                             let generic_type = Arc::new(GenericType {
                                 define_entity_id: EntityID::from(element),
-                                name: element.name.value.to_string(),
+                                name: Arc::new(element.name.value.to_string()),
                                 bounds: FreezableMutex::new(Vec::new())
                             });
                             generics_define.push(generic_type);
@@ -95,7 +95,7 @@ pub(crate) fn collect_user_type_program(
                         for element in generics.elements.iter() {
                             let generic_type = Arc::new(GenericType {
                                 define_entity_id: EntityID::from(element),
-                                name: element.name.value.to_string(),
+                                name: Arc::new(element.name.value.to_string()),
                                 bounds: FreezableMutex::new(Vec::new())
                             });
                             generics_define.push(generic_type);

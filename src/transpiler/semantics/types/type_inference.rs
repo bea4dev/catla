@@ -101,29 +101,15 @@ impl<'allocator> TypeEnvironment<'allocator> {
 
         let ty = match &ty.value {
             Type::UserType { user_type_info, generics: _, generics_span: _ } => {
-                let new_type = Type::UserType { user_type_info: user_type_info.clone(), generics: generics.clone(), generics_span: None };
-                let new_type = Type::get_type_with_replaced_generics(&new_type, generics_define, &generics);
-                Spanned::new(new_type, ty.span)
+                Spanned::new(Type::UserType { user_type_info: user_type_info.clone(), generics: generics.clone(), generics_span: None }, ty.span)
             },
             Type::Function { function_info, generics: _ } => {
-                let new_type = Type::Function { function_info: function_info.clone(), generics: generics.clone() };
-                let new_type = Type::get_type_with_replaced_generics(&new_type, generics_define, &generics);
-                Spanned::new(new_type, ty.span)
+                Spanned::new(Type::Function { function_info: function_info.clone(), generics: generics.clone() }, ty.span)
             },
             _ => unreachable!()
         };
         
-        let generics_define = match &ty.value {
-            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
-                &user_type_info.generics_define
-            },
-            Type::Function { function_info, generics: _ } => {
-                &function_info.generics_define
-            },
-            _ => return ty.clone()
-        };
-        
-        for (generic_define, local_generic) in generics_define.iter().zip(generics.iter()) {
+        for (generic_define, local_generic) in ty.value.get_generics_define_with_replaced_generic().unwrap().iter().zip(generics.iter()) {
             self.generic_bounds_checks.push(GenericsBoundCheck::Generics {
                 type_span: ty.span.clone(),
                 ty: Spanned::new(local_generic.clone(), ty.span.clone()),
@@ -134,7 +120,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
         }
 
         if register_bounds_check {
-            let where_bounds = ty.value.get_where_bounds().unwrap();
+            let where_bounds = ty.value.get_where_bounds_with_replaced_generic().unwrap();
             for where_bound in where_bounds.iter() {
                 self.generic_bounds_checks.push(GenericsBoundCheck::Where {
                     type_span: ty.span.clone(),
@@ -965,8 +951,6 @@ impl<'allocator> TypeEnvironment<'allocator> {
         current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>
     ) {
-        let ty = ty.map(|ty| { ty.replace_generics() });
-        
         if let Type::UserType { user_type_info, generics, generics_span } = &ty.value {
             if user_type_info.generics_define.len() != generics.len() {
                 return;
@@ -979,9 +963,11 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     None
                 }
             }).flatten();
+            
+            let generics_define = ty.value.get_generics_define_with_replaced_generic().unwrap();
 
             for i in 0..generics.len() {
-                let generic_define = &user_type_info.generics_define[i];
+                let generic_define = &generics_define[i];
                 let generic = &generics[i];
 
                 let generic_span = generics_span
@@ -1003,16 +989,14 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 );
             }
 
-            if let Some(where_bounds) = ty.value.get_where_bounds() {
-                for where_bound in where_bounds.iter() {
-                    self.generic_bounds_checks.push(GenericsBoundCheck::Where {
-                        type_span: ty.span.clone(),
-                        target_type: where_bound.target_type.value.clone(),
-                        bounds: where_bound.bounds.clone(),
-                        scope_this_type: current_scope_this_type.clone(),
-                        scope_implements_info_set: current_scope_implements_info_set.clone()
-                    });
-                }
+            for where_bound in ty.value.get_where_bounds_with_replaced_generic().unwrap().into_iter() {
+                self.generic_bounds_checks.push(GenericsBoundCheck::Where {
+                    type_span: ty.span.clone(),
+                    target_type: where_bound.target_type.value.clone(),
+                    bounds: where_bound.bounds.clone(),
+                    scope_this_type: current_scope_this_type.clone(),
+                    scope_implements_info_set: current_scope_implements_info_set.clone()
+                });
             }
         }
     }
@@ -3553,7 +3537,7 @@ fn type_inference_primary_right<'allocator>(
                 false
             ).value;
 
-            if let Some(where_bounds) = ty.get_where_bounds() {
+            if let Some(where_bounds) = ty.get_where_bounds_with_replaced_generic() {
                 for where_bound in where_bounds.iter() {
                     for bound in where_bound.bounds.iter() {
                         if !global_implements_info_set.is_implemented(
@@ -3604,7 +3588,7 @@ fn type_inference_primary_right<'allocator>(
                 };
                 errors.push(TranspileError::new(error));
             } else {
-                let where_bounds = element_types.last().unwrap().0.value.get_where_bounds();
+                let where_bounds = element_types.last().unwrap().0.value.get_where_bounds_with_replaced_generic();
 
                 if let Some(where_bounds) = where_bounds {
                     for where_bound in where_bounds.iter() {
@@ -3980,13 +3964,10 @@ fn type_inference_function_call<'allocator>(
 ) {
     let function_type = type_environment.resolve_entity_type(function);
 
-    if let Type::Function { function_info, generics } = function_type.value {
+    if let Type::Function { function_info, generics: _ } = &function_type.value {
         let is_method_call = is_method_call && function_info.is_extension;
 
-        let function_type = Type::Function {
-            function_info: function_info.clone(),
-            generics: generics
-        };
+        let function_type = function_type.value.clone();
 
         if let Ok(arg_exprs) = &ast.arg_exprs {
             let is_method_call = is_method_call && function_info.is_extension;

@@ -51,17 +51,6 @@ impl Type {
                     let ty = Type::get_type_with_replaced_generics(generic, generics_define, replace_generics);
                     new_generics.push(ty);
                 }
-                
-                let user_type_info = DataStructInfo {
-                    module_name: user_type_info.module_name.clone(),
-                    name: user_type_info.name.clone(),
-                    define_span: user_type_info.define_span.clone(),
-                    kind: user_type_info.kind,
-                    generics_define: user_type_info.generics_define.clone(),
-                    generics_define_span: todo!(),
-                    element_types: todo!(),
-                    where_bounds: todo!(),
-                };
 
                 Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(new_generics), generics_span: None }
             },
@@ -84,23 +73,13 @@ impl Type {
                     replace_generics
                 );
 
-                let where_bounds = Type::get_where_bounds_with_generics(
-                    &function_info.where_bounds.freeze_and_get(),
-                    generics_define,
-                    replace_generics
-                );
-                
-                let generics_define = function_info.generics_define.iter()
-                    .map(|generic_define| { Arc::new(generic_define.replace_generic(generics_define, replace_generics)) })
-                    .collect();
-
                 let function_info = FunctionType {
                     is_extension: function_info.is_extension,
-                    generics_define,
+                    generics_define: function_info.generics_define.clone(),
                     argument_types,
                     return_type: Spanned::new(return_type, function_info.return_type.span.clone()),
                     define_info: function_info.define_info.clone(),
-                    where_bounds: FreezableMutex::new(where_bounds)
+                    where_bounds: function_info.where_bounds.clone()
                 };
 
                 Type::Function { function_info: Arc::new(function_info), generics: Arc::new(new_generics) }
@@ -123,18 +102,6 @@ impl Type {
                 Type::Result { value: Arc::new(new_value_type), error: Arc::new(new_error_type) }
             },
             _ => ty.clone()
-        }
-    }
-    
-    pub(crate) fn replace_generics(&self) -> Type {
-        match self {
-            Type::UserType { user_type_info, generics, generics_span: _ } => {
-                Type::get_type_with_replaced_generics(self, &user_type_info.generics_define, generics)
-            },
-            Type::Function { function_info, generics } => {
-                Type::get_type_with_replaced_generics(self, &function_info.generics_define, generics)
-            },
-            _ => self.clone()
         }
     }
 
@@ -203,13 +170,41 @@ impl Type {
         }
     }
     
-    pub(crate) fn get_where_bounds(&self) -> Option<Arc<Vec<WhereBound>>> {
+    pub(crate) fn get_where_bounds_with_replaced_generic(&self) -> Option<Vec<WhereBound>> {
         match self {
-            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
-                Some(user_type_info.where_bounds.freeze_and_get())
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
+                Some(Type::get_where_bounds_with_generics(
+                    &user_type_info.where_bounds.freeze_and_get(),
+                    &user_type_info.generics_define,
+                    generics
+                ))
             },
-            Type::Function { function_info, generics: _ } => {
-                Some(function_info.where_bounds.freeze_and_get())
+            Type::Function { function_info, generics } => {
+                Some(Type::get_where_bounds_with_generics(
+                    &function_info.where_bounds.freeze_and_get(),
+                    &function_info.generics_define,
+                    generics
+                ))
+            },
+            _ => None
+        }
+    }
+    
+    pub(crate) fn get_generics_define_with_replaced_generic(&self) -> Option<Vec<Arc<GenericType>>> {
+        match self {
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
+                Some(
+                    user_type_info.generics_define.iter()
+                        .map(|generic_define| { Arc::new(generic_define.replace_generic(&user_type_info.generics_define, generics)) })
+                        .collect()
+                )
+            },
+            Type::Function { function_info, generics } => {
+                Some(
+                    function_info.generics_define.iter()
+                        .map(|generic_define| { Arc::new(generic_define.replace_generic(&function_info.generics_define, generics)) })
+                        .collect()
+                )
             },
             _ => None
         }

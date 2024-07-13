@@ -1150,6 +1150,28 @@ impl OverrideElementsEnvironment {
     ) -> bool {
         for ((interface, name, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
             let element_type = element_type.replace_method_instance_type(&interface.value);
+            
+            let interface_generics_define = match &ty.value {
+                Type::UserType { user_type_info, generics, generics_span } => {
+                    Some(&user_type_info.generics_define)
+                },
+                Type::Function { function_info, generics } => {
+                    Some(&function_info.generics_define)
+                },
+                _ => None
+            };
+            
+            let element_type = if let Some(replace) = interface_generics_define {
+                match &element_type {
+                    Type::UserType { user_type_info, generics, generics_span: _ } => {
+                        Type::get_type_with_replaced_generics(&element_type, generics_define, replace_generics)
+                    },
+                    Type::Function { function_info, generics } => {
+                        
+                    },
+                    _ => element_type.clone()
+                }
+            };
 
             if name == element_name && type_environment.unify_type(
                 &ty.value,

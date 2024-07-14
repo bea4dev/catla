@@ -1194,7 +1194,9 @@ pub(crate) fn type_inference_program<'allocator>(
                             name.value,
                             function_type,
                             current_scope_this_type,
-                            type_environment
+                            global_implements_info_set,
+                            type_environment,
+                            context
                         ) {
                             let interface_span_start = implements_interfaces.first().unwrap().span.start;
                             let interface_span_end = implements_interfaces.last().unwrap().span.end;
@@ -3492,7 +3494,6 @@ fn type_inference_primary_right<'allocator>(
         let implementations = global_implements_info_set.collect_satisfied_implementations(
             &user_type.value,
             type_environment,
-            current_scope_this_type,
             current_scope_implements_info_set,
             allocator
         );
@@ -3518,10 +3519,11 @@ fn type_inference_primary_right<'allocator>(
                         Some((
                             WithDefineInfo {
                                 value: interface.value,
-                                module_name: implementation.implements_info.module_name.clone(),
+                                module_name: implementation.implements_info.module_name,
                                 span: interface.span
                             },
-                            implementation.implements_info.where_bounds.clone()
+                            implementation.implements_info.concrete.value,
+                            implementation.implements_info.where_bounds
                         ))
                     )
                 );
@@ -3596,13 +3598,13 @@ fn type_inference_primary_right<'allocator>(
                             type_span: second_expr.0.span.clone(),
                             target_type: where_bound.target_type.value.clone(),
                             bounds: where_bound.bounds.clone(),
-                            scope_this_type: current_scope_this_type.clone(),
+                            scope_this_type: user_type.value.clone(),
                             scope_implements_info_set: current_scope_implements_info_set.clone()
                         });
                     }
                 }
 
-                if let Some((interface, where_bounds)) = &element_types.last().unwrap().1 {
+                if let Some((interface, concrete, where_bounds)) = &element_types.last().unwrap().1 {
                     type_environment.impl_interface_generics_check.push((second_expr.0.span.clone(), interface.clone()));
 
                     for where_bound in where_bounds.iter() {
@@ -3610,7 +3612,7 @@ fn type_inference_primary_right<'allocator>(
                             type_span: second_expr.0.span.clone(),
                             target_type: where_bound.target_type.value.clone(),
                             bounds: where_bound.bounds.clone(),
-                            scope_this_type: current_scope_this_type.clone(),
+                            scope_this_type: concrete.clone(),
                             scope_implements_info_set: current_scope_implements_info_set.clone()
                         });
                     }

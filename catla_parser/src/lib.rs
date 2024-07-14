@@ -12,11 +12,7 @@ fn test() {
 
     let source = 
 "
-class TestClass {
-    override function test(var this) {}
-}
-
-function test() {}
+interface Interface where This: Interface1 {}
 ";
 
     let allocator = Bump::new();

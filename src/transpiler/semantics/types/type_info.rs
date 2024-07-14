@@ -132,6 +132,32 @@ impl Type {
         }
         new_where_bounds
     }
+    
+    pub(crate) fn init_generics(&self) -> Type {
+        match self {
+            Type::UserType { user_type_info, generics, generics_span } => {
+                if !generics.is_empty() {
+                    return self.clone();
+                }
+                
+                let generics = user_type_info.generics_define.iter()
+                    .map(|generic| { Type::Generic(generic.clone()) })
+                    .collect::<Vec<_>>();
+                Type::UserType { user_type_info: user_type_info.clone(), generics: Arc::new(generics), generics_span: generics_span.clone() }
+            },
+            Type::Function { function_info, generics } => {
+                if !generics.is_empty() {
+                    return self.clone();
+                }
+                
+                let generics = function_info.generics_define.iter()
+                    .map(|generic| { Type::Generic(generic.clone()) })
+                    .collect::<Vec<_>>();
+                Type::Function { function_info: function_info.clone(), generics: Arc::new(generics) }
+            },
+            _ => self.clone()
+        }
+    }
 
     pub(crate) fn get_element_type_with_replaced_generic(&self, name: &str) -> Option<WithDefineInfo<Type>> {
         match self {
@@ -265,6 +291,18 @@ impl Type {
                 }
             },
             _ => self.clone()
+        }
+    }
+    
+    pub(crate) fn get_generics_define_length(&self) -> usize {
+        match self {
+            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
+                user_type_info.generics_define.len()
+            },
+            Type::Function { function_info, generics: _ } => {
+                function_info.generics_define.len()
+            },
+            _ => 0
         }
     }
 
@@ -551,9 +589,10 @@ impl ImplementsInfo {
     
     fn contains_target_type(
         self_type: &Type,
+        self_this_type: &Type,
         ty: &Type,
+        this_type: &Type,
         global_implements_info_set: &ImplementsInfoSet,
-        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         type_environment: &mut TypeEnvironment,
         allow_unknown: bool
@@ -569,9 +608,10 @@ impl ImplementsInfo {
 
             return ImplementsInfo::contains_target_type(
                 self_type,
+                self_this_type,
                 &ty.value,
+                this_type,
                 global_implements_info_set,
-                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
@@ -582,33 +622,38 @@ impl ImplementsInfo {
 
             return ImplementsInfo::contains_target_type(
                 &self_type.value,
+                self_this_type,
                 ty,
+                this_type,
                 global_implements_info_set,
-                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
             );
         }
 
-        if &Type::This == current_scope_this_type {
-            if let Type::This = ty {
+        if let Type::This = ty {
+            if this_type != &Type::This {
                 return ImplementsInfo::contains_target_type(
                     self_type,
-                    current_scope_this_type,
+                    self_this_type,
+                    this_type,
+                    this_type,
                     global_implements_info_set,
-                    current_scope_this_type,
                     current_scope_implements_info_set,
                     type_environment,
                     allow_unknown
                 );
             }
-            if let Type::This = self_type {
+        }
+        if let Type::This = self_type {
+            if self_this_type != &Type::This {
                 return ImplementsInfo::contains_target_type(
-                    current_scope_this_type,
+                    self_this_type,
+                    self_this_type,
                     ty,
+                    this_type,
                     global_implements_info_set,
-                    current_scope_this_type,
                     current_scope_implements_info_set,
                     type_environment,
                     allow_unknown
@@ -1020,7 +1065,6 @@ impl ImplementsInfoSet {
         &self,
         ty: &Type,
         type_environment: &mut TypeEnvironment,
-        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allocator: &'allocator Bump
     ) -> Vec<CollectedImplementation, &'allocator Bump> {
@@ -1039,7 +1083,7 @@ impl ImplementsInfoSet {
                 &implements_info.concrete.value,
                 ty,
                 self,
-                current_scope_this_type,
+                ty,
                 current_scope_implements_info_set,
                 type_environment,
                 true
@@ -1074,7 +1118,7 @@ impl ImplementsInfoSet {
                 &(0..0),
                 &resolved_ty,
                 &(0..0),
-                current_scope_this_type,
+                &impl_concrete,
                 true
             );
 
@@ -1095,7 +1139,7 @@ impl ImplementsInfoSet {
                         &where_bound.target_type.value,
                         &bound.ty,
                         type_environment,
-                        current_scope_this_type,
+                        &impl_concrete,
                         current_scope_implements_info_set,
                         true
                     ) {
@@ -1165,7 +1209,7 @@ impl OverrideElementsEnvironment {
         type_environment: &mut TypeEnvironment,
         context: &TranspileModuleContext
     ) -> bool {
-        for ((interface, name, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
+        'root : for ((interface, name, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
             let element_type = element_type.replace_method_instance_type(&interface.value);
             
             let interface_element_generics_define = match &ty.value {
@@ -1178,10 +1222,12 @@ impl OverrideElementsEnvironment {
                 _ => None
             };
             
-            let element_type = if let Some(replace_generics) = interface_element_generics_define {
+            let element_type = if let Some(replace_generics) = &interface_element_generics_define {
                 let replace_generics = replace_generics.iter()
                     .map(|generic| { Type::Generic(generic.clone()) })
                     .collect::<Vec<_>>();
+                
+                let element_type = element_type.init_generics();
 
                 match &element_type {
                     Type::UserType { user_type_info, generics: _, generics_span: _ } => {
@@ -1205,6 +1251,10 @@ impl OverrideElementsEnvironment {
                 true
             ).is_ok() {
                 
+                if ty.value.get_generics_define_length() != element_type.get_generics_define_length() {
+                    continue;
+                }
+                
                 let mut interface_element_implements_info_set = ImplementsInfoSet::new();
                 for where_bound in ty.value.get_where_bounds().unwrap().iter() {
                     for bound in where_bound.bounds.iter() {
@@ -1218,11 +1268,42 @@ impl OverrideElementsEnvironment {
                                 where_bounds: Arc::new(Vec::new()),
                                 element_types: Arc::new(FxHashMap::default())
                             }
-                        )
+                        );
+                    }
+                }
+                let interface_element_implements_info_set = Some(Arc::new(interface_element_implements_info_set));
+                
+                if let Some(generics_define) = element_type.get_generics_define_with_replaced_generic() {
+                    let replaced_generics = interface_element_generics_define.unwrap();
+                    
+                    for (replaced, bounds_generics) in replaced_generics.iter().zip(generics_define.iter()) {
+                        if global_implements_info_set.is_satisfied(
+                            &Type::Generic(replaced.clone()),
+                            &bounds_generics.bounds.freeze_and_get(),
+                            type_environment,
+                            concrete_type,
+                            &interface_element_implements_info_set,
+                            false
+                        ).is_err() {
+                            continue 'root;
+                        }
                     }
                 }
                 
-                
+                if let Some(where_bounds) = element_type.get_where_bounds_with_replaced_generic() {
+                    for where_bound in where_bounds.iter() {
+                        if global_implements_info_set.is_satisfied(
+                            &where_bound.target_type.value,
+                            &where_bound.bounds,
+                            type_environment,
+                            concrete_type,
+                            &interface_element_implements_info_set,
+                            false
+                        ).is_err() {
+                            continue 'root;
+                        }
+                    }
+                }
                 
                 *is_found = true;
                 return true;

@@ -286,6 +286,8 @@ pub(crate) fn collect_module_element_types_program(
             },
             StatementAST::UserTypeDefine(data_struct_define) => {
                 if let Ok(name) = &data_struct_define.name {
+                    let user_type = user_type_map.get(name.value).unwrap().clone();
+                    
                     if let Some(generics_define) = &data_struct_define.generics_define {
                         let generic_types = get_generic_type(
                             generics_define,
@@ -300,26 +302,24 @@ pub(crate) fn collect_module_element_types_program(
                             context
                         );
                         
-                        let user_type = user_type_map.get(name.value).unwrap().clone();
-                        
                         set_generics_bounds(&user_type, generic_types);
-
-                        if let Type::UserType{ user_type_info, generics: _, generics_span: _ } = user_type {
-                            let where_bounds = get_where_bounds(
-                                &data_struct_define.where_clause,
-                                user_type_map,
-                                import_element_map,
-                                name_resolved_map,
-                                module_user_type_map,
-                                module_element_type_map,
-                                generics_map,
-                                errors,
-                                warnings,
-                                context
-                            );
-                            let mut where_bounds_lock = user_type_info.where_bounds.lock().unwrap();
-                            *where_bounds_lock.as_mut().left().unwrap() = where_bounds;
-                        }
+                    }
+                    
+                    if let Type::UserType{ user_type_info, generics: _, generics_span: _ } = user_type {
+                        let where_bounds = get_where_bounds(
+                            &data_struct_define.where_clause,
+                            user_type_map,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            generics_map,
+                            errors,
+                            warnings,
+                            context
+                        );
+                        let mut where_bounds_lock = user_type_info.where_bounds.lock().unwrap();
+                        *where_bounds_lock.as_mut().left().unwrap() = where_bounds;
                     }
 
                     if let Some(super_type_info) = &data_struct_define.super_type_info {

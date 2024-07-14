@@ -675,12 +675,12 @@ fn parse_user_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocato
 
     let generics_define = parse_generics_define(cursor);
     if generics_define.is_none() {
-        error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::Colon, TokenKind::BraceLeft]));
+        error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::Colon, TokenKind::Where, TokenKind::BraceLeft]));
     }
 
     let super_type_info = parse_super_type_info(cursor);
     if super_type_info.is_none() {
-        error_tokens.merged_extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft]));
+        error_tokens.merged_extend(recover_until_token_found(cursor, &[TokenKind::Where, TokenKind::BraceLeft]));
     }
 
     let where_clause = parse_where_clause(cursor, TokenKind::BraceLeft);

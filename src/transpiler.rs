@@ -170,6 +170,7 @@ async fn transpile_module(
         &mut generics_map,
         &mut module_entity_type_map,
         &mut implements_infos,
+        &Type::Unknown,
         &mut errors,
         &mut warnings,
         None,

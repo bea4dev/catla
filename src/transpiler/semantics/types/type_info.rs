@@ -104,6 +104,20 @@ impl Type {
             _ => ty.clone()
         }
     }
+    
+    pub(crate) fn replace_this_type(&self, new_this_type: &Type) -> Self {
+        match self {
+            Type::UserType { user_type_info, generics, generics_span } => todo!(),
+            Type::Function { function_info, generics } => todo!(),
+            Type::Generic(_) => todo!(),
+            Type::LocalGeneric(_) => todo!(),
+            Type::Option(_) => todo!(),
+            Type::Result { value, error } => todo!(),
+            Type::This => todo!(),
+            Type::Unknown => todo!(),
+            _ => self.clone()
+        }
+    }
 
     fn get_where_bounds_with_generics(
         where_bounds: &Vec<WhereBound>,

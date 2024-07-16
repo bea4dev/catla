@@ -1518,6 +1518,7 @@ pub(crate) fn type_inference_program<'allocator>(
                                             module_user_type_map,
                                             module_element_type_map,
                                             generics_map,
+                                            current_scope_this_type,
                                             errors,
                                             warnings,
                                             context
@@ -3921,6 +3922,7 @@ fn type_inference_generics<'allocator>(
                 module_user_type_map,
                 module_element_type_map,
                 generics_map,
+                current_scope_this_type,
                 errors,
                 warnings,
                 context

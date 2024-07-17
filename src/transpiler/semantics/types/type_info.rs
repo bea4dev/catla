@@ -603,9 +603,7 @@ impl ImplementsInfo {
     
     fn contains_target_type(
         self_type: &Type,
-        self_this_type: &Type,
         ty: &Type,
-        this_type: &Type,
         global_implements_info_set: &ImplementsInfoSet,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         type_environment: &mut TypeEnvironment,
@@ -622,9 +620,7 @@ impl ImplementsInfo {
 
             return ImplementsInfo::contains_target_type(
                 self_type,
-                self_this_type,
                 &ty.value,
-                this_type,
                 global_implements_info_set,
                 current_scope_implements_info_set,
                 type_environment,
@@ -636,43 +632,12 @@ impl ImplementsInfo {
 
             return ImplementsInfo::contains_target_type(
                 &self_type.value,
-                self_this_type,
                 ty,
-                this_type,
                 global_implements_info_set,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
             );
-        }
-
-        if let Type::This = ty {
-            if this_type != &Type::This {
-                return ImplementsInfo::contains_target_type(
-                    self_type,
-                    self_this_type,
-                    this_type,
-                    this_type,
-                    global_implements_info_set,
-                    current_scope_implements_info_set,
-                    type_environment,
-                    allow_unknown
-                );
-            }
-        }
-        if let Type::This = self_type {
-            if self_this_type != &Type::This {
-                return ImplementsInfo::contains_target_type(
-                    self_this_type,
-                    self_this_type,
-                    ty,
-                    this_type,
-                    global_implements_info_set,
-                    current_scope_implements_info_set,
-                    type_environment,
-                    allow_unknown
-                );
-            }
         }
 
         match self_type {
@@ -707,7 +672,6 @@ impl ImplementsInfo {
                                 self_generic,
                                 generic,
                                 global_implements_info_set,
-                                current_scope_this_type,
                                 current_scope_implements_info_set,
                                 type_environment,
                                 allow_unknown
@@ -721,7 +685,6 @@ impl ImplementsInfo {
                                 &self_generic,
                                 generic,
                                 global_implements_info_set,
-                                current_scope_this_type,
                                 current_scope_implements_info_set,
                                 type_environment,
                                 allow_unknown
@@ -742,7 +705,6 @@ impl ImplementsInfo {
                         &self_function_info.return_type.value,
                         &function_info.return_type.value,
                         global_implements_info_set,
-                        current_scope_this_type,
                         current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
@@ -762,7 +724,6 @@ impl ImplementsInfo {
                             self_argument_type,
                             argument_type,
                             global_implements_info_set,
-                            current_scope_this_type,
                             current_scope_implements_info_set,
                             type_environment,
                             allow_unknown
@@ -785,7 +746,6 @@ impl ImplementsInfo {
                                 &self_bound.ty,
                                 &bound.ty,
                                 global_implements_info_set,
-                                current_scope_this_type,
                                 current_scope_implements_info_set,
                                 type_environment,
                                 allow_unknown
@@ -808,7 +768,6 @@ impl ImplementsInfo {
                         ty,
                         &bound.ty,
                         type_environment,
-                        current_scope_this_type,
                         current_scope_implements_info_set,
                         allow_unknown
                     ) {
@@ -824,7 +783,6 @@ impl ImplementsInfo {
                         &self_value_type,
                         &value_type,
                         global_implements_info_set,
-                        current_scope_this_type,
                         current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
@@ -839,7 +797,6 @@ impl ImplementsInfo {
                         &self_value,
                         &value,
                         global_implements_info_set,
-                        current_scope_this_type,
                         current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
@@ -847,7 +804,6 @@ impl ImplementsInfo {
                         &self_error,
                         &error,
                         global_implements_info_set,
-                        current_scope_this_type,
                         current_scope_implements_info_set,
                         type_environment,
                         allow_unknown
@@ -895,7 +851,6 @@ impl ImplementsInfoSet {
         ty: &Type,
         interface: &Type,
         type_environment: &mut TypeEnvironment,
-        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allow_unknown: bool
     ) -> bool {
@@ -906,7 +861,6 @@ impl ImplementsInfoSet {
             interface,
             &resolved_ty,
             self,
-            current_scope_this_type,
             current_scope_implements_info_set,
             type_environment,
             allow_unknown
@@ -920,7 +874,6 @@ impl ImplementsInfoSet {
                     interface,
                     &bound.ty,
                     self,
-                    current_scope_this_type,
                     current_scope_implements_info_set,
                     type_environment,
                     allow_unknown
@@ -943,7 +896,6 @@ impl ImplementsInfoSet {
                 &implements_info.interface.value,
                 interface,
                 self,
-                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
@@ -951,7 +903,6 @@ impl ImplementsInfoSet {
                 interface,
                 &implements_info.interface.value,
                 self,
-                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
@@ -959,7 +910,6 @@ impl ImplementsInfoSet {
                 &implements_info.concrete.value,
                 ty,
                 self,
-                current_scope_this_type,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
@@ -992,7 +942,7 @@ impl ImplementsInfoSet {
                     &(0..0),
                     &resolved_ty,
                     &(0..0),
-                    current_scope_this_type,
+                    &Type::This,
                     allow_unknown
                 );
                 let result2 = type_environment.unify_type(
@@ -1000,7 +950,7 @@ impl ImplementsInfoSet {
                     &(0..0),
                     &resolved_interface,
                     &(0..0),
-                    current_scope_this_type,
+                    &Type::This,
                     allow_unknown
                 );
 
@@ -1027,7 +977,6 @@ impl ImplementsInfoSet {
                             &target_type,
                             &bound_type,
                             type_environment,
-                            current_scope_this_type,
                             current_scope_implements_info_set,
                             allow_unknown
                         ) {
@@ -1050,7 +999,6 @@ impl ImplementsInfoSet {
         ty: &Type,
         bounds: &Vec<Arc<Bound>>,
         type_environment: &mut TypeEnvironment,
-        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allow_unknown: bool
     ) -> Result<(), Vec<Arc<Bound>>> {
@@ -1060,7 +1008,6 @@ impl ImplementsInfoSet {
                 ty,
                 &bound.ty,
                 type_environment,
-                current_scope_this_type,
                 current_scope_implements_info_set,
                 allow_unknown
             ) {
@@ -1097,7 +1044,6 @@ impl ImplementsInfoSet {
                 &implements_info.concrete.value,
                 ty,
                 self,
-                ty,
                 current_scope_implements_info_set,
                 type_environment,
                 true
@@ -1153,7 +1099,6 @@ impl ImplementsInfoSet {
                         &where_bound.target_type.value,
                         &bound.ty,
                         type_environment,
-                        &impl_concrete,
                         current_scope_implements_info_set,
                         true
                     ) {
@@ -1295,7 +1240,6 @@ impl OverrideElementsEnvironment {
                             &Type::Generic(replaced.clone()),
                             &bounds_generics.bounds.freeze_and_get(),
                             type_environment,
-                            concrete_type,
                             &interface_element_implements_info_set,
                             false
                         ).is_err() {
@@ -1310,7 +1254,6 @@ impl OverrideElementsEnvironment {
                             &where_bound.target_type.value,
                             &where_bound.bounds,
                             type_environment,
-                            concrete_type,
                             &interface_element_implements_info_set,
                             false
                         ).is_err() {

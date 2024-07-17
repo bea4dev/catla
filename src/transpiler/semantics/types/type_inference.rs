@@ -851,7 +851,6 @@ impl<'allocator> TypeEnvironment<'allocator> {
                         &type_resolved.value,
                         &generics_define.bounds.freeze_and_get(),
                         self,
-                        scope_this_type,
                         scope_implements_info_set,
                         false
                     );
@@ -888,7 +887,6 @@ impl<'allocator> TypeEnvironment<'allocator> {
                         target_type,
                         bounds,
                         self,
-                        scope_this_type,
                         scope_implements_info_set,
                         false
                     );
@@ -3547,7 +3545,6 @@ fn type_inference_primary_right<'allocator>(
                             &where_bound.target_type.value,
                             &bound.ty,
                             type_environment,
-                            current_scope_this_type,
                             current_scope_implements_info_set,
                             true
                         ) {

@@ -107,7 +107,28 @@ impl Type {
     
     pub(crate) fn replace_this_type(&self, new_this_type: &Type) -> Self {
         match self {
-            Type::UserType { user_type_info, generics, generics_span } => todo!(),
+            Type::UserType { user_type_info, generics, generics_span } => {
+                let user_type_info = DataStructInfo {
+                    module_name: user_type_info.module_name.clone(),
+                    name: user_type_info.name.clone(),
+                    define_span: user_type_info.define_span.clone(),
+                    kind: user_type_info.kind,
+                    generics_define: Type::replace_generics_define_this_type(&user_type_info.generics_define, new_this_type),
+                    generics_define_span: user_type_info.generics_define_span.clone(),
+                    element_types: todo!(),
+                    where_bounds: todo!(),
+                };
+                
+                let generics = generics.iter()
+                    .map(|ty| { ty.replace_this_type(new_this_type) })
+                    .collect();
+                
+                Type::UserType {
+                    user_type_info: (),
+                    generics: Arc::new(generics),
+                    generics_span: ()
+                }
+            },
             Type::Function { function_info, generics } => todo!(),
             Type::Generic(_) => todo!(),
             Type::LocalGeneric(_) => todo!(),
@@ -117,6 +138,36 @@ impl Type {
             Type::Unknown => todo!(),
             _ => self.clone()
         }
+    }
+    
+    fn replace_bounds_this_type(bounds: &Vec<Arc<Bound>>, new_this_type: &Type) -> Vec<Arc<Bound>> {
+        bounds.iter()
+            .map(|bound| {
+                Arc::new(Bound {
+                    module_name: bound.module_name.clone(),
+                    span: bound.span.clone(),
+                    ty: bound.ty.replace_this_type(new_this_type),
+                    entity_id: bound.entity_id
+                })
+            })
+            .collect()
+    }
+    
+    fn replace_generics_define_this_type(generics_define: &Vec<Arc<GenericType>>, new_this_type: &Type) -> Vec<Arc<GenericType>> {
+        generics_define.iter()
+            .map(|generic_define| {
+                let bounds = Type::replace_bounds_this_type(
+                    &generic_define.bounds.freeze_and_get(),
+                    new_this_type
+                );
+                
+                Arc::new(GenericType {
+                    define_entity_id: generic_define.define_entity_id,
+                    name: generic_define.name.clone(),
+                    bounds: FreezableMutex::new(bounds)
+                })
+            })
+            .collect()
     }
 
     fn get_where_bounds_with_generics(
@@ -596,7 +647,8 @@ pub struct ImplementsInfo {
     pub concrete: Spanned<Type>,
     pub module_name: Arc<String>,
     pub where_bounds: Arc<Vec<WhereBound>>,
-    pub element_types: Arc<FxHashMap<String, WithDefineInfo<Type>>>
+    pub element_types: Arc<FxHashMap<String, WithDefineInfo<Type>>>,
+    pub is_bounds_info: bool
 }
 
 impl ImplementsInfo {
@@ -1115,7 +1167,8 @@ impl ImplementsInfoSet {
                     concrete: Spanned::new(impl_concrete, implements_info.concrete.span.clone()),
                     module_name: implements_info.module_name.clone(),
                     where_bounds: Arc::new(where_bounds),
-                    element_types: implements_info.element_types.clone()
+                    element_types: implements_info.element_types.clone(),
+                    is_bounds_info: implements_info.is_bounds_info
                 };
 
                 satisfied_implementations.push(CollectedImplementation {
@@ -1225,7 +1278,8 @@ impl OverrideElementsEnvironment {
                                 concrete: where_bound.target_type.clone(),
                                 module_name: context.module_name.clone(),
                                 where_bounds: Arc::new(Vec::new()),
-                                element_types: Arc::new(FxHashMap::default())
+                                element_types: Arc::new(FxHashMap::default()),
+                                is_bounds_info: true
                             }
                         );
                     }

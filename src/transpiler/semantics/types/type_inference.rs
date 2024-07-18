@@ -1302,7 +1302,8 @@ pub(crate) fn type_inference_program<'allocator>(
                                 concrete: Spanned::new(Type::This, name.span.clone()),
                                 module_name: context.module_name.clone(),
                                 where_bounds: Arc::new(Vec::new()),
-                                element_types: Arc::new(FxHashMap::default())
+                                element_types: Arc::new(FxHashMap::default()),
+                                is_bounds_info: true
                             }
                         );
                         current_scope_implements_info_set = Some(Arc::new(implements_info_set));
@@ -1339,7 +1340,8 @@ pub(crate) fn type_inference_program<'allocator>(
                                 concrete: Spanned::new(user_type.clone(), name.span.clone()),
                                 module_name: context.module_name.clone(),
                                 where_bounds: Arc::new(Vec::new()),
-                                element_types: Arc::new(FxHashMap::default())
+                                element_types: Arc::new(FxHashMap::default()),
+                                is_bounds_info: true
                             });
                         }
                     }
@@ -1665,7 +1667,8 @@ fn get_and_check_where_bounds_implements_info(
                 concrete: where_bound.target_type.clone(),
                 module_name: context.module_name.clone(),
                 where_bounds: Arc::new(Vec::new()),
-                element_types: Arc::new(FxHashMap::default())
+                element_types: Arc::new(FxHashMap::default()),
+                is_bounds_info: true
             });
         }
     }

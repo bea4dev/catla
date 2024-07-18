@@ -375,7 +375,8 @@ pub(crate) fn collect_module_element_types_program(
                                 concrete: Spanned::new(concrete.clone(), name.span.clone()),
                                 module_name: context.module_name.clone(),
                                 where_bounds: Arc::new(Vec::new()),
-                                element_types: Arc::new(FxHashMap::default())
+                                element_types: Arc::new(FxHashMap::default()),
+                                is_bounds_info: true
                             };
                             implements_infos.insert(EntityID::from(type_info), implements_info);
                         }
@@ -474,7 +475,8 @@ pub(crate) fn collect_module_element_types_program(
                             concrete,
                             module_name: context.module_name.clone(),
                             where_bounds: Arc::new(where_bounds),
-                            element_types: Arc::new(FxHashMap::default())
+                            element_types: Arc::new(FxHashMap::default()),
+                            is_bounds_info: false
                         })
                     } else {
                         None
@@ -511,7 +513,8 @@ pub(crate) fn collect_module_element_types_program(
                         concrete: implements_info.concrete,
                         module_name: implements_info.module_name,
                         where_bounds: implements_info.where_bounds,
-                        element_types: Arc::new(element_types)
+                        element_types: Arc::new(element_types),
+                        is_bounds_info: false
                     };
                     implements_infos.insert(EntityID::from(implements), implements_info);
                 } else {

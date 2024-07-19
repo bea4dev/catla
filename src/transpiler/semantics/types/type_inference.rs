@@ -3501,7 +3501,7 @@ fn type_inference_primary_right<'allocator>(
         );
         
         for implementation in implementations {
-            let element_type = implementation.implements_info.element_types.get(element_name);
+            let element_type = implementation.implements_info.get_element_type(element_name);
             if let Some(element_type) = element_type {
                 let ty = Type::get_type_with_replaced_generics(
                     &element_type.value,

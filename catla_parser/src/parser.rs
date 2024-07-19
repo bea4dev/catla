@@ -206,7 +206,7 @@ pub struct UserTypeDefine<'allocator, 'input> {
 
 pub type UserTypeKind = Spanned<UserTypeKindEnum>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserTypeKindEnum {
     Class,
     Struct,

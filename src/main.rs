@@ -57,7 +57,7 @@ interface TestInterface2 {
     function <S> test2(let this) {}
 }
 
-function <T> aaa(i: T) where T: TestInterface1 {
+function <T> aaa(i: T) where T: TestInterface2 {
     let a = i.test2()
 }
 

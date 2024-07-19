@@ -108,6 +108,20 @@ impl Type {
     pub(crate) fn replace_this_type(&self, new_this_type: &Type) -> Self {
         match self {
             Type::UserType { user_type_info, generics, generics_span } => {
+                let mut element_types = user_type_info.element_types.lock().unwrap().clone();
+                for (_, element_type) in element_types.iter_mut() {
+                    *element_type = WithDefineInfo {
+                        value: element_type.value.replace_this_type(new_this_type),
+                        module_name: element_type.module_name.clone(),
+                        span: element_type.span.clone()
+                    };
+                }
+                
+                let where_bounds = Type::replace_where_bounds_this_type(
+                    &user_type_info.where_bounds.freeze_and_get(),
+                    new_this_type
+                );
+                
                 let user_type_info = DataStructInfo {
                     module_name: user_type_info.module_name.clone(),
                     name: user_type_info.name.clone(),
@@ -115,8 +129,8 @@ impl Type {
                     kind: user_type_info.kind,
                     generics_define: Type::replace_generics_define_this_type(&user_type_info.generics_define, new_this_type),
                     generics_define_span: user_type_info.generics_define_span.clone(),
-                    element_types: todo!(),
-                    where_bounds: todo!(),
+                    element_types: Mutex::new(element_types),
+                    where_bounds: FreezableMutex::new(where_bounds)
                 };
                 
                 let generics = generics.iter()
@@ -124,18 +138,56 @@ impl Type {
                     .collect();
                 
                 Type::UserType {
-                    user_type_info: (),
+                    user_type_info: Arc::new(user_type_info),
                     generics: Arc::new(generics),
-                    generics_span: ()
+                    generics_span: generics_span.clone()
                 }
             },
-            Type::Function { function_info, generics } => todo!(),
-            Type::Generic(_) => todo!(),
-            Type::LocalGeneric(_) => todo!(),
-            Type::Option(_) => todo!(),
-            Type::Result { value, error } => todo!(),
-            Type::This => todo!(),
-            Type::Unknown => todo!(),
+            Type::Function { function_info, generics } => {
+                let argument_types = function_info.argument_types.iter()
+                    .map(|ty| { ty.replace_this_type(new_this_type) })
+                    .collect();
+                
+                let where_bounds = Type::replace_where_bounds_this_type(
+                    &function_info.where_bounds.freeze_and_get(),
+                    new_this_type
+                );
+                
+                let function_info = FunctionType {
+                    is_extension: function_info.is_extension,
+                    generics_define: Type::replace_generics_define_this_type(&function_info.generics_define, new_this_type),
+                    argument_types,
+                    return_type: function_info.return_type.clone().map(|ty| { ty.replace_this_type(new_this_type) }),
+                    define_info: function_info.define_info.clone(),
+                    where_bounds: FreezableMutex::new(where_bounds)
+                };
+                
+                let generics = generics.iter()
+                    .map(|ty| { ty.replace_this_type(new_this_type) })
+                    .collect();
+                
+                Type::Function {
+                    function_info: Arc::new(function_info),
+                    generics: Arc::new(generics)
+                }
+            },
+            Type::Generic(generic) => {
+                let bounds = Type::replace_bounds_this_type(&generic.bounds.freeze_and_get(), new_this_type);
+                
+                Type::Generic(Arc::new(GenericType {
+                    define_entity_id: generic.define_entity_id,
+                    name: generic.name.clone(),
+                    bounds: FreezableMutex::new(bounds)
+                }))
+            },
+            Type::Option(value) => Type::Option(Arc::new(value.replace_this_type(new_this_type))),
+            Type::Result { value, error } => {
+                Type::Result {
+                    value: Arc::new(value.replace_this_type(new_this_type)),
+                    error: Arc::new(error.replace_this_type(new_this_type))
+                }
+            },
+            Type::This => new_this_type.clone(),
             _ => self.clone()
         }
     }
@@ -166,6 +218,17 @@ impl Type {
                     name: generic_define.name.clone(),
                     bounds: FreezableMutex::new(bounds)
                 })
+            })
+            .collect()
+    }
+    
+    fn replace_where_bounds_this_type(where_bounds: &Vec<WhereBound>, new_this_type: &Type) -> Vec<WhereBound> {
+        where_bounds.iter()
+            .map(|where_bound| {
+                WhereBound {
+                    target_type: where_bound.target_type.clone().map(|ty| { ty.replace_this_type(new_this_type) }),
+                    bounds: Type::replace_bounds_this_type(&where_bound.bounds, new_this_type)
+                }
             })
             .collect()
     }
@@ -866,6 +929,21 @@ impl ImplementsInfo {
             },
             Type::This => unreachable!(),
             Type::Unknown => false
+        }
+    }
+    
+    pub(crate) fn get_element_type(&self, element_name: &str) -> Option<WithDefineInfo<Type>> {
+        if self.is_bounds_info {
+            self.interface.value.get_element_type_with_replaced_generic(element_name)
+                .map(|ty| {
+                    WithDefineInfo {
+                        value: ty.value.replace_this_type(&self.concrete.value),
+                        module_name: ty.module_name.clone(),
+                        span: ty.span.clone()
+                    }
+                })
+        } else {
+            self.element_types.get(element_name).cloned()
         }
     }
 

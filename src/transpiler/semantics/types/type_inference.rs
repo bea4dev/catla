@@ -77,7 +77,6 @@ impl<'allocator> TypeEnvironment<'allocator> {
     pub fn get_user_or_function_type_with_local_generic_id(
         &mut self,
         ty: Spanned<Type>,
-        current_scope_this_type: &Type,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         register_bounds_check: bool
     ) -> Spanned<Type> {
@@ -114,7 +113,6 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 type_span: ty.span.clone(),
                 ty: Spanned::new(local_generic.clone(), ty.span.clone()),
                 generic_define: generic_define.clone(),
-                scope_this_type: current_scope_this_type.clone(),
                 scope_implements_info_set: current_scope_implements_info_set.clone()
             });
         }
@@ -126,7 +124,6 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     type_span: ty.span.clone(),
                     target_type: where_bound.target_type.value.clone(),
                     bounds: where_bound.bounds.clone(),
-                    scope_this_type: current_scope_this_type.clone(),
                     scope_implements_info_set: current_scope_implements_info_set.clone()
                 });
             }
@@ -838,7 +835,6 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     type_span,
                     ty,
                     generic_define: generics_define,
-                    scope_this_type,
                     scope_implements_info_set
                 } => {
                     let type_resolved = if let Type::LocalGeneric(generic_id) = &ty.value {
@@ -880,7 +876,6 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     type_span,
                     target_type,
                     bounds,
-                    scope_this_type,
                     scope_implements_info_set
                 } => {
                     let result = global_implements_info_set.is_satisfied(
@@ -946,7 +941,8 @@ impl<'allocator> TypeEnvironment<'allocator> {
     fn add_check_type_info_bounds(
         &mut self,
         ty: Spanned<Type>,
-        current_scope_this_type: &Type,
+        this_type: &Type,
+        check_this_type_bounds: bool,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>
     ) {
         if let Type::UserType { user_type_info, generics, generics_span } = &ty.value {
@@ -962,7 +958,10 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 }
             }).flatten();
             
-            let generics_define = ty.value.get_generics_define_with_replaced_generic().unwrap();
+            let mut generics_define = ty.value.get_generics_define_with_replaced_generic().unwrap();
+            if ty.value.is_interface() {
+                generics_define = Type::replace_generics_define_this_type(&generics_define, this_type);
+            }
 
             for i in 0..generics.len() {
                 let generic_define = &generics_define[i];
@@ -976,23 +975,42 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     type_span: ty.span.clone(),
                     ty: Spanned::new(generic.clone(), generic_span.clone()),
                     generic_define: generic_define.clone(),
-                    scope_this_type: current_scope_this_type.clone(),
                     scope_implements_info_set: current_scope_implements_info_set.clone()
                 });
 
                 self.add_check_type_info_bounds(
                     Spanned::new(generic.clone(), generic_span),
-                    current_scope_this_type,
+                    this_type,
+                    check_this_type_bounds,
                     current_scope_implements_info_set
                 );
             }
+            
+            let where_bounds = ty.value.get_where_bounds_with_replaced_generic().unwrap();
+            let replaced_where_bounds = if ty.value.is_interface() {
+                Some(Type::replace_where_bounds_this_type(&where_bounds, this_type))
+            } else {
+                None
+            };
 
-            for where_bound in ty.value.get_where_bounds_with_replaced_generic().unwrap().into_iter() {
+            for i in 0..where_bounds.len() {
+                let where_bound = &where_bounds[i];
+                let replaced_where_bound = if let Some(replaced_where_bounds) = &replaced_where_bounds {
+                    &replaced_where_bounds[i]
+                } else {
+                    where_bound
+                };
+                
+                if !check_this_type_bounds {
+                    if &where_bound.target_type.value == &Type::This {
+                        continue;
+                    }
+                }
+                
                 self.generic_bounds_checks.push(GenericsBoundCheck::Where {
                     type_span: ty.span.clone(),
-                    target_type: where_bound.target_type.value.clone(),
-                    bounds: where_bound.bounds.clone(),
-                    scope_this_type: current_scope_this_type.clone(),
+                    target_type: replaced_where_bound.target_type.value.clone(),
+                    bounds: replaced_where_bound.bounds.clone(),
                     scope_implements_info_set: current_scope_implements_info_set.clone()
                 });
             }
@@ -1015,14 +1033,12 @@ pub(crate) enum GenericsBoundCheck {
         type_span: Range<usize>,
         ty: Spanned<Type>,
         generic_define: Arc<GenericType>,
-        scope_this_type: Type,
         scope_implements_info_set: Option<Arc<ImplementsInfoSet>>
     },
     Where {
         type_span: Range<usize>,
         target_type: Type,
         bounds: Vec<Arc<Bound>>,
-        scope_this_type: Type,
         scope_implements_info_set: Option<Arc<ImplementsInfoSet>>
     }
 }
@@ -1229,7 +1245,6 @@ pub(crate) fn type_inference_program<'allocator>(
 
                     let current_scope_implements_info_set = get_and_check_where_bounds_implements_info(
                         &function_info.where_bounds.freeze_and_get(),
-                        current_scope_this_type,
                         current_scope_implements_info_set,
                         &mut type_environment,
                         context
@@ -1280,7 +1295,6 @@ pub(crate) fn type_inference_program<'allocator>(
                     Type::UserType { user_type_info, generics: _, generics_span: _ } => {
                         get_and_check_where_bounds_implements_info(
                             &user_type_info.where_bounds.freeze_and_get(),
-                            &this_type,
                             &None,
                             type_environment,
                             context
@@ -1328,7 +1342,8 @@ pub(crate) fn type_inference_program<'allocator>(
 
                         type_environment.add_check_type_info_bounds(
                             Spanned::new(super_type.clone(), type_info.span.clone()),
-                            &this_type,
+                            &user_type,
+                            true,
                             &current_scope_implements_info_set
                         );
 
@@ -1386,7 +1401,6 @@ pub(crate) fn type_inference_program<'allocator>(
                 let current_scope_implements_info_set = if let Some(implements_info) = implements_info {
                     get_and_check_where_bounds_implements_info(
                         &implements_info.where_bounds,
-                        &concrete,
                         &None,
                         type_environment,
                         context
@@ -1399,6 +1413,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     type_environment.add_check_type_info_bounds(
                         Spanned::new(concrete.clone(), target_type.span.clone()),
                         &concrete,
+                        true,
                         &current_scope_implements_info_set
                     );
                 }
@@ -1413,6 +1428,7 @@ pub(crate) fn type_inference_program<'allocator>(
                     type_environment.add_check_type_info_bounds(
                         Spanned::new(interface.clone(), interface_info.span.clone()),
                         &concrete,
+                        true,
                         &current_scope_implements_info_set
                     );
                 }
@@ -1535,7 +1551,8 @@ pub(crate) fn type_inference_program<'allocator>(
                 if let Some(type_tag) = &variable_define.type_tag {
                     type_environment.add_check_type_info_bounds(
                         Spanned::new(tag_type.clone(), type_tag.span.clone()),
-                        current_scope_this_type,
+                        &Type::This,
+                        false,
                         current_scope_implements_info_set
                     );
                 }
@@ -1630,7 +1647,6 @@ pub(crate) fn type_inference_program<'allocator>(
 
 fn get_and_check_where_bounds_implements_info(
     where_bounds: &Vec<WhereBound>,
-    current_scope_this_type: &Type,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     type_environment: &mut TypeEnvironment,
     context: &TranspileModuleContext
@@ -1650,14 +1666,16 @@ fn get_and_check_where_bounds_implements_info(
 
         type_environment.add_check_type_info_bounds(
             where_bound.target_type.clone(),
-            current_scope_this_type,
+            &where_bound.target_type.value,
+            true,
             &current_implements_info_set
         );
 
         for bound in where_bound.bounds.iter() {
             type_environment.add_check_type_info_bounds(
                 Spanned::new(bound.ty.clone(), bound.span.clone()),
-                current_scope_this_type,
+                &where_bound.target_type.value,
+                false,
                 &current_implements_info_set
             );
 
@@ -2500,7 +2518,6 @@ fn type_inference_primary<'allocator>(
             
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(ty, second_expr.0.span.clone()),
-                current_scope_this_type,
                 current_scope_implements_info_set,
                 true
             );
@@ -2834,7 +2851,6 @@ fn type_inference_primary_left<'allocator>(
 
                                 let ty = type_environment.get_user_or_function_type_with_local_generic_id(
                                     Spanned::new(ty, identifier.span.clone()),
-                                    current_scope_this_type,
                                     current_scope_implements_info_set,
                                     true
                                 );
@@ -3019,7 +3035,6 @@ fn type_inference_primary_left<'allocator>(
 
             let mut user_type = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(user_type, user_type_span),
-                current_scope_this_type,
                 current_scope_implements_info_set,
                 true
             );
@@ -3500,6 +3515,8 @@ fn type_inference_primary_right<'allocator>(
             allocator
         );
         
+        dbg!(element_name, implementations.len());
+        
         for implementation in implementations {
             let element_type = implementation.implements_info.get_element_type(element_name);
             if let Some(element_type) = element_type {
@@ -3536,7 +3553,6 @@ fn type_inference_primary_right<'allocator>(
         'root: for (element_type, interface_and_where_bounds) in pre_element_types {
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(element_type.value, second_expr.0.span.clone()),
-                current_scope_this_type,
                 current_scope_implements_info_set,
                 false
             ).value;
@@ -3599,7 +3615,6 @@ fn type_inference_primary_right<'allocator>(
                             type_span: second_expr.0.span.clone(),
                             target_type: where_bound.target_type.value.clone(),
                             bounds: where_bound.bounds.clone(),
-                            scope_this_type: user_type.value.clone(),
                             scope_implements_info_set: current_scope_implements_info_set.clone()
                         });
                     }
@@ -3613,7 +3628,6 @@ fn type_inference_primary_right<'allocator>(
                             type_span: second_expr.0.span.clone(),
                             target_type: where_bound.target_type.value.clone(),
                             bounds: where_bound.bounds.clone(),
-                            scope_this_type: concrete.clone(),
                             scope_implements_info_set: current_scope_implements_info_set.clone()
                         });
                     }
@@ -3936,8 +3950,9 @@ fn type_inference_generics<'allocator>(
             );
 
             type_environment.add_check_type_info_bounds(
-                ty,
-                current_scope_this_type,
+                ty.clone(),
+                &ty.value,
+                true,
                 current_scope_implements_info_set
             );
         }

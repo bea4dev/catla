@@ -53,11 +53,15 @@ function <T, E> error(error: E) -> T!<E> {}
 
 
 interface TestInterface1 {}
-interface TestInterface2 {
+interface TestInterface2 where This: TestInterface1 {
     function <S> test2(let this) {}
 }
 
-function <T> aaa(i: T) where T: TestInterface2 {
+implements<T> TestInterface2 for T where T: TestInterface1 {
+    override function <S> test2(let this) {}
+}
+
+function <T: TestInterface2> aaa(i: T) {
     let a = i.test2()
 }
 

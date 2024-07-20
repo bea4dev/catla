@@ -105,47 +105,53 @@ impl Type {
         }
     }
     
-    pub(crate) fn replace_this_type(&self, new_this_type: &Type) -> Self {
+    pub(crate) fn replace_this_type(&self, new_this_type: &Type, replace_field_recursive: bool) -> Self {
         match self {
             Type::UserType { user_type_info, generics, generics_span } => {
-                let mut element_types = user_type_info.element_types.lock().unwrap().clone();
-                for (_, element_type) in element_types.iter_mut() {
-                    *element_type = WithDefineInfo {
-                        value: element_type.value.replace_this_type(new_this_type),
-                        module_name: element_type.module_name.clone(),
-                        span: element_type.span.clone()
+                let user_type_info = if replace_field_recursive {
+                    let mut element_types = user_type_info.element_types.lock().unwrap().clone();
+                    for (_, element_type) in element_types.iter_mut() {
+                        *element_type = WithDefineInfo {
+                            value: element_type.value.replace_this_type(new_this_type, false),
+                            module_name: element_type.module_name.clone(),
+                            span: element_type.span.clone()
+                        };
+                    }
+                    
+                    let where_bounds = Type::replace_where_bounds_this_type(
+                        &user_type_info.where_bounds.freeze_and_get(),
+                        new_this_type
+                    );
+                    
+                    let user_type_info = DataStructInfo {
+                        module_name: user_type_info.module_name.clone(),
+                        name: user_type_info.name.clone(),
+                        define_span: user_type_info.define_span.clone(),
+                        kind: user_type_info.kind,
+                        generics_define: Type::replace_generics_define_this_type(&user_type_info.generics_define, new_this_type),
+                        generics_define_span: user_type_info.generics_define_span.clone(),
+                        element_types: Mutex::new(element_types),
+                        where_bounds: FreezableMutex::new(where_bounds)
                     };
-                }
-                
-                let where_bounds = Type::replace_where_bounds_this_type(
-                    &user_type_info.where_bounds.freeze_and_get(),
-                    new_this_type
-                );
-                
-                let user_type_info = DataStructInfo {
-                    module_name: user_type_info.module_name.clone(),
-                    name: user_type_info.name.clone(),
-                    define_span: user_type_info.define_span.clone(),
-                    kind: user_type_info.kind,
-                    generics_define: Type::replace_generics_define_this_type(&user_type_info.generics_define, new_this_type),
-                    generics_define_span: user_type_info.generics_define_span.clone(),
-                    element_types: Mutex::new(element_types),
-                    where_bounds: FreezableMutex::new(where_bounds)
+                    
+                    Arc::new(user_type_info)
+                } else {
+                    user_type_info.clone()
                 };
                 
                 let generics = generics.iter()
-                    .map(|ty| { ty.replace_this_type(new_this_type) })
+                    .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive) })
                     .collect();
                 
                 Type::UserType {
-                    user_type_info: Arc::new(user_type_info),
+                    user_type_info,
                     generics: Arc::new(generics),
                     generics_span: generics_span.clone()
                 }
             },
             Type::Function { function_info, generics } => {
                 let argument_types = function_info.argument_types.iter()
-                    .map(|ty| { ty.replace_this_type(new_this_type) })
+                    .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive) })
                     .collect();
                 
                 let where_bounds = Type::replace_where_bounds_this_type(
@@ -157,13 +163,13 @@ impl Type {
                     is_extension: function_info.is_extension,
                     generics_define: Type::replace_generics_define_this_type(&function_info.generics_define, new_this_type),
                     argument_types,
-                    return_type: function_info.return_type.clone().map(|ty| { ty.replace_this_type(new_this_type) }),
+                    return_type: function_info.return_type.clone().map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive) }),
                     define_info: function_info.define_info.clone(),
                     where_bounds: FreezableMutex::new(where_bounds)
                 };
                 
                 let generics = generics.iter()
-                    .map(|ty| { ty.replace_this_type(new_this_type) })
+                    .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive) })
                     .collect();
                 
                 Type::Function {
@@ -180,11 +186,11 @@ impl Type {
                     bounds: FreezableMutex::new(bounds)
                 }))
             },
-            Type::Option(value) => Type::Option(Arc::new(value.replace_this_type(new_this_type))),
+            Type::Option(value) => Type::Option(Arc::new(value.replace_this_type(new_this_type, replace_field_recursive))),
             Type::Result { value, error } => {
                 Type::Result {
-                    value: Arc::new(value.replace_this_type(new_this_type)),
-                    error: Arc::new(error.replace_this_type(new_this_type))
+                    value: Arc::new(value.replace_this_type(new_this_type, replace_field_recursive)),
+                    error: Arc::new(error.replace_this_type(new_this_type, replace_field_recursive))
                 }
             },
             Type::This => new_this_type.clone(),
@@ -192,20 +198,20 @@ impl Type {
         }
     }
     
-    fn replace_bounds_this_type(bounds: &Vec<Arc<Bound>>, new_this_type: &Type) -> Vec<Arc<Bound>> {
+    pub(crate) fn replace_bounds_this_type(bounds: &Vec<Arc<Bound>>, new_this_type: &Type) -> Vec<Arc<Bound>> {
         bounds.iter()
             .map(|bound| {
                 Arc::new(Bound {
                     module_name: bound.module_name.clone(),
                     span: bound.span.clone(),
-                    ty: bound.ty.replace_this_type(new_this_type),
+                    ty: bound.ty.replace_this_type(new_this_type, false),
                     entity_id: bound.entity_id
                 })
             })
             .collect()
     }
     
-    fn replace_generics_define_this_type(generics_define: &Vec<Arc<GenericType>>, new_this_type: &Type) -> Vec<Arc<GenericType>> {
+    pub(crate) fn replace_generics_define_this_type(generics_define: &Vec<Arc<GenericType>>, new_this_type: &Type) -> Vec<Arc<GenericType>> {
         generics_define.iter()
             .map(|generic_define| {
                 let bounds = Type::replace_bounds_this_type(
@@ -222,11 +228,11 @@ impl Type {
             .collect()
     }
     
-    fn replace_where_bounds_this_type(where_bounds: &Vec<WhereBound>, new_this_type: &Type) -> Vec<WhereBound> {
+    pub(crate) fn replace_where_bounds_this_type(where_bounds: &Vec<WhereBound>, new_this_type: &Type) -> Vec<WhereBound> {
         where_bounds.iter()
             .map(|where_bound| {
                 WhereBound {
-                    target_type: where_bound.target_type.clone().map(|ty| { ty.replace_this_type(new_this_type) }),
+                    target_type: where_bound.target_type.clone().map(|ty| { ty.replace_this_type(new_this_type, false) }),
                     bounds: Type::replace_bounds_this_type(&where_bound.bounds, new_this_type)
                 }
             })
@@ -494,6 +500,15 @@ impl Type {
             Type::UserType { user_type_info, generics: _, generics_span: _ } => {
                 let element_types = user_type_info.element_types.lock().unwrap();
                 element_types.contains_key("type")
+            },
+            _ => false
+        }
+    }
+    
+    pub(crate) fn is_interface(&self) -> bool {
+        match self {
+            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
+                user_type_info.kind == UserTypeKindEnum::Interface
             },
             _ => false
         }
@@ -937,7 +952,7 @@ impl ImplementsInfo {
             self.interface.value.get_element_type_with_replaced_generic(element_name)
                 .map(|ty| {
                     WithDefineInfo {
-                        value: ty.value.replace_this_type(&self.concrete.value),
+                        value: ty.value.replace_this_type(&self.concrete.value, true),
                         module_name: ty.module_name.clone(),
                         span: ty.span.clone()
                     }

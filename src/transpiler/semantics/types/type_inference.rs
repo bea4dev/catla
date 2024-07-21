@@ -1,4 +1,4 @@
-use std::{alloc::Allocator, ops::{Deref, Range}, sync::Arc};
+use std::{alloc::Allocator, collections::HashSet, ops::{Deref, Range}, sync::Arc};
 
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
@@ -1016,6 +1016,26 @@ impl<'allocator> TypeEnvironment<'allocator> {
             }
         }
     }
+    
+    fn add_check_type_info_generics_define(
+        &mut self,
+        generics_define: &Vec<Arc<GenericType>>,
+        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>
+    ) {
+        for generic_define in generics_define.iter() {
+            let target_type = Type::Generic(generic_define.clone());
+            
+            for bound in generic_define.bounds.freeze_and_get().iter() {
+                let bound_type = Spanned::new(bound.ty.clone(), bound.span.clone());
+                self.add_check_type_info_bounds(
+                    bound_type,
+                    &target_type,
+                    false,
+                    current_scope_implements_info_set
+                );
+            }
+        }
+    }
 
 }
 
@@ -1249,6 +1269,11 @@ pub(crate) fn type_inference_program<'allocator>(
                         &mut type_environment,
                         context
                     );
+                    
+                    type_environment.add_check_type_info_generics_define(
+                        &function_info.generics_define,
+                        &current_scope_implements_info_set
+                    );
 
                     if let Some(block) = &function_define.block.value {
                         type_inference_program(
@@ -1302,6 +1327,13 @@ pub(crate) fn type_inference_program<'allocator>(
                     },
                     _ => None
                 };
+                
+                if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &user_type {
+                    type_environment.add_check_type_info_generics_define(
+                        &user_type_info.generics_define,
+                        &current_scope_implements_info_set
+                    );
+                }
 
                 if user_type_define.kind.value == UserTypeKindEnum::Interface {
                     if let Ok(name) = &user_type_define.name {
@@ -1408,6 +1440,13 @@ pub(crate) fn type_inference_program<'allocator>(
                 } else {
                     None
                 };
+                
+                if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &concrete {
+                    type_environment.add_check_type_info_generics_define(
+                        &user_type_info.generics_define,
+                        &current_scope_implements_info_set
+                    );
+                }
                 
                 if let Ok(target_type) = &implements.target_user_type {
                     type_environment.add_check_type_info_bounds(
@@ -3505,7 +3544,21 @@ fn type_inference_primary_right<'allocator>(
 
         let mut pre_element_types = Vec::new_in(allocator);
         if let Some(element_type) = element_type {
-            pre_element_types.push((element_type, None));
+            pre_element_types.push((element_type, user_type.value.clone(), None));
+        }
+        
+        if let Type::Generic(generic_define) = &user_type.value {
+            for bound in generic_define.bounds.freeze_and_get().iter() {
+                if let Some(element_type) = bound.ty.get_element_type_with_replaced_generic(element_name) {
+                    let element_type = element_type
+                        .map(|ty| { ty.replace_this_type(&user_type.value, true) });
+                    pre_element_types.push((
+                        element_type,
+                        bound.ty.clone(),
+                        None
+                    ));
+                }
+            }
         }
 
         let implementations = global_implements_info_set.collect_satisfied_implementations(
@@ -3514,8 +3567,6 @@ fn type_inference_primary_right<'allocator>(
             current_scope_implements_info_set,
             allocator
         );
-        
-        dbg!(element_name, implementations.len());
         
         for implementation in implementations {
             let element_type = implementation.implements_info.get_element_type(element_name);
@@ -3535,6 +3586,7 @@ fn type_inference_primary_right<'allocator>(
                             module_name: element_type.module_name.clone(),
                             span: element_type.span.clone()
                         },
+                        interface.value.clone(),
                         Some((
                             WithDefineInfo {
                                 value: interface.value,
@@ -3549,8 +3601,17 @@ fn type_inference_primary_right<'allocator>(
             }
         }
 
+        let mut origin_types = HashSet::new();
         let mut element_types = Vec::new_in(allocator);
-        'root: for (element_type, interface_and_where_bounds) in pre_element_types {
+        'root: for (element_type, origin_type, interface_and_where_bounds) in pre_element_types {
+            if let Type::UserType { user_type_info, generics: _, generics_span: _ } = origin_type {
+                let origin_type_name = (user_type_info.module_name.deref().clone(), user_type_info.name.value.clone());
+                if origin_types.contains(&origin_type_name) {
+                    continue;
+                }
+                origin_types.insert(origin_type_name);
+            }
+            
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(element_type.value, second_expr.0.span.clone()),
                 current_scope_implements_info_set,

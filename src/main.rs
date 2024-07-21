@@ -63,7 +63,10 @@ implements<T> TestInterface2 for T where T: TestInterface1 {
 
 function <T: TestInterface2> aaa(i: T) {
     let a = i.test2()
+    ccc(i)
 }
+
+function ccc(i: T) where T: TestInterface2 {}
 
 function bbb(i: TestInterface2) {
     let b = i.test2()

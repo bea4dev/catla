@@ -6,7 +6,7 @@ use derivative::Derivative;
 use either::Either;
 use fxhash::FxHashMap;
 
-use crate::transpiler::{component::EntityID, context::TranspileModuleContext};
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, TranspileError};
 
 use super::type_inference::TypeEnvironment;
 
@@ -1423,4 +1423,21 @@ impl OverrideElementsEnvironment {
             .collect()
     }
 
+}
+
+
+pub enum NoOverrideElementError {
+    NotFoundEqualsName { override_keyword_span: Range<usize>, name: Spanned<String> },
+    NotEqualsType { origin: WithDefineInfo<Type>, found: WithDefineInfo<Type> },
+    ExtraBounds { target: Spanned<Type>, bounds: WithDefineInfo<Type> }
+}
+
+impl NoOverrideElementError {
+    pub(crate) fn collect(&self, type_environment: &mut TypeEnvironment, errors: &mut Vec<TranspileError>) {
+        match self {
+            NoOverrideElementError::NotFoundEqualsName { override_keyword_span, name } => {
+                
+            }
+        }
+    }
 }

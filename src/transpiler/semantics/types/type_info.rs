@@ -1,12 +1,13 @@
 use std::{mem::swap, ops::Range, sync::{Arc, Mutex, MutexGuard, PoisonError}};
 
+use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
 use catla_parser::parser::{Spanned, UserTypeKindEnum};
 use derivative::Derivative;
 use either::Either;
 use fxhash::FxHashMap;
 
-use crate::transpiler::{component::EntityID, context::TranspileModuleContext, TranspileError};
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, TranspileError};
 
 use super::type_inference::TypeEnvironment;
 
@@ -183,7 +184,8 @@ impl Type {
                 Type::Generic(Arc::new(GenericType {
                     define_entity_id: generic.define_entity_id,
                     name: generic.name.clone(),
-                    bounds: FreezableMutex::new(bounds)
+                    bounds: FreezableMutex::new(bounds),
+                    location: generic.location.clone()
                 }))
             },
             Type::Option(value) => Type::Option(Arc::new(value.replace_this_type(new_this_type, replace_field_recursive))),
@@ -222,7 +224,8 @@ impl Type {
                 Arc::new(GenericType {
                     define_entity_id: generic_define.define_entity_id,
                     name: generic_define.name.clone(),
-                    bounds: FreezableMutex::new(bounds)
+                    bounds: FreezableMutex::new(bounds),
+                    location: generic_define.location.clone()
                 })
             })
             .collect()
@@ -634,7 +637,8 @@ impl<T> WithDefineInfo<T> {
 pub struct GenericType {
     pub(crate) define_entity_id: EntityID,
     pub name: Arc<String>,
-    pub bounds: FreezableMutex<Vec<Arc<Bound>>>
+    pub bounds: FreezableMutex<Vec<Arc<Bound>>>,
+    pub location: WithDefineInfo<()>
 }
 
 impl GenericType {
@@ -665,7 +669,8 @@ impl GenericType {
         GenericType {
             define_entity_id: self.define_entity_id,
             name: self.name.clone(),
-            bounds: FreezableMutex::new(self.get_bounds_with_replaced_generic(generics_define, replace_generics))
+            bounds: FreezableMutex::new(self.get_bounds_with_replaced_generic(generics_define, replace_generics)),
+            location: self.location.clone()
         }
     }
     
@@ -1314,12 +1319,10 @@ impl OverrideElementsEnvironment {
         type_environment: &mut TypeEnvironment,
         context: &TranspileModuleContext
     ) -> Result<(), NoOverrideElementError> {
-        let mut no_override_element_error = None;
-        
-        'root : for ((interface, name, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
+        for ((interface, name, interface_element_type), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
             let element_type = element_type.replace_method_instance_type(&interface.value);
             
-            let interface_element_generics_define = match &ty.value {
+            let interface_element_generics_define = match &interface_element_type.value {
                 Type::UserType { user_type_info, generics: _, generics_span: _ } => {
                     Some(&user_type_info.generics_define)
                 },
@@ -1329,8 +1332,8 @@ impl OverrideElementsEnvironment {
                 _ => None
             };
             
-            let element_type = if let Some(replace_generics) = &interface_element_generics_define {
-                let replace_generics = replace_generics.iter()
+            let element_type_replaced = if let Some(interface_element_generics) = &interface_element_generics_define {
+                let interface_element_generics = interface_element_generics.iter()
                     .map(|generic| { Type::Generic(generic.clone()) })
                     .collect::<Vec<_>>();
                 
@@ -1338,10 +1341,10 @@ impl OverrideElementsEnvironment {
 
                 match &element_type {
                     Type::UserType { user_type_info, generics: _, generics_span: _ } => {
-                        Type::get_type_with_replaced_generics(&element_type, &user_type_info.generics_define, &replace_generics)
+                        Type::get_type_with_replaced_generics(&element_type, &user_type_info.generics_define, &interface_element_generics)
                     },
                     Type::Function { function_info, generics: _ } => {
-                        Type::get_type_with_replaced_generics(&element_type, &function_info.generics_define, &replace_generics)
+                        Type::get_type_with_replaced_generics(&element_type, &function_info.generics_define, &interface_element_generics)
                     },
                     _ => element_type.clone()
                 }
@@ -1351,20 +1354,20 @@ impl OverrideElementsEnvironment {
 
             if name == element_name.value {
                 if type_environment.unify_type(
-                    &ty.value,
+                    &interface_element_type.value,
                     &(0..0),
-                    &element_type,
+                    &element_type_replaced,
                     &(0..0),
                     concrete_type,
                     true
                 ).is_ok() {
                     
-                    if ty.value.get_generics_define_length() != element_type.get_generics_define_length() {
+                    if interface_element_type.value.get_generics_define_length() != element_type_replaced.get_generics_define_length() {
                         continue;
                     }
                     
                     let mut interface_element_implements_info_set = ImplementsInfoSet::new();
-                    for where_bound in ty.value.get_where_bounds().unwrap().iter() {
+                    for where_bound in interface_element_type.value.get_where_bounds().unwrap().iter() {
                         for bound in where_bound.bounds.iter() {
                             interface_element_implements_info_set.insert(
                                 bound.entity_id,
@@ -1382,32 +1385,38 @@ impl OverrideElementsEnvironment {
                     }
                     let interface_element_implements_info_set = Some(Arc::new(interface_element_implements_info_set));
                     
-                    if let Some(generics_define) = element_type.get_generics_define_with_replaced_generic() {
+                    if let Some(element_type_generics_define) = element_type_replaced.get_generics_define_with_replaced_generic() {
                         let replaced_generics = interface_element_generics_define.unwrap();
                         
-                        for (replaced, bounds_generics) in replaced_generics.iter().zip(generics_define.iter()) {
-                            if global_implements_info_set.is_satisfied(
+                        for (replaced, bounds_generics) in replaced_generics.iter().zip(element_type_generics_define.iter()) {
+                            if let Err(bounds) = global_implements_info_set.is_satisfied(
                                 &Type::Generic(replaced.clone()),
                                 &bounds_generics.bounds.freeze_and_get(),
                                 type_environment,
                                 &interface_element_implements_info_set,
                                 false
-                            ).is_err() {
-                                continue 'root;
+                            ) {
+                                return Err(NoOverrideElementError::ExtraBounds {
+                                    target: Type::Generic(replaced.clone()),
+                                    bounds
+                                });
                             }
                         }
                     }
                     
-                    if let Some(where_bounds) = element_type.get_where_bounds_with_replaced_generic() {
+                    if let Some(where_bounds) = element_type_replaced.get_where_bounds_with_replaced_generic() {
                         for where_bound in where_bounds.iter() {
-                            if global_implements_info_set.is_satisfied(
+                            if let Err(bounds) = global_implements_info_set.is_satisfied(
                                 &where_bound.target_type.value,
                                 &where_bound.bounds,
                                 type_environment,
                                 &interface_element_implements_info_set,
                                 false
-                            ).is_err() {
-                                continue 'root;
+                            ) {
+                                return Err(NoOverrideElementError::ExtraBounds {
+                                    target: where_bound.target_type.value.clone(),
+                                    bounds
+                                });
                             }
                         }
                     }
@@ -1415,13 +1424,21 @@ impl OverrideElementsEnvironment {
                     *is_found = true;
                     return Ok(());
                 } else {
-                    
-                    no_override_element_error = Some(NoOverrideElementError::NotEqualsType { origin: (), found: () })
+                    return Err(NoOverrideElementError::NotEqualsType {
+                        origin: interface_element_type.clone(),
+                        found: WithDefineInfo {
+                            value: element_type_replaced.clone(),
+                            module_name: context.module_name.clone(),
+                            span: element_name.span.clone()
+                        }
+                    });
                 }
             }
         }
         
-        Err(NoOverrideElementError::NotFoundEqualsName { name: () })
+        Err(NoOverrideElementError::NotFoundEqualsName {
+            name: element_name.map(|name| { name.to_string() })
+        })
     }
 
     pub fn collect_not_impl(self) -> Vec<(Spanned<Type>, String, WithDefineInfo<Type>)> {
@@ -1437,15 +1454,108 @@ impl OverrideElementsEnvironment {
 pub enum NoOverrideElementError {
     NotFoundEqualsName { name: Spanned<String> },
     NotEqualsType { origin: WithDefineInfo<Type>, found: WithDefineInfo<Type> },
-    ExtraBounds { target: Spanned<Type>, bounds: WithDefineInfo<Type> }
+    ExtraBounds { target: Type, bounds: Vec<Arc<Bound>> }
 }
 
 impl NoOverrideElementError {
-    pub(crate) fn collect(&self, type_environment: &mut TypeEnvironment, errors: &mut Vec<TranspileError>) {
-        match self {
-            NoOverrideElementError::NotFoundEqualsName { override_keyword_span, name } => {
-                
+    pub(crate) fn collect(
+        &self,
+        override_keyword_span: Range<usize>,
+        interface_span: Range<usize>,
+        type_environment: &mut TypeEnvironment,
+        errors: &mut Vec<TranspileError>,
+        context: &TranspileModuleContext
+    ) {
+        let error = match self {
+            NoOverrideElementError::NotFoundEqualsName { name  } => {
+                TranspileError::new(SimpleError::new(
+                    0057,
+                    override_keyword_span,
+                    vec![],
+                    vec![
+                        ((context.module_name.clone(), name.span.clone()), Color::Red),
+                        ((context.module_name.clone(), interface_span), Color::Yellow)
+                    ]
+                ))
+            },
+            NoOverrideElementError::NotEqualsType { origin, found } => {
+                TranspileError::new(SimpleError::new(
+                    0058,
+                    override_keyword_span,
+                    vec![
+                        (type_environment.get_type_display_string(&origin.value), Color::Yellow),
+                        (type_environment.get_type_display_string(&found.value), Color::Red)
+                    ],
+                    vec![
+                        ((origin.module_name.clone(), origin.span.clone()), Color::Yellow),
+                        ((found.module_name.clone(), found.span.clone()), Color::Red)
+                    ]
+                ))
+            },
+            NoOverrideElementError::ExtraBounds { target, bounds } => {
+                TranspileError::new(ExtraBoundsError {
+                    override_keyword_span,
+                    target: type_environment.get_type_display_string(target),
+                    bounds: bounds.iter()
+                        .map(|bound| {
+                            Spanned::new(
+                                type_environment.get_type_display_string(&bound.ty),
+                                bound.span.clone()
+                            )
+                        })
+                        .collect()
+                })
             }
+        };
+        errors.push(error);
+    }
+}
+
+
+struct ExtraBoundsError {
+    override_keyword_span: Range<usize>,
+    target: String,
+    bounds: Vec<Spanned<String>>
+}
+
+impl TranspileReport for ExtraBoundsError {
+    fn print(&self, context: &TranspileModuleContext) {
+        let module_name = &context.module_name;
+        let text = &context.context.localized_text;
+        let error_code = 0059;
+        let key = ErrorMessageKey::new(error_code);
+
+        let message = key.get_massage(text, ErrorMessageType::Message);
+
+        let mut builder = Report::build(ReportKind::Error, module_name, self.override_keyword_span.start)
+            .with_code(error_code)
+            .with_message(message);
+
+        for bound in self.bounds.iter() {
+            let bound_str = format!(
+                "{}: {}",
+                self.target.clone().fg(Color::Yellow).to_string(),
+                bound.value.clone().fg(Color::Red).to_string()
+            );
+            
+            builder.add_label(
+                Label::new((module_name, bound.span.clone()))
+                    .with_color(Color::Red)
+                    .with_message(
+                        key.get_massage(text, ErrorMessageType::Label(0))
+                            .replace("%bound", &bound_str)
+                    )
+            );
         }
+
+        if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
+            builder.set_note(note);
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+        builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
     }
 }

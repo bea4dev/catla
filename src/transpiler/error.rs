@@ -1,6 +1,6 @@
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
-use ariadne::{Color, Label, Report, ReportKind, Source};
+use ariadne::{sources, Color, Fmt, Label, Report, ReportKind};
 
 use crate::localize::localizer::LocalizedText;
 
@@ -59,16 +59,16 @@ impl ErrorMessageType {
 pub(crate) struct SimpleError {
     error_code: usize,
     message_span: Range<usize>,
-    message_replace: Vec<String>,
-    labels: Vec<(Range<usize>, Color)>
+    message_replace: Vec<(String, Color)>,
+    labels: Vec<((Arc<String>, Range<usize>), Color)>
 }
 
 impl SimpleError {
     pub(crate) fn new(
         error_code: usize,
         message_span: Range<usize>,
-        message_replace: Vec<String>,
-        labels: Vec<(Range<usize>, Color)>
+        message_replace: Vec<(String, Color)>,
+        labels: Vec<((Arc<String>, Range<usize>), Color)>
     ) -> TranspileError {
         TranspileError::new(SimpleError { error_code, message_span, message_replace, labels })
     }
@@ -80,10 +80,11 @@ impl TranspileReport for SimpleError {
         let text = &context.context.localized_text;
         let key = ErrorMessageKey::new(self.error_code);
 
-        fn replace_message(mut message: String, message_replace: &Vec<String>) -> String {
+        fn replace_message(mut message: String, message_replace: &Vec<(String, Color)>) -> String {
             for i in 0..message_replace.len() {
                 let target = format!("%{}", i);
-                message = message.replace(&target, &message_replace[i]);
+                let (replace_message, color) = &message_replace[i];
+                message = message.replace(&target, replace_message.clone().fg(*color).to_string().as_str());
             }
             message
         }
@@ -91,18 +92,18 @@ impl TranspileReport for SimpleError {
         let mut message = key.get_massage(text, ErrorMessageType::Message);
         message = replace_message(message, &self.message_replace);
 
-        let mut builder = Report::build(ReportKind::Error, module_name, self.message_span.start)
+        let mut builder = Report::build(ReportKind::Error, module_name.as_ref(), self.message_span.start)
             .with_code(self.error_code)
             .with_message(message);
 
         let mut index = 0;
-        for label in self.labels.iter() {
+        for ((module_name, span), color) in self.labels.iter() {
             let mut message = key.get_massage(text, ErrorMessageType::Label(index));
             message = replace_message(message, &self.message_replace);
 
             builder.add_label(
-                Label::new((module_name, label.0.clone()))
-                    .with_color(label.1.clone())
+                Label::new((module_name.as_ref().clone(), span.clone()))
+                    .with_color(*color)
                     .with_message(message)
             );
             index += 1;
@@ -117,7 +118,21 @@ impl TranspileReport for SimpleError {
             let message = replace_message(help, &self.message_replace);
             builder.set_help(message);
         }
+        
+        let mut module_names = self.labels.iter()
+            .map(|((module_name, _), _)| { module_name.as_ref().clone() })
+            .collect::<Vec<_>>();
+        module_names.push(module_name.as_ref().clone());
+        
+        let context = &context.context;
+        let source_code_vec = module_names.iter()
+            .map(|module_name| { context.get_module_context(module_name).unwrap().source_code.clone() })
+            .collect::<Vec<_>>();
+        
+        let sources_vec = module_names.into_iter().zip(source_code_vec.iter())
+            .map(|(module_name, source_code)| { (module_name, source_code.code.as_str()) })
+            .collect::<Vec<_>>();
 
-        builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+        builder.finish().print(sources(sources_vec)).unwrap();
     }
 }

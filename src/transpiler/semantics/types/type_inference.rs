@@ -22,8 +22,7 @@ const NUMBER_OF_GENERICS_MISMATCH_ERROR: usize = 0048;
 const WHERE_BOUNDS_NOT_SATISFIED_ERROR: usize = 0050;
 const DUPLICATED_ELEMENT_ERROR: usize = 0051;
 const UNRESOLVED_INTERFACE: usize = 0052;
-const NO_OVERRIDE_TARGET_ERROR: usize = 0056;
-const INVALID_OVERRIDE_ERROR: usize = 0057;
+const INVALID_OVERRIDE_ERROR: usize = 0056;
 
 
 pub(crate) struct TypeEnvironment<'allocator> {
@@ -812,14 +811,15 @@ impl<'allocator> TypeEnvironment<'allocator> {
         implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
         global_implements_info_set: &ImplementsInfoSet,
         errors: &mut Vec<TranspileError>,
-        warnings: &mut Vec<TranspileWarning>
+        warnings: &mut Vec<TranspileWarning>,
+        context: &TranspileModuleContext
     ) {
         implicit_convert_map.extend(&self.implicit_convert_map);
 
         self.type_check_bounds(global_implements_info_set, errors);
 
         for report in self.lazy_type_reports.iter() {
-            match report.build_report(self) {
+            match report.build_report(self, context) {
                 Either::Left(error) => errors.push(error),
                 Either::Right(warning) => warnings.push(warning),
             }
@@ -1210,39 +1210,35 @@ pub(crate) fn type_inference_program<'allocator>(
 
                 if let Ok(name) = &function_define.name {
                     if function_define.attributes.contains(StatementAttributeKind::Override) {
-                        let override_span = function_define.attributes.get_span(StatementAttributeKind::Override).unwrap();
+                        let override_keyword_span = function_define.attributes.get_span(StatementAttributeKind::Override).unwrap();
 
                         if implements_interfaces.is_empty() {
                             let mut error = TranspileError::new(SimpleError::new(
                                 INVALID_OVERRIDE_ERROR,
-                                override_span.clone(),
+                                override_keyword_span.clone(),
                                 vec![],
-                                vec![(override_span.clone(), Color::Red)]
+                                vec![((context.module_name.clone(), override_keyword_span.clone()), Color::Red)]
                             ));
                             error.add_advice(
                                 context.module_name.clone(),
-                                Advice::Remove { span: override_span }
+                                Advice::Remove { span: override_keyword_span }
                             );
                             errors.push(error);
-                        } else if !override_elements_environment.check(
-                            name.value,
-                            function_type,
-                            current_scope_this_type,
-                            global_implements_info_set,
-                            type_environment,
-                            context
-                        ) {
+                        } else {
                             let interface_span_start = implements_interfaces.first().unwrap().span.start;
                             let interface_span_end = implements_interfaces.last().unwrap().span.end;
                             let interface_span = interface_span_start..interface_span_end;
 
-                            let error = TranspileError::new(SimpleError::new(
-                                NO_OVERRIDE_TARGET_ERROR,
-                                override_span.clone(),
-                                vec![],
-                                vec![(override_span, Color::Red), (interface_span, Color::Yellow)]
-                            ));
-                            errors.push(error);
+                            if let Err(error) = override_elements_environment.check(
+                                name.clone(),
+                                function_type,
+                                current_scope_this_type,
+                                global_implements_info_set,
+                                type_environment,
+                                context
+                            ) {
+                                error.collect(override_keyword_span, interface_span, type_environment, errors, context);
+                            }
                         }
                     }
                 }
@@ -1300,7 +1296,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         );
                     }
 
-                    type_environment.collect_info(implicit_convert_map, global_implements_info_set, errors, warnings);
+                    type_environment.collect_info(implicit_convert_map, global_implements_info_set, errors, warnings, context);
                 }
             },
             StatementAST::UserTypeDefine(user_type_define) => {
@@ -1419,7 +1415,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         context
                     );
 
-                    type_environment.collect_info(implicit_convert_map, global_implements_info_set, errors, warnings);
+                    type_environment.collect_info(implicit_convert_map, global_implements_info_set, errors, warnings, context);
                 }
             },
             StatementAST::Implements(implements) => {
@@ -2485,7 +2481,10 @@ fn type_inference_primary<'allocator>(
                 0043,
                 next_span.clone(),
                 vec![],
-                vec![(span, Color::Yellow), (next_span.clone(), Color::Red)]
+                vec![
+                    ((context.module_name.clone(), span), Color::Yellow),
+                    ((context.module_name.clone(), next_span.clone()), Color::Red)
+                ]
             );
             let mut error = TranspileError::new(error);
 
@@ -2515,7 +2514,10 @@ fn type_inference_primary<'allocator>(
                 0042,
                 span.clone(),
                 vec![],
-                vec![(next_primary.span.clone(), Color::Yellow), (span, Color::Red)]
+                vec![
+                    ((context.module_name.clone(), next_primary.span.clone()), Color::Yellow),
+                    ((context.module_name.clone(), span), Color::Red)
+                ]
             );
             errors.push(TranspileError::new(error));
 
@@ -2548,7 +2550,10 @@ fn type_inference_primary<'allocator>(
                     0044,
                     span.clone(),
                     vec![],
-                    vec![(first_span_start..first_span_end, Color::Yellow), (span, Color::Red)]
+                    vec![
+                        ((context.module_name.clone(), first_span_start..first_span_end), Color::Yellow),
+                        ((context.module_name.clone(), span), Color::Red)
+                    ]
                 );
                 errors.push(error);
 
@@ -2705,7 +2710,10 @@ fn type_inference_primary<'allocator>(
                 0043,
                 span.clone(),
                 vec![],
-                vec![(first_span_start..first_span_end, Color::Yellow), (span, Color::Red)]
+                vec![
+                    ((context.module_name.clone(), first_span_start..first_span_end), Color::Yellow),
+                    ((context.module_name.clone(), span), Color::Red)
+                ]
             );
             let mut error = TranspileError::new(error);
 
@@ -3146,7 +3154,7 @@ fn type_inference_primary_left<'allocator>(
                         0036,
                         span.clone(),
                         vec![],
-                        vec![(span, Color::Red)]
+                        vec![((context.module_name.clone(), span), Color::Red)]
                     );
                     errors.push(error);
                 }
@@ -4153,7 +4161,7 @@ fn type_inference_function_call<'allocator>(
 
 
 pub(crate) trait LazyTypeReport {
-    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning>;
+    fn build_report(&self, type_environment: &TypeEnvironment, context: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning>;
 }
 
 
@@ -4164,7 +4172,7 @@ pub(crate) struct TypeMismatchError {
 }
 
 impl LazyTypeReport for TypeMismatchError {
-    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+    fn build_report(&self, type_environment: &TypeEnvironment, context: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
         let func = |ty| { type_environment.get_type_display_string(&ty) };
 
         let type_0 = self.type_0.clone().map(func);
@@ -4375,12 +4383,15 @@ struct NotFoundTypeElementError {
 }
 
 impl LazyTypeReport for NotFoundTypeElementError {
-    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+    fn build_report(&self, type_environment: &TypeEnvironment, context: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
         let error = SimpleError::new(
             0037,
             self.name.span.clone(),
-            vec![type_environment.get_type_display_string(&self.user_type), self.name.value.to_string()],
-            vec![(self.name.span.clone(), Color::Red)]
+            vec![
+                (type_environment.get_type_display_string(&self.user_type), Color::Yellow),
+                (self.name.value.to_string(), Color::Red)
+            ],
+            vec![((context.module_name.clone(), self.name.span.clone()), Color::Red)]
         );
         Either::Left(error)
     }
@@ -4394,14 +4405,14 @@ struct SimpleTypeError {
 }
 
 impl LazyTypeReport for SimpleTypeError {
-    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+    fn build_report(&self, type_environment: &TypeEnvironment, context: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
         let ty = self.ty.clone().map(|ty| { type_environment.get_type_display_string(&ty) });
         
         let error = SimpleError::new(
             self.error_code,
             self.ty.span.clone(),
-            vec![ty.value],
-            vec![(ty.span, Color::Red)]
+            vec![(ty.value, Color::Red)],
+            vec![((context.module_name.clone(), ty.span), Color::Red)]
         );
         Either::Left(error)
     }
@@ -4478,7 +4489,7 @@ struct UnexpectedTypeError {
 }
 
 impl LazyTypeReport for UnexpectedTypeError {
-    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+    fn build_report(&self, type_environment: &TypeEnvironment, _: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
         let report = UnexpectedTypeErrorReport {
             error_code: self.error_code,
             found_type: self.found_type.clone().map(|ty| { type_environment.get_type_display_string(&ty) }),
@@ -4713,15 +4724,18 @@ struct InvalidSetGenericsTypeError {
 }
 
 impl LazyTypeReport for InvalidSetGenericsTypeError {
-    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+    fn build_report(&self, type_environment: &TypeEnvironment, context: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
         let type_name = type_environment.get_type_display_string(&self.ty.value)
             .fg(Color::Red).to_string();
 
         Either::Left(TranspileError::new(SimpleError::new(
             INVALID_SET_GENERICS_TYPE_ERROR,
             self.set_span.clone(),
-            vec![type_name],
-            vec![(self.set_span.clone(), Color::Red), (self.ty.span.clone(), Color::Yellow)]
+            vec![(type_name, Color::Yellow)],
+            vec![
+                ((context.module_name.clone(), self.set_span.clone()), Color::Red),
+                ((context.module_name.clone(), self.ty.span.clone()), Color::Yellow)
+            ]
         )))
     }
 }
@@ -4735,7 +4749,7 @@ struct NumberOfGenericsMismatchError {
 }
 
 impl LazyTypeReport for NumberOfGenericsMismatchError {
-    fn build_report(&self, type_environment: &TypeEnvironment) -> Either<TranspileError, TranspileWarning> {
+    fn build_report(&self, type_environment: &TypeEnvironment, _: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
         let type_name = type_environment.get_type_display_string(&self.ty.value)
             .fg(Color::Yellow).to_string();
 

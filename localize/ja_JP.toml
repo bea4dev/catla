@@ -252,9 +252,16 @@ label_0 = ""
 message = "this可変性が記述されていません"
 label_0 = "メソッドにはthis可変性の明記が必要です"
 [error.0056]
+message = "無効な'override'です"
+label_0 = "'override'キーワードはインタフェースの実装時のみ使用できます"
+[error.0057]
 message = "overrideする対象が存在していません"
 label_0 = "指定されたインタフェースの中にこの要素は存在していません"
 label_1 = "インタフェースはここで指定されています"
-[error.0057]
-message = "無効な'override'です"
-label_0 = "'override'キーワードはインタフェースの実装時のみ使用できます"
+[error.0058]
+message = "overrideする対象と型が一致しません"
+label_0 = "この型は %0 です"
+label_1 = "この型は %1 です"
+[error.0059]
+message = "実装側に指定されている境界が元の関数よりも狭められています"
+label_0 = "%bound は境界として指定できません"

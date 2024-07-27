@@ -136,7 +136,7 @@ pub(crate) fn collect_module_element_types_program(
                                 0028,
                                 field_define.span.clone(),
                                 vec![],
-                                vec![(field_define.span.clone(), Color::Red)]
+                                vec![((context.module_name.clone(), field_define.span.clone()), Color::Red)]
                             );
                             errors.push(error);
                             Type::Unknown
@@ -614,7 +614,7 @@ pub(crate) fn collect_module_element_types_program(
                                 0029,
                                 span.clone(),
                                 vec![],
-                                vec![(span, Color::Red)]
+                                vec![((context.module_name.clone(), span), Color::Red)]
                             );
                             errors.push(error);
 
@@ -1719,8 +1719,11 @@ pub(crate) fn get_type(
                 let error = SimpleError::new(
                     0030,
                     span.clone(),
-                    vec![module_name.clone(), ast.path.last().unwrap().value.to_string()],
-                    vec![(span, Color::Red)]
+                    vec![
+                        (module_name.clone(), Color::Yellow),
+                        (ast.path.last().unwrap().value.to_string(), Color::Red)
+                    ],
+                    vec![((context.module_name.clone(), span), Color::Red)]
                 );
                 errors.push(error);
                 return Type::Unknown
@@ -1752,8 +1755,11 @@ pub(crate) fn get_type(
                     let error = SimpleError::new(
                         0033,
                         span.clone(),
-                        vec![text],
-                        vec![(span, Color::Red), (resolved.define_info.span.clone(), Color::Yellow)]
+                        vec![(text, Color::Red)],
+                        vec![
+                            ((context.module_name.clone(), span), Color::Red),
+                            ((context.module_name.clone(), resolved.define_info.span.clone()), Color::Yellow)
+                        ]
                     );
                     errors.push(error);
                 }
@@ -1824,7 +1830,10 @@ pub(crate) fn get_type(
                     0031,
                     span_1.clone(),
                     vec![],
-                    vec![(span_0, Color::Yellow), (span_1, Color::Red)]
+                    vec![
+                        ((context.module_name.clone(), span_0), Color::Yellow),
+                        ((context.module_name.clone(), span_1), Color::Red)
+                    ]
                 );
                 errors.push(error);
                 
@@ -1862,8 +1871,14 @@ pub(crate) fn get_type(
                             let error = SimpleError::new(
                                 0032,
                                 span_1.clone(),
-                                vec![1.to_string(), error_type.elements.len().to_string()],
-                                vec![(span_0, Color::Yellow), (span_1, Color::Red)]
+                                vec![
+                                    (1.to_string(), Color::Yellow),
+                                    (error_type.elements.len().to_string(), Color::Red)
+                                ],
+                                vec![
+                                    ((context.module_name.clone(), span_0), Color::Yellow),
+                                    ((context.module_name.clone(), span_1), Color::Red)
+                                ]
                             );
                             errors.push(error);
                             Type::Unknown
@@ -1930,6 +1945,7 @@ fn get_generic_type<'allocator>(
             define_entity_id: entity_id,
             name: Arc::new(element.name.value.to_string()),
             bounds: FreezableMutex::new(bounds),
+            location: WithDefineInfo { value: (), module_name: context.module_name.clone(), span: element.span.clone() }
         });
 
         generics_map.insert(entity_id, generic.clone());

@@ -6,7 +6,7 @@ use fxhash::FxHashMap;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext};
 
-use super::type_info::{DataStructInfo, FreezableMutex, GenericType, Type};
+use super::type_info::{DataStructInfo, FreezableMutex, GenericType, Type, WithDefineInfo};
 
 
 pub(crate) fn collect_user_type_program(
@@ -50,7 +50,8 @@ pub(crate) fn collect_user_type_program(
                             let generic_type = Arc::new(GenericType {
                                 define_entity_id: EntityID::from(element),
                                 name: Arc::new(element.name.value.to_string()),
-                                bounds: FreezableMutex::new(Vec::new())
+                                bounds: FreezableMutex::new(Vec::new()),
+                                location: WithDefineInfo { value: (), module_name: context.module_name.clone(), span: element.span.clone() }
                             });
                             generics_define.push(generic_type);
                         }
@@ -96,7 +97,8 @@ pub(crate) fn collect_user_type_program(
                             let generic_type = Arc::new(GenericType {
                                 define_entity_id: EntityID::from(element),
                                 name: Arc::new(element.name.value.to_string()),
-                                bounds: FreezableMutex::new(Vec::new())
+                                bounds: FreezableMutex::new(Vec::new()),
+                                location: WithDefineInfo { value: (), module_name: context.module_name.clone(), span: element.span.clone() }
                             });
                             generics_define.push(generic_type);
                         }

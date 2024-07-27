@@ -221,7 +221,13 @@ async fn transpile_module(
         &module_context
     );
 
-    type_environment.collect_info(&mut implicit_convert_map, &merged_implements_infos, &mut errors, &mut warnings);
+    type_environment.collect_info(
+        &mut implicit_convert_map,
+        &merged_implements_infos,
+        &mut errors,
+        &mut warnings,
+        &module_context
+    );
 
     module_context.context.add_error_and_warning(module_name, errors, warnings);
 }

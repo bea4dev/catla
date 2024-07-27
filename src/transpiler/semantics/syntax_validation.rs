@@ -44,7 +44,10 @@ pub(crate) fn validate_syntax_program(
             };
 
             if !is_valid {
-                let labels = vec![(span.clone(), Color::Red), (data_struct_span.clone(), Color::Yellow)];
+                let labels = vec![
+                    ((context.module_name.clone(), span.clone()), Color::Red),
+                    ((context.module_name.clone(), data_struct_span.clone()), Color::Yellow)
+                ];
                 let mut error = SimpleError::new(
                     ERROR_STATEMENT_IN_DATA_STRUCT_DEFINE_ENVIRONMENT,
                     span.clone(),
@@ -77,7 +80,7 @@ pub(crate) fn validate_syntax_program(
                         ERROR_INVALID_ASSIGNMENT_FORMAT,
                         span.clone(),
                         vec![],
-                        vec![(span, Color::Red)]
+                        vec![((context.module_name.clone(), span), Color::Red)]
                     ));
                 }
                 validate_syntax_expression(assignment.left_expr, context, errors, warnings);
@@ -92,7 +95,7 @@ pub(crate) fn validate_syntax_program(
                         ERROR_INVALID_ASSIGNMENT_FORMAT,
                         span.clone(),
                         vec![],
-                        vec![(span, Color::Red)]
+                        vec![((context.module_name.clone(), span), Color::Red)]
                     ));
                 }
                 validate_syntax_expression(exchange.left_expr, context,errors, warnings);
@@ -103,7 +106,7 @@ pub(crate) fn validate_syntax_program(
                             ERROR_INVALID_ASSIGNMENT_FORMAT,
                             span.clone(),
                             vec![],
-                            vec![(span, Color::Red)]
+                            vec![((context.module_name.clone(), span), Color::Red)]
                         ));
                     }
                     validate_syntax_expression(right_expr, context,errors, warnings);
@@ -125,7 +128,7 @@ pub(crate) fn validate_syntax_program(
                         0055,
                         function_define.args.span.clone(),
                         vec![],
-                        vec![(function_define.args.span.clone(), Color::Red)]
+                        vec![((context.module_name.clone(), function_define.args.span.clone()), Color::Red)]
                     ));
                     error.add_advice(
                         context.module_name.clone(),

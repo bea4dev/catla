@@ -1307,13 +1307,15 @@ impl OverrideElementsEnvironment {
 
     pub fn check(
         &mut self,
-        element_name: &str,
+        element_name: Spanned<&str>,
         element_type: &Type,
         concrete_type: &Type,
         global_implements_info_set: &ImplementsInfoSet,
         type_environment: &mut TypeEnvironment,
         context: &TranspileModuleContext
-    ) -> bool {
+    ) -> Result<(), NoOverrideElementError> {
+        let mut no_override_element_error = None;
+        
         'root : for ((interface, name, ty), is_found) in self.elements.iter().zip(self.is_found_flags.iter_mut()) {
             let element_type = element_type.replace_method_instance_type(&interface.value);
             
@@ -1347,73 +1349,79 @@ impl OverrideElementsEnvironment {
                 element_type
             };
 
-            if name == element_name && type_environment.unify_type(
-                &ty.value,
-                &(0..0),
-                &element_type,
-                &(0..0),
-                concrete_type,
-                true
-            ).is_ok() {
-                
-                if ty.value.get_generics_define_length() != element_type.get_generics_define_length() {
-                    continue;
-                }
-                
-                let mut interface_element_implements_info_set = ImplementsInfoSet::new();
-                for where_bound in ty.value.get_where_bounds().unwrap().iter() {
-                    for bound in where_bound.bounds.iter() {
-                        interface_element_implements_info_set.insert(
-                            bound.entity_id,
-                            ImplementsInfo {
-                                generics: Arc::new(Vec::new()),
-                                interface: Spanned::new(bound.ty.clone(), bound.span.clone()),
-                                concrete: where_bound.target_type.clone(),
-                                module_name: context.module_name.clone(),
-                                where_bounds: Arc::new(Vec::new()),
-                                element_types: Arc::new(FxHashMap::default()),
-                                is_bounds_info: true
-                            }
-                        );
-                    }
-                }
-                let interface_element_implements_info_set = Some(Arc::new(interface_element_implements_info_set));
-                
-                if let Some(generics_define) = element_type.get_generics_define_with_replaced_generic() {
-                    let replaced_generics = interface_element_generics_define.unwrap();
+            if name == element_name.value {
+                if type_environment.unify_type(
+                    &ty.value,
+                    &(0..0),
+                    &element_type,
+                    &(0..0),
+                    concrete_type,
+                    true
+                ).is_ok() {
                     
-                    for (replaced, bounds_generics) in replaced_generics.iter().zip(generics_define.iter()) {
-                        if global_implements_info_set.is_satisfied(
-                            &Type::Generic(replaced.clone()),
-                            &bounds_generics.bounds.freeze_and_get(),
-                            type_environment,
-                            &interface_element_implements_info_set,
-                            false
-                        ).is_err() {
-                            continue 'root;
+                    if ty.value.get_generics_define_length() != element_type.get_generics_define_length() {
+                        continue;
+                    }
+                    
+                    let mut interface_element_implements_info_set = ImplementsInfoSet::new();
+                    for where_bound in ty.value.get_where_bounds().unwrap().iter() {
+                        for bound in where_bound.bounds.iter() {
+                            interface_element_implements_info_set.insert(
+                                bound.entity_id,
+                                ImplementsInfo {
+                                    generics: Arc::new(Vec::new()),
+                                    interface: Spanned::new(bound.ty.clone(), bound.span.clone()),
+                                    concrete: where_bound.target_type.clone(),
+                                    module_name: context.module_name.clone(),
+                                    where_bounds: Arc::new(Vec::new()),
+                                    element_types: Arc::new(FxHashMap::default()),
+                                    is_bounds_info: true
+                                }
+                            );
                         }
                     }
-                }
-                
-                if let Some(where_bounds) = element_type.get_where_bounds_with_replaced_generic() {
-                    for where_bound in where_bounds.iter() {
-                        if global_implements_info_set.is_satisfied(
-                            &where_bound.target_type.value,
-                            &where_bound.bounds,
-                            type_environment,
-                            &interface_element_implements_info_set,
-                            false
-                        ).is_err() {
-                            continue 'root;
+                    let interface_element_implements_info_set = Some(Arc::new(interface_element_implements_info_set));
+                    
+                    if let Some(generics_define) = element_type.get_generics_define_with_replaced_generic() {
+                        let replaced_generics = interface_element_generics_define.unwrap();
+                        
+                        for (replaced, bounds_generics) in replaced_generics.iter().zip(generics_define.iter()) {
+                            if global_implements_info_set.is_satisfied(
+                                &Type::Generic(replaced.clone()),
+                                &bounds_generics.bounds.freeze_and_get(),
+                                type_environment,
+                                &interface_element_implements_info_set,
+                                false
+                            ).is_err() {
+                                continue 'root;
+                            }
                         }
                     }
+                    
+                    if let Some(where_bounds) = element_type.get_where_bounds_with_replaced_generic() {
+                        for where_bound in where_bounds.iter() {
+                            if global_implements_info_set.is_satisfied(
+                                &where_bound.target_type.value,
+                                &where_bound.bounds,
+                                type_environment,
+                                &interface_element_implements_info_set,
+                                false
+                            ).is_err() {
+                                continue 'root;
+                            }
+                        }
+                    }
+                    
+                    *is_found = true;
+                    return Ok(());
+                } else {
+                    
+                    no_override_element_error = Some(NoOverrideElementError::NotEqualsType { origin: (), found: () })
                 }
-                
-                *is_found = true;
-                return true;
             }
         }
-        false
+        
+        Err(NoOverrideElementError::NotFoundEqualsName { name: () })
     }
 
     pub fn collect_not_impl(self) -> Vec<(Spanned<Type>, String, WithDefineInfo<Type>)> {
@@ -1427,7 +1435,7 @@ impl OverrideElementsEnvironment {
 
 
 pub enum NoOverrideElementError {
-    NotFoundEqualsName { override_keyword_span: Range<usize>, name: Spanned<String> },
+    NotFoundEqualsName { name: Spanned<String> },
     NotEqualsType { origin: WithDefineInfo<Type>, found: WithDefineInfo<Type> },
     ExtraBounds { target: Spanned<Type>, bounds: WithDefineInfo<Type> }
 }

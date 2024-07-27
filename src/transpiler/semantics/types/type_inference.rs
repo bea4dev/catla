@@ -1666,6 +1666,8 @@ pub(crate) fn type_inference_program<'allocator>(
             Spanned::new(Type::Unit, ast.span.clone())
         );
     }
+    
+    override_elements_environment.collect_errors(errors, context);
 
     let mut builder = Report::build(ReportKind::Custom("Debug", Color::Cyan), &context.module_name, 0);
 

@@ -1353,6 +1353,8 @@ impl OverrideElementsEnvironment {
             };
 
             if name == element_name.value {
+                *is_found = true;
+                
                 if type_environment.unify_type(
                     &interface_element_type.value,
                     &(0..0),
@@ -1421,7 +1423,6 @@ impl OverrideElementsEnvironment {
                         }
                     }
                     
-                    *is_found = true;
                     return Ok(());
                 } else {
                     return Err(NoOverrideElementError::NotEqualsType {
@@ -1441,11 +1442,24 @@ impl OverrideElementsEnvironment {
         })
     }
 
-    pub fn collect_not_impl(self) -> Vec<(Spanned<Type>, String, WithDefineInfo<Type>)> {
-        self.elements.into_iter().zip(self.is_found_flags.into_iter())
-            .filter(|(_, is_found)| { *is_found })
+    pub fn collect_errors(self, errors: &mut Vec<TranspileError>, context: &TranspileModuleContext) {
+        let not_impl_elements = self.elements.into_iter().zip(self.is_found_flags.into_iter())
+            .filter(|(_, is_found)| { !*is_found })
             .map(|(element, _)| { element })
-            .collect()
+            .collect::<Vec<_>>();
+        
+        for (interface, _, element) in not_impl_elements {
+            let error = SimpleError::new(
+                0060,
+                interface.span.clone(),
+                vec![],
+                vec![
+                    ((context.module_name.clone(), interface.span), Color::Red),
+                    ((element.module_name, element.span), Color::Yellow)
+                ]
+            );
+            errors.push(TranspileError::new(error));
+        }
     }
 
 }

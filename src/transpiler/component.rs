@@ -1,38 +1,22 @@
-use std::{fmt::Debug, hash::Hash, mem::transmute, ops::{Index, IndexMut}};
+use std::{any::TypeId, fmt::Debug, hash::Hash, mem::transmute, ops::{Index, IndexMut}};
 
 use bumpalo::Bump;
 use catla_parser::parser::AST;
 use hashbrown::{HashMap, hash_map::DefaultHashBuilder};
 
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct EntityID {
-    ptr: usize
-}
-
-impl PartialEq for EntityID {
-    fn eq(&self, other: &Self) -> bool {
-        self.ptr == other.ptr
-    }
-}
-
-impl Eq for EntityID {}
-
-impl Hash for EntityID {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.ptr.hash(state);
-    }
+    ptr: usize,
+    type_id: TypeId
 }
 
 impl<T: Sized + AST> From<&T> for EntityID {
     fn from(value: &T) -> Self {
-        Self { ptr: unsafe { transmute(value) } }
-    }
-}
-
-impl Debug for EntityID {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EntityID").field("ptr", &self.ptr).finish()
+        Self {
+            ptr: unsafe { transmute(value) },
+            type_id: typeid::of::<T>()
+        }
     }
 }
 

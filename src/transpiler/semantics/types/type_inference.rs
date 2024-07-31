@@ -6,6 +6,7 @@ use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpr
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
+use indexmap::IndexMap;
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
@@ -1357,7 +1358,7 @@ pub(crate) fn type_inference_program<'allocator>(
                 if let Some(super_type_info) = &user_type_define.super_type_info {
                     let mut implements_infos = current_scope_implements_info_set.as_ref()
                         .map(|implements_infos| { implements_infos.implements_infos.clone() })
-                        .unwrap_or(FxHashMap::default());
+                        .unwrap_or(IndexMap::new());
 
                     for type_info in super_type_info.type_infos.iter() {
                         let current_scope_implements_info_set = Some(Arc::new(ImplementsInfoSet {
@@ -1436,6 +1437,33 @@ pub(crate) fn type_inference_program<'allocator>(
                 } else {
                     None
                 };
+
+                if let Some(implements_info) = implements_info {
+                    let mut has_same_module_type = false;
+                    if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &implements_info.interface.value {
+                        if &context.module_name == &user_type_info.module_name {
+                            has_same_module_type = true;
+                        }
+                    }
+                    if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &implements_info.concrete.value {
+                        if &context.module_name == &user_type_info.module_name {
+                            has_same_module_type = true;
+                        }
+                    }
+
+                    if !has_same_module_type {
+                        let error = SimpleError::new(
+                            0062,
+                            implements_info.interface.span.clone(),
+                            vec![],
+                            vec![
+                                ((context.module_name.clone(), implements_info.interface.span.clone()), Color::Red),
+                                ((context.module_name.clone(), implements_info.concrete.span.clone()), Color::Red)
+                            ]
+                        );
+                        errors.push(TranspileError::new(error));
+                    }
+                }
                 
                 if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &concrete {
                     type_environment.add_check_type_info_generics_define(
@@ -1694,7 +1722,7 @@ fn get_and_check_where_bounds_implements_info(
 
     let mut implements_infos = current_scope_implements_info_set.as_ref()
         .map(|implements_info_set| { implements_info_set.implements_infos.clone() })
-        .unwrap_or(FxHashMap::default());
+        .unwrap_or(IndexMap::new());
 
     for where_bound in where_bounds.iter() {
         let current_implements_info_set = Some(Arc::new(ImplementsInfoSet {

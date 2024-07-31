@@ -6,6 +6,7 @@ use catla_parser::parser::{Spanned, UserTypeKindEnum};
 use derivative::Derivative;
 use either::Either;
 use fxhash::FxHashMap;
+use indexmap::IndexMap;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, TranspileError};
 
@@ -972,7 +973,7 @@ impl ImplementsInfo {
 
 #[derive(Debug, Clone, Default)]
 pub struct ImplementsInfoSet {
-    pub(crate) implements_infos: FxHashMap<EntityID, ImplementsInfo>
+    pub(crate) implements_infos: IndexMap<EntityID, ImplementsInfo>
 }
 
 
@@ -980,7 +981,7 @@ impl ImplementsInfoSet {
     
     pub fn new() -> Self {
         Self {
-            implements_infos: FxHashMap::default()
+            implements_infos: IndexMap::new()
         }
     }
 
@@ -1033,7 +1034,7 @@ impl ImplementsInfoSet {
             }
         }
 
-        let empty_map = FxHashMap::default();
+        let empty_map = IndexMap::new();
         let iter = match current_scope_implements_info_set {
             Some(scope_implements_info_set) => {
                 scope_implements_info_set.implements_infos.values().chain(self.implements_infos.values())
@@ -1181,7 +1182,7 @@ impl ImplementsInfoSet {
     ) -> Vec<CollectedImplementation, &'allocator Bump> {
         let mut satisfied_implementations = Vec::new_in(allocator);
 
-        let empty_map = FxHashMap::default();
+        let empty_map = IndexMap::new();
         let iter = match current_scope_implements_info_set {
             Some(scope_implements_info_set) => {
                 scope_implements_info_set.implements_infos.values().chain(self.implements_infos.values())
@@ -1285,6 +1286,143 @@ impl ImplementsInfoSet {
 pub(crate) struct CollectedImplementation {
     pub implements_info: ImplementsInfo,
     pub local_generics: Vec<Type>
+}
+
+
+pub(crate) fn collect_duplicated_implementation_error(
+    implementations: &ImplementsInfoSet,
+    other_module_implementations: &ImplementsInfoSet,
+    errors: &mut Vec<TranspileError>
+) {
+    let implementations = implementations.implements_infos.values().collect::<Vec<_>>();
+    let mut duplicated = Vec::new();
+    
+    'root: for i in 0..implementations.len() {
+        let implementation = implementations[i];
+        
+        for other_implementation in other_module_implementations.implements_infos.values() {
+            if is_duplicated_implementation(implementation, other_implementation) {
+                duplicated.push((implementation, other_implementation.clone()));
+                continue 'root;
+            }
+        }
+        
+        for other_implementation in &implementations[0..i] {
+            if is_duplicated_implementation(implementation, other_implementation) {
+                duplicated.push((implementation, (*other_implementation).clone()));
+            }
+        }
+    }
+    
+    let temp_alloc = Bump::new();
+    let temp_env = TypeEnvironment::new(&temp_alloc);
+
+    for (duplicated, first_implementation) in duplicated {
+        let duplicated_interface_name = temp_env.get_type_display_string(&duplicated.interface.value);
+        let duplicated_concrete_name = temp_env.get_type_display_string(&duplicated.concrete.value);
+        let first_impl_interface_name = temp_env.get_type_display_string(&first_implementation.interface.value);
+        let first_impl_concrete_name = temp_env.get_type_display_string(&first_implementation.concrete.value);
+
+        let error = SimpleError::new(
+            0061,
+            duplicated.interface.span.clone(),
+            vec![
+                (first_impl_concrete_name, Color::Yellow),
+                (first_impl_interface_name, Color::Yellow),
+                (duplicated_concrete_name, Color::Yellow),
+                (duplicated_interface_name, Color::Yellow)
+            ],
+            vec![
+                ((first_implementation.module_name.clone(), first_implementation.interface.span), Color::Yellow),
+                ((duplicated.module_name.clone(), duplicated.interface.span.clone()), Color::Red)
+            ]
+        );
+        errors.push(TranspileError::new(error));
+    }
+}
+
+fn is_duplicated_implementation(implementation_1: &ImplementsInfo, implementation_2: &ImplementsInfo) -> bool {
+    is_duplicated_implementation_type(&implementation_1.interface.value, &implementation_2.interface.value)
+        && is_duplicated_implementation_type(&implementation_1.concrete.value, &implementation_2.concrete.value)
+}
+
+fn is_duplicated_implementation_type(type_1: &Type, type_2: &Type) -> bool {
+    if let Type::Generic(_) = type_1 {
+        return true;
+    }
+    if let Type::Generic(_) = type_2 {
+        return true;
+    }
+    
+    match type_1 {
+        Type::UserType { user_type_info: user_type_info_1, generics: generics_1, generics_span: _ } => {
+            if let Type::UserType { user_type_info: user_type_info_2, generics: generics_2, generics_span: _ } = type_2 {
+                if user_type_info_1 != user_type_info_2 {
+                    return false;
+                }
+                
+                if generics_1.len() != generics_2.len() {
+                    return false;
+                }
+                
+                for (generic_1, generic_2) in generics_1.iter().zip(generics_2.iter()) {
+                    if !is_duplicated_implementation_type(generic_1, generic_2) {
+                        return false;
+                    }
+                }
+                
+                return true;
+            }
+            false
+        },
+        Type::Function { function_info: function_info_1, generics: generics_1 } => {
+            if let Type::Function { function_info: function_info_2, generics: generics_2 } = type_2 {
+                if function_info_1.argument_types.len() != function_info_2.argument_types.len() {
+                    return false;
+                }
+                
+                if generics_1.len() != generics_2.len() {
+                    return false;
+                }
+                
+                if !is_duplicated_implementation_type(&function_info_1.return_type.value, &function_info_2.return_type.value) {
+                    return false;
+                }
+                
+                for (argument_1, argument_2) in function_info_1.argument_types.iter().zip(function_info_2.argument_types.iter()) {
+                    if !is_duplicated_implementation_type(argument_1, argument_2) {
+                        return false;
+                    }
+                }
+                
+                for (generic_1, generic_2) in generics_1.iter().zip(generics_2.iter()) {
+                    if !is_duplicated_implementation_type(generic_1, generic_2) {
+                        return false;
+                    }
+                }
+                
+                return true;
+            }
+            false
+        },
+        Type::Generic(_) => unreachable!(),
+        Type::LocalGeneric(_) => unreachable!(),
+        Type::Option(value_1) => {
+            if let Type::Option(value_2) = type_2 {
+                return is_duplicated_implementation_type(value_1, value_2);
+            }
+            false
+        },
+        Type::Result { value: value_1, error: error_1 } => {
+            if let Type::Result { value: value_2, error: error_2 } = type_2 {
+                return is_duplicated_implementation_type(value_1, value_2)
+                    && is_duplicated_implementation_type(error_1, error_2);
+            }
+            false
+        },
+        Type::Unknown => return false,
+        _ => type_1 == type_2
+    }
 }
 
 

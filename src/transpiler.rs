@@ -4,7 +4,7 @@ use async_recursion::async_recursion;
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
 use fxhash::FxHashMap;
-use semantics::types::type_info::Type;
+use semantics::types::type_info::{collect_duplicated_implementation_error, Type};
 
 use crate::transpiler::semantics::types::{import_module_collector::collect_import_module_program, type_inference::{type_inference_program, TypeEnvironment}, user_type_element_collector::collect_module_element_types_program};
 
@@ -185,7 +185,6 @@ async fn transpile_module(
 
     let mut module_element_type_maps = FxHashMap::default();
     let mut merged_implements_infos = ImplementsInfoSet::new();
-    merged_implements_infos.merge(&implements_infos);
 
     for module_name in import_element_map.values() {
         let module_context = context.get_module_context(module_name).unwrap();
@@ -195,6 +194,10 @@ async fn transpile_module(
         module_element_type_maps.insert(module_name.clone(), module_element_type_map);
         merged_implements_infos.merge(&module_type_implements_infos);
     }
+
+    collect_duplicated_implementation_error(&implements_infos, &merged_implements_infos, &mut errors);
+
+    merged_implements_infos.merge(&implements_infos);
 
     let mut implicit_convert_map = FxHashMap::default();
     let mut type_environment = TypeEnvironment::new(&allocator);

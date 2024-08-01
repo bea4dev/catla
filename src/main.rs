@@ -57,7 +57,7 @@ interface TestInterface2 {
     function <S> test2(let this) {}
 }
 
-implements<T> TestInterface2 for T {
+implements<T> TestInterface2 for T? where T: TestInterface1 {
     override function <S> test2(let this) {}
 }
 
@@ -65,12 +65,12 @@ implements TestInterface2 for int {
     override function <S> test2(let this) {}
 }
 
-function <T: TestInterface2> aaa(i: T) {
+function <T: TestInterface1> aaa(i: T?) {
     let a = i.test2()
     ccc(i)
 }
 
-function ccc(i: T) where T: TestInterface2 {}
+function <T> ccc(i: T) where T: TestInterface2 {}
 
 function bbb(i: TestInterface2) {
     let b = i.test2()

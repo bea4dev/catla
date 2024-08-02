@@ -73,7 +73,7 @@ bnf_rules!{
     loop_expression     ::= "loop" block
 
     closure             ::= ( closure_args | literal ) "=>" ( expression | block )
-    closure_args        ::= "|" [ [ line_feed ] function_argument [ line_feed ] ] { "," [ line_feed ] [ function_argument [ line_feed ] ] } "|"
+    closure_args        ::= "|" [ [ line_feed ] ( function_argument | literal ) [ line_feed ] ] { "," [ line_feed ] [ ( function_argument | literal ) [ line_feed ] ] } "|"
 
     function_call       ::= "(" [ [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
 

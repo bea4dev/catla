@@ -40,6 +40,7 @@ pub enum Type {
     Option(Arc<Type>),
     Result { value: Arc<Type>, error: Arc<Type> },
     This,
+    Unreachable,
     Unknown
 }
 
@@ -750,6 +751,10 @@ impl ImplementsInfo {
                 return true;
             }
         }
+        
+        if self_type == &Type::Unreachable || ty == &Type::Unreachable {
+            return true;
+        }
 
         if let Type::LocalGeneric(generic_id) = ty {
             let (_, ty) = type_environment.resolve_generic_type(*generic_id);
@@ -949,6 +954,7 @@ impl ImplementsInfo {
                 }
             },
             Type::This => unreachable!(),
+            Type::Unreachable => unreachable!(),
             Type::Unknown => false
         }
     }

@@ -437,6 +437,10 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 return Ok(());
             }
         }
+        
+        if first_type == &Type::Unreachable || second_type == &Type::Unreachable {
+            return Ok(());
+        }
 
         if let Type::LocalGeneric(first_generic_id) = first_type {
             let first_resolved_type = self.resolve_generic_type(*first_generic_id);
@@ -756,6 +760,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
                 format!("{}!<{}>", self.get_type_display_string(value), self.get_type_display_string(error))
             },
             Type::This => "This".to_string(),
+            Type::Unreachable => "$unreachable".to_string(),
             Type::Unknown => "unknown".to_string()
         }
     }
@@ -3197,6 +3202,8 @@ fn type_inference_primary_left<'allocator>(
         },
         PrimaryLeftExpr::IfExpression(if_expression) => {
             let mut blocks = Vec::new_in(allocator);
+            let mut has_else = false;
+
             let first_statement = &if_expression.if_statement;
             if let Ok(condition) = &first_statement.condition {
                 type_inference_expression(
@@ -3289,10 +3296,21 @@ fn type_inference_primary_left<'allocator>(
                             }
                         },
                         Either::Right(block) => {
+                            has_else = true;
                             blocks.push(block);
                         }
                     }
                 }
+            }
+
+            if force_be_expression && !has_else {
+                let error = SimpleError::new(
+                    0063,
+                    if_expression.span.clone(),
+                    vec![],
+                    vec![((context.module_name.clone(), if_expression.span.clone()), Color::Red)]
+                );
+                errors.push(TranspileError::new(error));
             }
 
             type_inference_blocks(

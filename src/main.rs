@@ -76,6 +76,19 @@ function bbb(i: TestInterface2) {
     let b = i.test2()
 }
 
+interface Default {
+    static function default() -> This {}
+}
+
+implements Default for int {
+    override static function default() -> This {
+        return 0
+    }
+}
+
+let a = unknown
+a = 100
+
 ";
 let source1 = 
 "

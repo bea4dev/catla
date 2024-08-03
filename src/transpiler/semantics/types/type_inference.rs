@@ -33,6 +33,7 @@ pub(crate) struct TypeEnvironment<'allocator> {
     impl_interface_generics_check: Vec<(Range<usize>, WithDefineInfo<Type>), &'allocator Bump>,
     implicit_convert_map: HashMap<EntityID, ImplicitConvertKind, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, Spanned<Type>>,
+    last_expr_type: Option<Either<EntityID, Spanned<Type>>>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
     current_generics_id: usize
 }
@@ -54,6 +55,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
             impl_interface_generics_check: Vec::new_in(allocator),
             implicit_convert_map: HashMap::new_in(allocator),
             return_type,
+            last_expr_type: None,
             lazy_type_reports: Vec::new_in(allocator),
             current_generics_id: 0
         }
@@ -1093,10 +1095,12 @@ pub(crate) fn type_inference_program<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
-    let mut has_type = false;
     let mut var_type_and_spans = Vec::new_in(allocator);
 
     let mut override_elements_environment = OverrideElementsEnvironment::new(implements_interfaces);
+    
+    let last_type_snapshot = type_environment.last_expr_type.clone();
+    type_environment.last_expr_type = None;
 
     for i in 0..ast.statements.len() {
         let statement = match &ast.statements[i] {
@@ -1577,13 +1581,8 @@ pub(crate) fn type_inference_program<'allocator>(
                     context
                 );
 
-                if force_be_expression {
-                    type_environment.set_entity_id_equals(
-                        EntityID::from(*expression),
-                        EntityID::from(ast)
-                    );
-
-                    has_type = true;
+                if force_be_expression && type_environment.last_expr_type.is_none() {
+                    type_environment.last_expr_type = Some(Either::Left(EntityID::from(*expression)));
                 }
             },
             StatementAST::VariableDefine(variable_define) => {
@@ -1693,12 +1692,31 @@ pub(crate) fn type_inference_program<'allocator>(
         }
     }
 
-    if !has_type {
-        type_environment.set_entity_type(
-            EntityID::from(ast),
-            Spanned::new(Type::Unit, ast.span.clone())
-        );
+    if force_be_expression {
+        if let Some(last_expr_type) = &type_environment.last_expr_type {
+            match last_expr_type {
+                Either::Left(last_expr_entity_id) => {
+                    type_environment.set_entity_id_equals(
+                        *last_expr_entity_id,
+                        EntityID::from(ast)
+                    );
+                },
+                Either::Right(last_expr_type) => {
+                    type_environment.set_entity_type(
+                        EntityID::from(ast),
+                        last_expr_type.clone()
+                    );
+                }
+            }
+        } else {
+            type_environment.set_entity_type(
+                EntityID::from(ast),
+                Spanned::new(Type::Unit, ast.span.clone())
+            );
+        }
     }
+    
+    type_environment.last_expr_type = last_type_snapshot;
     
     override_elements_environment.collect_errors(errors, context);
 
@@ -1889,7 +1907,22 @@ fn type_inference_expression<'allocator>(
                     current_scope_this_type
                 );
                 add_error(result, type_environment);
+            } else {
+                type_environment.set_entity_type(
+                    EntityID::from(return_expression),
+                    Spanned::new(Type::Unit, return_expression.span.clone())
+                );
+                let result = type_environment.unify_with_return_type(
+                    Spanned::new(EntityID::from(return_expression), return_expression.span.clone()),
+                    current_scope_this_type
+                );
+                add_error(result, type_environment);
             }
+            
+            type_environment.last_expr_type = Some(Either::Right(Spanned::new(
+                Type::Unreachable,
+                return_expression.span.clone()
+            )));
         },
         ExpressionEnum::Closure(closure) => {
             if let Some(expression_or_block) = &closure.expression_or_block.value {

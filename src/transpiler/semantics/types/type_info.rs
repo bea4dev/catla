@@ -519,6 +519,13 @@ impl Type {
         }
     }
 
+    pub(crate) fn is_replaceable(&self) -> bool {
+        match self {
+            Type::Unknown | Type::Unreachable => true,
+            _ => false
+        }
+    }
+
 }
 
 

@@ -33,7 +33,6 @@ pub(crate) struct TypeEnvironment<'allocator> {
     impl_interface_generics_check: Vec<(Range<usize>, WithDefineInfo<Type>), &'allocator Bump>,
     implicit_convert_map: HashMap<EntityID, ImplicitConvertKind, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, Spanned<Type>>,
-    last_expr_type: Option<Either<EntityID, Spanned<Type>>>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
     current_generics_id: usize
 }
@@ -55,7 +54,6 @@ impl<'allocator> TypeEnvironment<'allocator> {
             impl_interface_generics_check: Vec::new_in(allocator),
             implicit_convert_map: HashMap::new_in(allocator),
             return_type,
-            last_expr_type: None,
             lazy_type_reports: Vec::new_in(allocator),
             current_generics_id: 0
         }
@@ -189,19 +187,35 @@ impl<'allocator> TypeEnvironment<'allocator> {
         current_scope_this_type: &Type
     ) -> Result<(), TypeMismatchError> {
         
-        let mut first_resolved = self.resolve_entity_type(first_entity_id.value);
-        let mut second_resolved = self.resolve_entity_type(second_entity_id.value);
-        first_resolved.span = first_entity_id.span.clone();
-        second_resolved.span = second_entity_id.span.clone();
+        let mut first_resolved = self.resolve_entity_type_with_id(first_entity_id.value);
+        let mut second_resolved = self.resolve_entity_type_with_id(second_entity_id.value);
+        first_resolved.1.span = first_entity_id.span.clone();
+        second_resolved.1.span = second_entity_id.span.clone();
 
-        self.unify_type(
-            &first_resolved.value,
-            &first_resolved.span,
-            &second_resolved.value,
-            &second_resolved.span,
-            current_scope_this_type,
-            false
-        )
+        match (first_resolved.1.value.is_replaceable(), second_resolved.1.value.is_replaceable()) {
+            (true, true) => {
+                self.entity_type_map.insert(second_resolved.0, Either::Left(first_resolved.0));
+            },
+            (true, false) => {
+                self.entity_type_map.insert(first_resolved.0, Either::Right(second_resolved.1));
+                self.entity_type_map.insert(second_resolved.0, Either::Left(first_resolved.0));
+            },
+            (false, true) => {
+                self.entity_type_map.insert(second_resolved.0, Either::Left(first_resolved.0));
+            },
+            (false, false) => {
+                return self.unify_type(
+                    &first_resolved.1.value,
+                    &first_resolved.1.span,
+                    &second_resolved.1.value,
+                    &second_resolved.1.span,
+                    current_scope_this_type,
+                    false
+                );
+            }
+        }
+        
+        Ok(())
     }
 
     pub fn unify_with_implicit_convert(
@@ -212,32 +226,43 @@ impl<'allocator> TypeEnvironment<'allocator> {
         first_is_expr: bool
     ) -> Result<(), TypeMismatchError> {
 
-        let mut first_resolved = self.resolve_entity_type(first_entity_id.value);
-        let mut second_resolved = self.resolve_entity_type(second_entity_id.value);
-        first_resolved.span = first_entity_id.span.clone();
-        second_resolved.span = second_entity_id.span.clone();
+        let mut first_resolved = self.resolve_entity_type_with_id(first_entity_id.value);
+        let mut second_resolved = self.resolve_entity_type_with_id(second_entity_id.value);
+        first_resolved.1.span = first_entity_id.span.clone();
+        second_resolved.1.span = second_entity_id.span.clone();
 
-        let result = self.unify_type_with_implicit_convert(
-            &first_resolved.value,
-            &first_resolved.span,
-            &second_resolved.value,
-            &second_resolved.span,
-            current_scope_this_type,
-            first_is_expr
-        );
-
-        if let Ok(convert_kind) = &result {
-            if let Some(convert_kind) = convert_kind {
-                let entity_id = if first_is_expr {
-                    first_entity_id.value
-                } else {
-                    second_entity_id.value
-                };
-                self.implicit_convert_map.insert(entity_id, *convert_kind);
+        match (first_resolved.1.value.is_replaceable(), second_resolved.1.value.is_replaceable()) {
+            (true, true) => {
+                self.entity_type_map.insert(second_resolved.0, Either::Left(first_resolved.0));
+            },
+            (true, false) => {
+                self.entity_type_map.insert(first_resolved.0, Either::Right(second_resolved.1));
+                self.entity_type_map.insert(second_resolved.0, Either::Left(first_resolved.0));
+            },
+            (false, true) => {
+                self.entity_type_map.insert(second_resolved.0, Either::Left(first_resolved.0));
+            },
+            (false, false) => {
+                let result = self.unify_type_with_implicit_convert(
+                    &first_resolved.1.value,
+                    &first_resolved.1.span,
+                    &second_resolved.1.value,
+                    &second_resolved.1.span,
+                    current_scope_this_type,
+                    first_is_expr
+                )?;
+        
+                if let Some(convert_kind) = result {
+                    let entity_id = if first_is_expr {
+                        first_entity_id.value
+                    } else {
+                        second_entity_id.value
+                    };
+                    self.implicit_convert_map.insert(entity_id, convert_kind);
+                }
             }
         }
-
-        result?;
+        
         Ok(())
     }
 
@@ -447,35 +472,47 @@ impl<'allocator> TypeEnvironment<'allocator> {
         if let Type::LocalGeneric(first_generic_id) = first_type {
             let first_resolved_type = self.resolve_generic_type(*first_generic_id);
 
-            return if &first_resolved_type.1.value == &Type::Unknown {
-                self.set_generic_type(first_resolved_type.0, Spanned::new(second_type.clone(), second_span.clone()));
-                Ok(())
-            } else {
-                self.unify_type_recursive(
-                    &first_resolved_type.1.value,
-                    &first_resolved_type.1.span,
-                    second_type,
-                    second_span,
-                    current_scope_this_type,
-                    allow_unknown
-                )
-            };
-        }
-        if let Type::LocalGeneric(second_generic_id) = second_type {
-            let second_resolved_type = self.resolve_generic_type(*second_generic_id);
+            if let Type::LocalGeneric(second_generic_id) = second_type {
+                let second_resolved_type = self.resolve_generic_type(*second_generic_id);
 
-            return if &second_resolved_type.1.value == &Type::Unknown {
-                self.set_generic_type(second_resolved_type.0, Spanned::new(first_type.clone(), first_span.clone()));
-                Ok(())
+                match (first_resolved_type.1.value.is_replaceable(), second_resolved_type.1.value.is_replaceable()) {
+                    (true, true) => {
+                        self.generic_type_map.insert(second_resolved_type.0, Either::Left(first_resolved_type.0));
+                    },
+                    (true, false) => {
+                        self.generic_type_map.insert(first_resolved_type.0, Either::Right(second_resolved_type.1));
+                        self.generic_type_map.insert(second_resolved_type.0, Either::Left(first_resolved_type.0));
+                    },
+                    (false, true) => {
+                        self.generic_type_map.insert(second_resolved_type.0, Either::Left(first_resolved_type.0));
+                    },
+                    (false, false) => {
+                        return self.unify_type_recursive(
+                            &first_resolved_type.1.value,
+                            &first_resolved_type.1.span,
+                            &second_resolved_type.1.value,
+                            &second_resolved_type.1.span,
+                            current_scope_this_type,
+                            allow_unknown
+                        );
+                    }
+                }
+
+                return Ok(());
             } else {
-                self.unify_type_recursive(
-                    first_type,
-                    first_span,
-                    &second_resolved_type.1.value,
-                    &second_resolved_type.1.span,
-                    current_scope_this_type,
-                    allow_unknown
-                )
+                self.set_generic_type(
+                    *first_generic_id,
+                    Spanned::new(second_type.clone(), second_span.clone())
+                );
+                return Ok(());
+            }
+        } else {
+            if let Type::LocalGeneric(second_generic_id) = second_type {
+                self.set_generic_type(
+                    *second_generic_id,
+                    Spanned::new(first_type.clone(), first_span.clone())
+                );
+                return Ok(());
             }
         }
 
@@ -562,34 +599,7 @@ impl<'allocator> TypeEnvironment<'allocator> {
                     false
                 }
             },
-            Type::LocalGeneric(first_generic_id) => {
-                if let Type::LocalGeneric(second_generic_id) = second_type {
-                    let first = self.resolve_generic_type(*first_generic_id);
-                    let second = self.resolve_generic_type(*second_generic_id);
-
-                    if &first.1.value == &Type::Unknown && &second.1.value == &Type::Unknown {
-                        self.generic_type_map.insert(second.0, Either::Left(first.0));
-                    } else if &first.1.value == &Type::Unknown && &second.1.value != &Type::Unknown {
-                        self.generic_type_map.insert(first.0.clone(), Either::Right(second.1));
-                        self.generic_type_map.insert(second.0, Either::Left(first.0));
-                    } else if &first.1.value != &Type::Unknown && &second.1.value == &Type::Unknown {
-                        self.generic_type_map.insert(second.0, Either::Left(first.0));
-                    } else {
-                        return self.unify_type_recursive(
-                            &first.1.value,
-                            &first.1.span,
-                            &second.1.value,
-                            &second.1.span,
-                            current_scope_this_type,
-                            allow_unknown
-                        );
-                    }
-
-                    true
-                } else {
-                    false
-                }
-            },
+            Type::LocalGeneric(_) => unreachable!(),
             Type::Option(first_type) => {
                 if let Type::Option(second_type) = second_type {
                     self.unify_type_recursive(
@@ -695,6 +705,17 @@ impl<'allocator> TypeEnvironment<'allocator> {
             match entity_id_or_type {
                 Either::Left(entity_id) => current_id = *entity_id,
                 Either::Right(ty) => return ty.clone()
+            }
+        }
+    }
+
+    pub fn resolve_entity_type_with_id(&self, entity_id: EntityID) -> (EntityID, Spanned<Type>) {
+        let mut current_id = entity_id;
+        loop {
+            let entity_id_or_type = self.entity_type_map.get(&current_id).unwrap();
+            match entity_id_or_type {
+                Either::Left(entity_id) => current_id = *entity_id,
+                Either::Right(ty) => return (current_id, ty.clone())
             }
         }
     }
@@ -1095,12 +1116,10 @@ pub(crate) fn type_inference_program<'allocator>(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
+    let mut has_type = false;
     let mut var_type_and_spans = Vec::new_in(allocator);
 
     let mut override_elements_environment = OverrideElementsEnvironment::new(implements_interfaces);
-    
-    let last_type_snapshot = type_environment.last_expr_type.clone();
-    type_environment.last_expr_type = None;
 
     for i in 0..ast.statements.len() {
         let statement = match &ast.statements[i] {
@@ -1154,12 +1173,15 @@ pub(crate) fn type_inference_program<'allocator>(
                         context
                     );
 
-                    let result = type_environment.unify(
-                        Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
+                    let result = type_environment.unify_with_implicit_convert(
                         Spanned::new(EntityID::from(assignment.left_expr), assignment.left_expr.get_span()),
-                        current_scope_this_type
+                        Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
+                        current_scope_this_type,
+                        false
                     );
                     add_error(result, type_environment);
+
+                    dbg!(type_environment.resolve_entity_type(EntityID::from(assignment.left_expr)));
                 }
             },
             StatementAST::Exchange(exchange) => {
@@ -1208,8 +1230,8 @@ pub(crate) fn type_inference_program<'allocator>(
                     );
 
                     let result = type_environment.unify(
-                        Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
                         Spanned::new(EntityID::from(exchange.left_expr), exchange.left_expr.get_span()),
+                        Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
                         current_scope_this_type
                     );
                     add_error(result, type_environment);
@@ -1581,8 +1603,13 @@ pub(crate) fn type_inference_program<'allocator>(
                     context
                 );
 
-                if force_be_expression && type_environment.last_expr_type.is_none() {
-                    type_environment.last_expr_type = Some(Either::Left(EntityID::from(*expression)));
+                if force_be_expression {
+                    type_environment.set_entity_id_equals(
+                        EntityID::from(*expression),
+                        EntityID::from(ast)
+                    );
+
+                    has_type = true;
                 }
             },
             StatementAST::VariableDefine(variable_define) => {
@@ -1692,31 +1719,12 @@ pub(crate) fn type_inference_program<'allocator>(
         }
     }
 
-    if force_be_expression {
-        if let Some(last_expr_type) = &type_environment.last_expr_type {
-            match last_expr_type {
-                Either::Left(last_expr_entity_id) => {
-                    type_environment.set_entity_id_equals(
-                        *last_expr_entity_id,
-                        EntityID::from(ast)
-                    );
-                },
-                Either::Right(last_expr_type) => {
-                    type_environment.set_entity_type(
-                        EntityID::from(ast),
-                        last_expr_type.clone()
-                    );
-                }
-            }
-        } else {
-            type_environment.set_entity_type(
-                EntityID::from(ast),
-                Spanned::new(Type::Unit, ast.span.clone())
-            );
-        }
+    if !has_type {
+        type_environment.set_entity_type(
+            EntityID::from(ast),
+            Spanned::new(Type::Unit, ast.span.clone())
+        );
     }
-    
-    type_environment.last_expr_type = last_type_snapshot;
     
     override_elements_environment.collect_errors(errors, context);
 
@@ -1907,22 +1915,7 @@ fn type_inference_expression<'allocator>(
                     current_scope_this_type
                 );
                 add_error(result, type_environment);
-            } else {
-                type_environment.set_entity_type(
-                    EntityID::from(return_expression),
-                    Spanned::new(Type::Unit, return_expression.span.clone())
-                );
-                let result = type_environment.unify_with_return_type(
-                    Spanned::new(EntityID::from(return_expression), return_expression.span.clone()),
-                    current_scope_this_type
-                );
-                add_error(result, type_environment);
             }
-            
-            type_environment.last_expr_type = Some(Either::Right(Spanned::new(
-                Type::Unreachable,
-                return_expression.span.clone()
-            )));
         },
         ExpressionEnum::Closure(closure) => {
             if let Some(expression_or_block) = &closure.expression_or_block.value {

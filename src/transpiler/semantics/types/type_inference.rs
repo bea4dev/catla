@@ -1117,7 +1117,7 @@ pub(crate) fn type_inference_program<'allocator>(
     context: &TranspileModuleContext
 ) {
     let mut has_type = false;
-    let mut var_type_and_spans = Vec::new_in(allocator);
+    let mut var_entity_id_and_spans = Vec::new_in(allocator);
 
     let mut override_elements_environment = OverrideElementsEnvironment::new(implements_interfaces);
 
@@ -1707,10 +1707,7 @@ pub(crate) fn type_inference_program<'allocator>(
                         }
 
                         if let Ok(name) = &variable_define.name {
-                            var_type_and_spans.push((
-                                name.span.clone(),
-                                type_environment.resolve_entity_type(EntityID::from(variable_define)).value
-                            ));
+                            var_entity_id_and_spans.push((name.span.clone(), EntityID::from(variable_define)));
                         }
                     }
                 }
@@ -1730,11 +1727,13 @@ pub(crate) fn type_inference_program<'allocator>(
 
     let mut builder = Report::build(ReportKind::Custom("Debug", Color::Cyan), &context.module_name, 0);
 
-    for var_type_and_span in var_type_and_spans {
+    for var_type_and_span in var_entity_id_and_spans {
+        let ty = type_environment.resolve_entity_type(var_type_and_span.1).value;
+        
         builder.add_label(
             Label::new((&context.module_name, var_type_and_span.0))
                 .with_color(Color::Green)
-                .with_message(type_environment.get_type_display_string(&var_type_and_span.1))
+                .with_message(type_environment.get_type_display_string(&ty))
         );
     }
     

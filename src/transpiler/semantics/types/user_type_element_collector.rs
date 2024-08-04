@@ -1,7 +1,7 @@
 use std::{mem, ops::DerefMut, sync::Arc};
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, TypeAttributeEnum, TypeInfo, UserTypeKindEnum, WhereClause};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, TypeAttributeEnum, TypeInfo, UserTypeKindEnum, WhereClause};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -740,7 +740,9 @@ fn get_function_type_and_name<'allocator>(
     let mut argument_types = Vec::new();
 
     if let Some(user_type) = current_user_type {
-        argument_types.push(user_type.clone());
+        if !ast.attributes.contains(StatementAttributeKind::Static) {
+            argument_types.push(user_type.clone());
+        }
     }
 
     for argument in ast.args.arguments.iter() {
@@ -806,7 +808,7 @@ fn get_function_type_and_name<'allocator>(
     );
 
     let function_info = Arc::new(FunctionType {
-        is_extension: current_user_type.is_some(),
+        is_extension: current_user_type.is_some() && !ast.attributes.contains(StatementAttributeKind::Static),
         generics_define,
         argument_types,
         return_type,

@@ -86,7 +86,7 @@ implements Default for int {
     }
 }
 
-let a = unknown
+let a = Default::default()
 a = 100
 
 ";

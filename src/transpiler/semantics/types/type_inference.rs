@@ -1180,8 +1180,6 @@ pub(crate) fn type_inference_program<'allocator>(
                         false
                     );
                     add_error(result, type_environment);
-
-                    dbg!(type_environment.resolve_entity_type(EntityID::from(assignment.left_expr)));
                 }
             },
             StatementAST::Exchange(exchange) => {
@@ -2947,6 +2945,13 @@ fn type_inference_primary_left<'allocator>(
                                     );
                                 }
                             },
+                            DefineKind::Generics => {
+                                let generic_type = generics_map.get(&resolved.define_info.entity_id).unwrap();
+                                type_environment.set_entity_type(
+                                    EntityID::from(&simple.0),
+                                    Spanned::new(Type::Generic(generic_type.clone()), identifier.span.clone())
+                                );
+                            },
                             _ => {
                                 let ty = if let Some(user_type) = user_type_map.get(identifier.value) {
                                     user_type.clone()
@@ -3640,59 +3645,52 @@ fn type_inference_primary_right<'allocator>(
                     ));
                 }
             }
-        }
-
-        let implementations = global_implements_info_set.collect_satisfied_implementations(
-            &user_type.value,
-            type_environment,
-            current_scope_implements_info_set,
-            allocator
-        );
-        
-        for implementation in implementations {
-            let element_type = implementation.implements_info.get_element_type(element_name);
-            if let Some(element_type) = element_type {
-                let ty = Type::get_type_with_replaced_generics(
-                    &element_type.value,
-                    &implementation.implements_info.generics,
-                    &implementation.local_generics
-                );
-
-                let interface = implementation.implements_info.interface;
-
-                pre_element_types.push(
-                    (
-                        WithDefineInfo {
-                            value: ty,
-                            module_name: element_type.module_name.clone(),
-                            span: element_type.span.clone()
-                        },
-                        interface.value.clone(),
-                        Some((
-                            WithDefineInfo {
-                                value: interface.value,
-                                module_name: implementation.implements_info.module_name,
-                                span: interface.span
-                            },
-                            implementation.implements_info.concrete.value,
-                            implementation.implements_info.where_bounds
-                        ))
-                    )
-                );
-            }
-        }
-
-        let mut origin_types = HashSet::new();
-        let mut element_types = Vec::new_in(allocator);
-        'root: for (element_type, origin_type, interface_and_where_bounds) in pre_element_types {
-            if let Type::UserType { user_type_info, generics: _, generics_span: _ } = origin_type {
-                let origin_type_name = (user_type_info.module_name.deref().clone(), user_type_info.name.value.clone());
-                if origin_types.contains(&origin_type_name) {
-                    continue;
-                }
-                origin_types.insert(origin_type_name);
-            }
+        } else {
+            let implementations = global_implements_info_set.collect_satisfied_implementations(
+                &user_type.value,
+                type_environment,
+                current_scope_implements_info_set,
+                allocator
+            );
             
+            for implementation in implementations {
+                let element_type = implementation.implements_info.get_element_type(element_name);
+                if let Some(element_type) = element_type {
+                    let ty = Type::get_type_with_replaced_generics(
+                        &element_type.value,
+                        &implementation.implements_info.generics,
+                        &implementation.local_generics
+                    );
+    
+                    let interface = implementation.implements_info.interface;
+    
+                    pre_element_types.push(
+                        (
+                            WithDefineInfo {
+                                value: ty,
+                                module_name: element_type.module_name.clone(),
+                                span: element_type.span.clone()
+                            },
+                            interface.value.clone(),
+                            Some((
+                                WithDefineInfo {
+                                    value: interface.value,
+                                    module_name: implementation.implements_info.module_name,
+                                    span: interface.span
+                                },
+                                implementation.implements_info.concrete.value,
+                                implementation.implements_info.where_bounds
+                            ))
+                        )
+                    );
+                }
+            }
+        }
+
+
+        let mut element_types = Vec::new_in(allocator);
+        'root: for (element_type, _, interface_and_where_bounds) in pre_element_types {
+        
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(element_type.value, second_expr.0.span.clone()),
                 current_scope_implements_info_set,

@@ -86,7 +86,11 @@ implements Default for int {
     }
 }
 
-let a = Default::default()
+function <T: Default> default() -> T {
+    return T::default()
+}
+
+let a = default()
 a = 100
 
 ";

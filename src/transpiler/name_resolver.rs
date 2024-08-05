@@ -143,6 +143,7 @@ impl FoundDefineInfo {
 pub(crate) fn name_resolve_program<'allocator>(
     ast: Program<'allocator, '_>,
     parent_env_id: Option<EntityID>,
+    is_user_type_scope: bool,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
@@ -197,10 +198,12 @@ pub(crate) fn name_resolve_program<'allocator>(
                     };
 
                     if let Some(already_exists) = name_environment.get_name_define_info(name.value, name_environments) {
-                        errors.push(NameAlreadyExists::new(
-                            define_info.span.clone(),
-                            already_exists.define_info.span.clone()
-                        ));
+                        if !is_user_type_scope {
+                            errors.push(NameAlreadyExists::new(
+                                define_info.span.clone(),
+                                already_exists.define_info.span.clone()
+                            ));
+                        }
                     } else {
                         let name = String::from_str_in(name.value, allocator);
                         name_environment.set_name_define_info(name, define_info);
@@ -418,6 +421,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                     name_resolve_block(
                         block,
                         entity_id,
+                        false,
                         name_environments,
                         resolved_map,
                         errors,
@@ -478,6 +482,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                     name_resolve_block(
                         block,
                         entity_id,
+                        true,
                         name_environments,
                         resolved_map,
                         errors,
@@ -579,6 +584,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                     name_resolve_block(
                         block,
                         entity_id,
+                        true,
                         name_environments,
                         resolved_map,
                         errors,
@@ -799,6 +805,7 @@ fn name_resolve_expression<'allocator>(
                         name_resolve_block(
                             block,
                             entity_id,
+                            false,
                             name_environments,
                             resolved_map,
                             errors,
@@ -815,6 +822,7 @@ fn name_resolve_expression<'allocator>(
 fn name_resolve_block<'allocator>(
     ast: &'allocator Block<'allocator, '_>,
     environment_id: EntityID,
+    is_user_type_scope: bool,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
@@ -833,6 +841,7 @@ fn name_resolve_block<'allocator>(
     name_resolve_program(
         ast.program,
         Some(entity_id),
+        is_user_type_scope,
         name_environments,
         resolved_map,
         errors,
@@ -1190,6 +1199,7 @@ fn name_resolve_primary_left<'allocator>(
                 name_resolve_block(
                     block,
                     entity_id,
+                    false,
                     name_environments,
                     resolved_map,
                     errors,
@@ -1230,6 +1240,7 @@ fn name_resolve_primary_left<'allocator>(
                                 name_resolve_block(
                                     block,
                                     entity_id,
+                                    false,
                                     name_environments,
                                     resolved_map,
                                     errors,
@@ -1242,6 +1253,7 @@ fn name_resolve_primary_left<'allocator>(
                             name_resolve_block(
                                 block,
                                 environment_id,
+                                false,
                                 name_environments,
                                 resolved_map,
                                 errors,
@@ -1258,6 +1270,7 @@ fn name_resolve_primary_left<'allocator>(
                 name_resolve_block(
                     block,
                     environment_id,
+                    false,
                     name_environments,
                     resolved_map,
                     errors,
@@ -1299,6 +1312,7 @@ fn name_resolve_mapping_operator<'allocator>(
         name_resolve_block(
             block,
             environment_id,
+            false,
             name_environments,
             resolved_map,
             errors,

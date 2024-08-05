@@ -115,6 +115,7 @@ async fn transpile_module(
         name_resolve_program(
             ast,
             None,
+            false,
             &mut name_environments,
             &mut name_resolved_map,
             &mut errors,

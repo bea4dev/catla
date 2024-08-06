@@ -960,8 +960,8 @@ impl ImplementsInfo {
                     false
                 }
             },
-            Type::This => unreachable!(),
-            Type::Unreachable => unreachable!(),
+            Type::This => ty == &Type::This,
+            Type::Unreachable => true,
             Type::Unknown => false
         }
     }
@@ -1106,7 +1106,7 @@ impl ImplementsInfoSet {
                     &(0..0),
                     &resolved_ty,
                     &(0..0),
-                    &Type::This,
+                    &ScopeThisType::new(Type::This),
                     allow_unknown
                 );
                 let result2 = type_environment.unify_type(
@@ -1114,7 +1114,7 @@ impl ImplementsInfoSet {
                     &(0..0),
                     &resolved_interface,
                     &(0..0),
-                    &Type::This,
+                    &ScopeThisType::new(Type::This),
                     allow_unknown
                 );
 
@@ -1242,7 +1242,7 @@ impl ImplementsInfoSet {
                 &(0..0),
                 &resolved_ty,
                 &(0..0),
-                &impl_concrete,
+                &ScopeThisType::new(impl_concrete.clone()),
                 true
             );
 
@@ -1511,7 +1511,7 @@ impl OverrideElementsEnvironment {
                     &(0..0),
                     &element_type_replaced,
                     &(0..0),
-                    concrete_type,
+                    &ScopeThisType::new(concrete_type.clone()),
                     true
                 ).is_ok() {
                     
@@ -1722,5 +1722,27 @@ impl TranspileReport for ExtraBoundsError {
         }
 
         builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct ScopeThisType {
+    pub ty: Type,
+    nest_count: usize
+}
+
+impl ScopeThisType {
+    pub fn new(ty: Type) -> Self {
+        Self { ty, nest_count: 0 }
+    }
+    
+    pub fn nest(&self) -> Self {
+        let nest_count = self.nest_count + 1;
+        if nest_count >= 2 {
+            Self { ty: Type::Unknown, nest_count: 0 }
+        } else {
+            Self { ty: self.ty.clone(), nest_count }
+        }
     }
 }

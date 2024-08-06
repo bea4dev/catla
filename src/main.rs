@@ -86,12 +86,23 @@ implements Default for int {
     }
 }
 
-function <T: Default> default() -> T {
-    return T::default()
+let a = int::default()
+a = 100
+
+interface TestInterface3: TestInterface4 {
+    static function test3() -> This {
+        return This::test4()
+    }
 }
 
-let a = default()
-a = 100
+interface TestInterface4 {
+    static function test4() -> This {}
+}
+
+function <T: TestInterface3> aaaa() {
+    let b = T::test3()
+    let c = T::test4()
+}
 
 ";
 let source1 = 

@@ -1355,6 +1355,17 @@ pub(crate) fn collect_duplicated_implementation_error(
 }
 
 fn is_duplicated_implementation(implementation_1: &ImplementsInfo, implementation_2: &ImplementsInfo) -> bool {
+    if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &implementation_1.concrete.value {
+        if user_type_info.kind == UserTypeKindEnum::Interface {
+            return false;
+        }
+    }
+    if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &implementation_2.concrete.value {
+        if user_type_info.kind == UserTypeKindEnum::Interface {
+            return false;
+        }
+    }
+    
     is_duplicated_implementation_type(&implementation_1.interface.value, &implementation_2.interface.value)
         && is_duplicated_implementation_type(&implementation_1.concrete.value, &implementation_2.concrete.value)
 }

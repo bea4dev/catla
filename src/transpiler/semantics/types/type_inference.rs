@@ -4,7 +4,7 @@ use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, So
 use bumpalo::Bump;
 use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum};
 use either::Either;
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use indexmap::IndexMap;
 
@@ -3653,9 +3653,9 @@ fn type_inference_primary_right<'allocator>(
             pre_element_types.push((element_type, user_type.value.clone(), None));
         }
         
-        let implementations = if let Type::Generic(generic_define) = &user_type.value {
-            let mut implementations = Vec::new_in(allocator);
-            
+        let mut implementations = Vec::new_in(allocator);
+        
+        if let Type::Generic(generic_define) = &user_type.value {
             for bound in generic_define.bounds.freeze_and_get().iter() {
                 if let Some(element_type) = bound.ty.get_element_type_with_replaced_generic(element_name) {
                     let element_type = element_type
@@ -3665,45 +3665,43 @@ fn type_inference_primary_right<'allocator>(
                         bound.ty.clone(),
                         None
                     ));
+                } else {
+                    implementations.extend(
+                        global_implements_info_set.collect_satisfied_implementations(
+                            &bound.ty,
+                            type_environment,
+                            current_scope_implements_info_set,
+                            allocator
+                        ).into_iter().map(|implementation| {
+                            let this_type = Type::Generic(generic_define.clone());
+                            
+                            let implements_info = implementation.implements_info;
+                            let implements_info = ImplementsInfo {
+                                generics: implements_info.generics,
+                                interface: implements_info.interface.map(|ty| { ty.replace_this_type(&this_type, true) }),
+                                concrete: implements_info.concrete.map(|ty| { ty.replace_this_type(&this_type, true) }),
+                                module_name: implements_info.module_name,
+                                where_bounds: Arc::new(Type::replace_where_bounds_this_type(&implements_info.where_bounds, &this_type)),
+                                element_types: Arc::new(Default::default()),
+                                is_bounds_info: true
+                            };
+                            
+                            CollectedImplementation {
+                                implements_info,
+                                local_generics: implementation.local_generics
+                            }
+                        })
+                    );
                 }
-                
-                implementations.extend(
-                    global_implements_info_set.collect_satisfied_implementations(
-                        &bound.ty,
-                        type_environment,
-                        current_scope_implements_info_set,
-                        allocator
-                    ).into_iter().map(|implementation| {
-                        let this_type = Type::Generic(generic_define.clone());
-                        
-                        let implements_info = implementation.implements_info;
-                        let implements_info = ImplementsInfo {
-                            generics: implements_info.generics,
-                            interface: implements_info.interface.map(|ty| { ty.replace_this_type(&this_type, true) }),
-                            concrete: implements_info.concrete.map(|ty| { ty.replace_this_type(&this_type, true) }),
-                            module_name: implements_info.module_name,
-                            where_bounds: Arc::new(Type::replace_where_bounds_this_type(&implements_info.where_bounds, &this_type)),
-                            element_types: Arc::new(Default::default()),
-                            is_bounds_info: true
-                        };
-                        
-                        CollectedImplementation {
-                            implements_info,
-                            local_generics: implementation.local_generics
-                        }
-                    })
-                );
             }
-            
-            implementations
-        } else {
-            global_implements_info_set.collect_satisfied_implementations(
-                &user_type.value,
-                type_environment,
-                current_scope_implements_info_set,
-                allocator
-            )
-        };
+        }
+        
+        implementations.extend(global_implements_info_set.collect_satisfied_implementations(
+            &user_type.value,
+            type_environment,
+            current_scope_implements_info_set,
+            allocator
+        ));
         
         for implementation in implementations {
             let element_type = implementation.implements_info.get_element_type(element_name);
@@ -3738,9 +3736,10 @@ fn type_inference_primary_right<'allocator>(
             }
         }
 
+        let mut origin_types = FxHashSet::default();
         let mut element_types = Vec::new_in(allocator);
-        'root: for (element_type, _, interface_and_where_bounds) in pre_element_types {
-        
+        'root: for (element_type, origin_type, interface_and_where_bounds) in pre_element_types {
+            
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
                 Spanned::new(element_type.value, second_expr.0.span.clone()),
                 current_scope_implements_info_set,
@@ -3761,6 +3760,14 @@ fn type_inference_primary_right<'allocator>(
                         }
                     }
                 }
+            }
+            
+            if let Type::UserType { user_type_info, generics: _, generics_span: _ } = origin_type {
+                let name = (user_type_info.module_name.clone(), user_type_info.name.value.clone());
+                if origin_types.contains(&name) {
+                    continue;
+                }
+                origin_types.insert(name);
             }
 
             element_types.push(

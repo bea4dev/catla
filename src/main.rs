@@ -99,10 +99,27 @@ interface TestInterface4 {
     static function test4() -> This {}
 }
 
-function <T: TestInterface3> aaaa() {
+function <T> aaaa() where T: TestInterface3 {
     let b = T::test3()
     let c = T::test4()
 }
+
+implements<T> TestInterface3 for T where T: TestInterface4 {
+    override static function test3() -> This {
+        let a = T::test3()
+        let b = T::test4()
+        return b
+    }
+}
+
+implements<T> TestInterface4 for T {
+    override static function test4() -> This {
+        return This
+    }
+}
+
+let d = int::test3()
+let e = int::test4()
 
 ";
 let source1 = 

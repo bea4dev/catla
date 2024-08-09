@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, CollectedImplementation, GenericType, ImplementsInfo, ImplementsInfoSet, LocalGenericID, OverrideElementsEnvironment, ScopeThisType, Type, WhereBound, WithDefineInfo}, user_type_element_collector::{get_type, parse_primitive_type}};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, CollectedImplementation, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, LocalGenericID, OverrideElementsEnvironment, ScopeThisType, Type, WhereBound, WithDefineInfo}, user_type_element_collector::{get_type, parse_primitive_type}};
 
 
 
@@ -1727,6 +1727,98 @@ pub(crate) fn type_inference_program<'allocator>(
             _ => {}
         }
     }
+    
+    for statement in ast.statements.iter() {
+        if let Ok(statement) = statement {
+            if let StatementAST::Expression(expression) = statement {
+                if let ExpressionEnum::Closure(closure) = expression {
+                    let closure_type = type_environment.resolve_entity_type(EntityID::from(*expression));
+                    if let Type::Function { function_info, generics: _ } = closure_type.value {
+                        let return_type_temp = type_environment.return_type.clone();
+                        type_environment.return_type = Either::Right(function_info.return_type.clone());
+                        
+                        if let Some(block_or_expr) = &closure.expression_or_block.value {
+                            match block_or_expr {
+                                Either::Left(expression) => {
+                                    type_inference_expression(
+                                        *expression,
+                                        user_type_map,
+                                        import_element_map,
+                                        name_resolved_map,
+                                        module_user_type_map,
+                                        module_element_type_map,
+                                        module_element_type_maps,
+                                        generics_map,
+                                        module_entity_type_map,
+                                        global_implements_info_set,
+                                        current_scope_this_type,
+                                        current_scope_implements_info_set,
+                                        true,
+                                        type_environment,
+                                        implicit_convert_map,
+                                        allocator,
+                                        errors,
+                                        warnings,
+                                        context
+                                    );
+                                    
+                                    let expression_type = type_environment.resolve_entity_type(EntityID::from(*expression));
+                                    
+                                    if &expression_type.value != &Type::Unreachable {
+                                        let result = type_environment.unify_with_return_type(
+                                            Spanned::new(EntityID::from(*expression), expression.get_span()),
+                                            current_scope_this_type
+                                        );
+                                        add_error(result, type_environment);
+                                    }
+                                },
+                                Either::Right(block) => {
+                                    type_inference_program(
+                                        block.program,
+                                        user_type_map,
+                                        import_element_map,
+                                        name_resolved_map,
+                                        module_user_type_map,
+                                        module_element_type_map,
+                                        module_element_type_maps,
+                                        generics_map,
+                                        module_entity_type_map,
+                                        global_implements_info_set,
+                                        current_scope_this_type,
+                                        current_scope_implements_info_set,
+                                        is_interface_scope,
+                                        implements_interfaces,
+                                        force_be_expression,
+                                        type_environment,
+                                        implicit_convert_map,
+                                        allocator,
+                                        errors,
+                                        warnings,
+                                        context
+                                    );
+                                    
+                                    let program_type = type_environment.resolve_entity_type(EntityID::from(block.program));
+                                    
+                                    if &program_type.value != &Type::Unreachable {
+                                        let result = type_environment.unify_with_return_type(
+                                            Spanned::new(EntityID::from(block.program), block.span.clone()),
+                                            current_scope_this_type
+                                        );
+                                        
+                                        add_error(result, type_environment);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        type_environment.return_type = return_type_temp;
+                    } else {
+                        unreachable!()
+                    }
+                }
+            }
+        }
+    }
 
     if !has_type {
         type_environment.set_entity_type(
@@ -1892,12 +1984,10 @@ fn type_inference_expression<'allocator>(
 
             add_errors(results, type_environment);
 
-            if previous.value != EntityID::from(ast) {
-                type_environment.set_entity_id_equals(
-                    previous.value,
-                    EntityID::from(ast)
-                );
-            }
+            type_environment.set_entity_id_equals(
+                previous.value,
+                EntityID::from(ast)
+            );
         },
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
@@ -1931,58 +2021,77 @@ fn type_inference_expression<'allocator>(
             }
         },
         ExpressionEnum::Closure(closure) => {
-            if let Some(expression_or_block) = &closure.expression_or_block.value {
-                match expression_or_block {
-                    Either::Left(expression) => {
-                        type_inference_expression(
-                            &expression,
-                            user_type_map,
-                            import_element_map,
-                            name_resolved_map,
-                            module_user_type_map,
-                            module_element_type_map,
-                            module_element_type_maps,
-                            generics_map,
-                            module_entity_type_map,
-                            global_implements_info_set,
-                            current_scope_this_type,
-                            current_scope_implements_info_set,
-                            true,
-                            type_environment,
-                            implicit_convert_map,
-                            allocator,
-                            errors,
-                            warnings,
-                            context
-                        );
-                    },
-                    Either::Right(block) => {
-                        type_inference_program(
-                            block.program,
-                            user_type_map,
-                            import_element_map,
-                            name_resolved_map,
-                            module_user_type_map,
-                            module_element_type_map,
-                            module_element_type_maps,
-                            generics_map,
-                            module_entity_type_map,
-                            global_implements_info_set,
-                            current_scope_this_type,
-                            current_scope_implements_info_set,
-                            false,
-                            &Vec::new(),
-                            false,
-                            type_environment,
-                            implicit_convert_map,
-                            allocator,
-                            errors,
-                            warnings,
-                            context
-                        );
+            let mut argument_types = Vec::new();
+            
+            match &closure.arguments.arguments {
+                Either::Left(literal) => {
+                    argument_types.push(
+                        Type::LocalGeneric(type_environment.new_local_generic_id(literal.span.clone()))
+                    );
+                },
+                Either::Right(arguments) => {
+                    for argument in arguments.iter() {
+                        match argument {
+                            Either::Left(argument) => {
+                                let ty = if let Ok(type_info) = &argument.type_tag.type_info {
+                                    get_type(
+                                        type_info,
+                                        user_type_map,
+                                        import_element_map,
+                                        name_resolved_map,
+                                        module_user_type_map,
+                                        module_element_type_map,
+                                        generics_map,
+                                        current_scope_this_type,
+                                        errors,
+                                        warnings,
+                                        context
+                                    )
+                                } else {
+                                    Type::LocalGeneric(type_environment.new_local_generic_id(argument.span.clone()))
+                                };
+                                
+                                argument_types.push(ty);
+                            },
+                            Either::Right(literal) => {
+                                argument_types.push(
+                                    Type::LocalGeneric(type_environment.new_local_generic_id(literal.span.clone()))
+                                );
+                            }
+                        }
                     }
                 }
             }
+            
+            let return_type = Spanned::new(
+                Type::LocalGeneric(type_environment.new_local_generic_id(closure.span.clone())),
+                closure.span.clone()
+            );
+            
+            let define_info = FunctionDefineInfo {
+                module_name: context.module_name.clone(),
+                generics_define_span: None,
+                arguments_span: closure.arguments.span.clone(),
+                is_closure: true,
+                span: closure.span.clone()
+            };
+            
+            let function_info = FunctionType {
+                is_extension: false,
+                generics_define: Vec::new(),
+                argument_types,
+                return_type,
+                define_info,
+                where_bounds: FreezableMutex::new(Vec::new())
+            };
+            
+            type_environment.set_entity_type(
+                EntityID::from(ast),
+                Spanned::new(
+                    Type::Function { function_info: Arc::new(function_info), generics: Arc::new(Vec::new()) },
+                    closure.span.clone()
+                )
+            );
         }
     }
 }

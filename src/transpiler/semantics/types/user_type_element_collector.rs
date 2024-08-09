@@ -790,6 +790,7 @@ fn get_function_type_and_name<'allocator>(
         module_name: context.module_name.clone(),
         generics_define_span,
         arguments_span: ast.args.span.clone(),
+        is_closure: false,
         span: ast.span.clone()
     };
     

@@ -717,13 +717,14 @@ pub struct FunctionType {
     pub define_info: FunctionDefineInfo,
     #[derivative(PartialEq="ignore")]
     pub where_bounds: FreezableMutex<Vec<WhereBound>>
-}
+} 
 
 #[derive(Debug, Clone)]
 pub struct FunctionDefineInfo {
     pub module_name: Arc<String>,
     pub generics_define_span: Option<Range<usize>>,
     pub arguments_span: Range<usize>,
+    pub is_closure: bool,
     pub span: Range<usize>
 }
 

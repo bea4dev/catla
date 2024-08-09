@@ -2,7 +2,7 @@ use bumpalo::Bump;
 
 use crate::lexer::TokenKind;
 
-use super::{parse_as_literal, parse_literal, read_until_token_found, skip, unexpected_token_error, Generics, GetTokenKind, Span, TokenCursor, TypeAttribute, TypeAttributeEnum, TypeInfo, TypeInfoResult, TypeTag, TypeTagKind, TypeTagKindEnum};
+use super::{parse_as_literal, parse_literal, read_until_token_found, recover_until_token_found, skip, unexpected_token_error, ArrayTypeInfo, BaseTypeInfo, Generics, GetTokenKind, Span, TokenCursor, TypeAttribute, TypeAttributeEnum, TypeInfo, TypeInfoResult, TypeTag, TypeTagKind, TypeTagKindEnum};
 
 
 pub fn parse_type_tag<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TypeTag<'allocator, 'input>> {
@@ -25,6 +25,16 @@ pub fn parse_type_tag<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, '
 }
 
 pub fn parse_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TypeInfo<'allocator, 'input>> {
+    if let Some(array_type_info) = parse_array_type_info(cursor) {
+        return Some(TypeInfo::ArrayType(array_type_info));
+    }
+    if let Some(base_type_info) = parse_base_type_info(cursor) {
+        return Some(TypeInfo::BaseType(base_type_info));
+    }
+    return None;
+}
+
+pub fn parse_base_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<BaseTypeInfo<'allocator, 'input>> {
     let span = Span::start(cursor);
 
     let mut path = Vec::new_in(cursor.allocator);
@@ -55,7 +65,40 @@ pub fn parse_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
 
     let type_attributes = parse_type_attributes(cursor);
 
-    return Some(TypeInfo { path, generics, type_attributes, span: span.elapsed(cursor) });
+    return Some(BaseTypeInfo { path, generics, type_attributes, span: span.elapsed(cursor) });
+}
+
+pub fn parse_array_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<ArrayTypeInfo<'allocator, 'input>> {
+    let span = Span::start(cursor);
+    
+    if cursor.next().get_kind() != TokenKind::BracketLeft {
+        cursor.prev();
+        return None;
+    }
+    
+    skip(cursor, &[TokenKind::LineFeed]);
+    
+    let type_info = parse_type_info(cursor)
+        .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) })
+        .map(|type_info| { &*cursor.allocator.alloc(type_info) });
+    
+    let error_tokens = recover_until_token_found(cursor, &[TokenKind::BracketRight, TokenKind::LineFeed]);
+    
+    skip(cursor, &[TokenKind::LineFeed]);
+    
+    let allocator = cursor.allocator;
+    let last = cursor.next();
+    let bracket_right = if last.get_kind() == TokenKind::BracketRight {
+        Ok(())
+    } else {
+        Err(unexpected_token_error(allocator, last))
+    };
+    
+    if bracket_right.is_err() {
+        cursor.prev();
+    }
+    
+    return Some(ArrayTypeInfo { type_info, error_tokens, bracket_right, span: span.elapsed(cursor) });
 }
 
 pub fn parse_type_info_result<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> TypeInfoResult<'allocator, 'input> {

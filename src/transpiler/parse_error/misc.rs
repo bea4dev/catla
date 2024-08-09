@@ -109,7 +109,8 @@ pub(crate) enum Expected {
     TypeInfo,
     GreaterThan,
     FieldAssign,
-    This
+    This,
+    Semicolon
 }
 
 impl Expected {
@@ -140,7 +141,8 @@ impl Expected {
             Expected::TypeInfo => "type_info",
             Expected::GreaterThan => "greater_than",
             Expected::FieldAssign => "field_assign",
-            Expected::This => "this"
+            Expected::This => "this",
+            Expected::Semicolon => "semicolon"
         });
     }
 }
@@ -185,7 +187,8 @@ pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected:
         Expected::TypeInfo => None,
         Expected::GreaterThan => Some(">"),
         Expected::FieldAssign => None,
-        Expected::This => Some("this")
+        Expected::This => Some("this"),
+        Expected::Semicolon => Some(";")
     };
 
     if !unexpected_tokens.is_empty() {

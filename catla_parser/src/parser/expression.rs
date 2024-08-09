@@ -7,11 +7,11 @@ pub fn parse_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     if let Some(return_expr) = parse_return_expression(cursor) {
         return Some(allocator.alloc(ExpressionEnum::ReturnExpression(return_expr)));
     }
-    if let Some(or_expr) = parse_or_expression(cursor) {
-        return Some(allocator.alloc(ExpressionEnum::OrExpression(or_expr)));
-    }
     if let Some(closure) = parse_closure(cursor) {
         return Some(allocator.alloc(ExpressionEnum::Closure(closure)));
+    }
+    if let Some(or_expr) = parse_or_expression(cursor) {
+        return Some(allocator.alloc(ExpressionEnum::OrExpression(or_expr)));
     }
     return None;
 }
@@ -229,6 +229,10 @@ fn parse_primary_left<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, '
             None
         };
         PrimaryLeftExpr::Simple((simple_primary, generics, parse_function_call(cursor)))
+    } else if let Some(new_array_init_expression) = parse_new_array_init_expression(cursor) {
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression)
+    } else if let Some(new_array_expression) = parse_new_array_expression(cursor) {
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression)
     } else if let Some(new_expression) = parse_new_expression(cursor) {
         PrimaryLeftExpr::NewExpression(new_expression)
     } else if let Some(if_expression) = parse_if_expression(cursor) {
@@ -428,6 +432,124 @@ fn parse_function_call<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
     return Some(FunctionCall { error_tokens, arg_exprs: Ok(arg_exprs), span: span.elapsed(cursor) });
 }
 
+fn parse_new_array_init_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<NewArrayInitExpression<'allocator, 'input>> {
+    let span = Span::start(cursor);
+    let start_position = cursor.current_position;
+    
+    let new_keyword_token = cursor.next();
+    if new_keyword_token.get_kind() != TokenKind::New {
+        cursor.prev();
+        return None;
+    }
+    let new_keyword_span = new_keyword_token.unwrap().span.clone();
+    
+    let acyclic_keyword_token = cursor.next();
+    let acyclic_keyword_span = if acyclic_keyword_token.get_kind() == TokenKind::Acyclic {
+        acyclic_keyword_token.map(|token| { token.span.clone() })
+    } else {
+        cursor.prev();
+        None
+    };
+    
+    if cursor.next().get_kind() != TokenKind::BracketLeft {
+        cursor.current_position = start_position;
+        return None;
+    }
+    
+    skip(cursor, &[TokenKind::LineFeed]);
+    
+    let init_expression = parse_expression(cursor)
+        .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+    
+    skip(cursor, &[TokenKind::LineFeed]);
+    
+    let semicolon = cursor.current().get_kind();
+    let semicolon = if semicolon == TokenKind::Semicolon {
+        cursor.next();
+        Ok(())
+    } else {
+        Err(unexpected_token_error(cursor.allocator, cursor.current()))
+    };
+    
+    let length_expression = parse_expression(cursor)
+        .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+    
+    let error_tokens = recover_until_token_found(cursor, &[TokenKind::BracketRight, TokenKind::LineFeed]);
+    
+    let bracket_right = cursor.current().get_kind();
+    let bracket_right = if bracket_right == TokenKind::BracketRight {
+        cursor.next();
+        Ok(())
+    } else {
+        Err(unexpected_token_error(cursor.allocator, cursor.current()))
+    };
+    
+    return Some(NewArrayInitExpression {
+        new_keyword_span,
+        acyclic_keyword_span,
+        init_expression,
+        semicolon,
+        length_expression,
+        bracket_right,
+        error_tokens,
+        span: span.elapsed(cursor)
+    });
+}
+
+fn parse_new_array_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<NewArrayExpression<'allocator, 'input>> {
+    let span = Span::start(cursor);
+    let start_position = cursor.current_position;
+    
+    let new_keyword_token = cursor.next();
+    if new_keyword_token.get_kind() != TokenKind::New {
+        cursor.prev();
+        return None;
+    }
+    let new_keyword_span = new_keyword_token.unwrap().span.clone();
+    
+    let acyclic_keyword_token = cursor.next();
+    let acyclic_keyword_span = if acyclic_keyword_token.get_kind() == TokenKind::Acyclic {
+        acyclic_keyword_token.map(|token| { token.span.clone() })
+    } else {
+        cursor.prev();
+        None
+    };
+
+    if cursor.next().get_kind() != TokenKind::BraceLeft {
+        cursor.current_position = start_position;
+        return None;
+    }
+    
+    let mut error_tokens = Vec::new_in(cursor.allocator);
+    let mut value_expressions = Vec::new_in(cursor.allocator);
+
+    loop {
+        skip(cursor, &[TokenKind::LineFeed]);
+
+        let value_expression = parse_expression(cursor)
+            .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+        value_expressions.push(value_expression);
+        
+        skip(cursor, &[TokenKind::LineFeed]);
+
+        if cursor.next().get_kind() != TokenKind::Comma {
+            cursor.prev();
+            error_tokens.push(recover_until_token_found(cursor, &[TokenKind::BraceRight, TokenKind::Comma, TokenKind::LineFeed]));
+
+            match cursor.next().get_kind() {
+                TokenKind::BraceRight => break,
+                TokenKind::Comma => continue,
+                _ => {
+                    cursor.prev();
+                    break
+                }
+            }
+        }
+    }
+    
+    return Some(NewArrayExpression { new_keyword_span, acyclic_keyword_span, value_expressions, error_tokens, span: span.elapsed(cursor) });
+}
+
 fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<NewExpression<'allocator, 'input>> {
     let span = Span::start(cursor);
     
@@ -450,7 +572,7 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     let mut error_tokens = Vec::new_in(cursor.allocator);
     match parse_literal(cursor) {
         Some(literal) => path.push(literal),
-        _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
+        _ => error_tokens.push(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
     }
 
     if error_tokens.is_empty() {
@@ -461,11 +583,11 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
                     match parse_literal(cursor) {
                         Some(literal) => path.push(literal),
-                        _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
+                        _ => error_tokens.push(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
                     };
                 },
                 TokenKind::BraceLeft => break,
-                _ => error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
+                _ => error_tokens.push(recover_until_token_found(cursor, &[TokenKind::BraceLeft, TokenKind::LineFeed]))
             }
         }
     }
@@ -486,7 +608,7 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
                     break;
                 },
                 _ => {
-                    error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceRight, TokenKind::Comma, TokenKind::LineFeed]));
+                    error_tokens.push(recover_until_token_found(cursor, &[TokenKind::BraceRight, TokenKind::Comma, TokenKind::LineFeed]));
 
                     match cursor.next().get_kind() {
                         TokenKind::BraceRight => break,
@@ -501,7 +623,7 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
             if cursor.next().get_kind() != TokenKind::Colon {
                 cursor.prev();
-                error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceRight, TokenKind::Comma, TokenKind::LineFeed]));
+                error_tokens.push(recover_until_token_found(cursor, &[TokenKind::BraceRight, TokenKind::Comma, TokenKind::LineFeed]));
 
                 match cursor.next().get_kind() {
                     TokenKind::BraceRight => break,
@@ -526,7 +648,7 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
                 TokenKind::Comma => continue,
                 _ => {
                     cursor.prev();
-                    error_tokens.extend(recover_until_token_found(cursor, &[TokenKind::BraceRight, TokenKind::Comma, TokenKind::LineFeed]));
+                    error_tokens.push(recover_until_token_found(cursor, &[TokenKind::BraceRight, TokenKind::Comma, TokenKind::LineFeed]));
 
                     match cursor.next().get_kind() {
                         TokenKind::BraceRight => break,
@@ -605,6 +727,7 @@ fn parse_return_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocat
 
 fn parse_closure<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Closure<'allocator, 'input>> {
     let span = Span::start(cursor);
+    let start_position = cursor.current_position;
 
     let arguments = parse_closure_arguments(cursor)?;
 
@@ -618,6 +741,10 @@ fn parse_closure<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input
             cursor.next();
             Ok(cursor.peek_prev().unwrap().span.clone())
         } else {
+            if arguments.arguments.is_left() {
+                cursor.current_position = start_position;
+                return None;
+            }
             Err(())
         }
     };

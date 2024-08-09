@@ -1,5 +1,5 @@
 use bumpalo::Bump;
-use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FieldAssign, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause, WhereElement}};
+use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FieldAssign, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause, WhereElement}};
 use either::Either::{Right, Left, self};
 
 use self::{statement::{not_separated_statement_error_1, statement_attributes_without_define}, misc::{unexpected_token_error, Expected, UnexpectedTokens}};
@@ -614,8 +614,67 @@ fn collect_parse_error_primary_left(
                 collect_parse_error_function_call(function_call, errors, warnings, context);
             }
         },
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
+            collect_parse_error_with_parse_result(
+                &new_array_init_expression.init_expression,
+                collect_parse_error_expression,
+                Expected::Expression,
+                0064,
+                errors,
+                warnings,
+                context
+            );
+            collect_parse_error_only_parse_result_error(
+                &new_array_init_expression.semicolon,
+                Expected::Semicolon,
+                0064,
+                errors,
+                context
+            );
+            collect_parse_error_with_parse_result(
+                &new_array_init_expression.length_expression,
+                collect_parse_error_expression,
+                Expected::Expression,
+                0064,
+                errors,
+                warnings,
+                context
+            );
+            collect_parse_error_only_parse_result_error(
+                &new_array_init_expression.bracket_right,
+                Expected::BraceRight,
+                0064,
+                errors,
+                context
+            );
+            collect_error_tokens(
+                &new_array_init_expression.error_tokens,
+                Expected::Unnecessary,
+                0064,
+                errors,
+                context
+            );
+        },
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {
+            for value_expression in new_array_expression.value_expressions.iter() {
+                collect_parse_error_with_parse_result(
+                    value_expression,
+                    collect_parse_error_expression,
+                    Expected::Expression,
+                    0064,
+                    errors,
+                    warnings,
+                    context
+                );
+            }
+            for error_tokens in new_array_expression.error_tokens.iter() {
+                collect_error_tokens(error_tokens, Expected::Expression, 0064, errors, context);
+            }
+        },
         PrimaryLeftExpr::NewExpression(new_expression) => {
-            collect_error_tokens(&new_expression.error_tokens, Expected::Unnecessary, 0016, errors, context);
+            for error_tokens in new_expression.error_tokens.iter() {
+                collect_error_tokens(error_tokens, Expected::Unnecessary, 0016, errors, context);
+            }
             collect_parse_error_with_parse_result(
                 &new_expression.field_assigns,
                 collect_parse_error_field_assigns,
@@ -803,6 +862,22 @@ fn collect_parse_error_type_info(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
+    match ast {
+        TypeInfo::BaseType(base_type_info) => {
+            collect_parse_error_base_type_info(base_type_info, errors, warnings, context);
+        },
+        TypeInfo::ArrayType(array_type_info) => {
+            collect_parse_error_array_type_info(array_type_info, errors, warnings, context);
+        }
+    }
+}
+
+fn collect_parse_error_base_type_info(
+    ast: &BaseTypeInfo,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
     if let Some(generics) = &ast.generics {
         collect_parse_error_generics(generics, errors, warnings, context);
     }
@@ -813,6 +888,30 @@ fn collect_parse_error_type_info(
             }
         }
     }
+}
+
+fn collect_parse_error_array_type_info(
+    ast: &ArrayTypeInfo,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    match &ast.type_info {
+        Ok(type_info) => {
+            collect_parse_error_type_info(*type_info, errors, warnings, context);
+        },
+        Err(error) => {
+            errors.extend(unexpected_token_error(&vec![error], Expected::TypeInfo, 0065, context))
+        }
+    }
+    collect_error_tokens(&ast.error_tokens, Expected::BraceRight, 0065, errors, context);
+    collect_parse_error_only_parse_result_error(
+        &ast.bracket_right,
+        Expected::BraceRight,
+        0065,
+        errors,
+        context
+    );
 }
 
 fn collect_parse_error_generics(

@@ -216,6 +216,7 @@ async fn transpile_module(
         &ScopeThisType::new(Type::Unknown),
         &None,
         false,
+        false,
         &Vec::new(),
         false,
         &mut type_environment,

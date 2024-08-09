@@ -10,8 +10,15 @@ bnf_rules!{
     source              ::= program
 
     program             ::= [ statement ] { end_of_statement [ statement ] }
-    statement           ::= assignment | exchange_statement | import_statement |
-                            define_with_attr | drop_statement | expression | impl_interface | type_define
+    
+    statement           ::= assignment
+                            | exchange_statement
+                            | import_statement
+                            | define_with_attr
+                            | drop_statement
+                            | expression
+                            | impl_interface
+                            | type_define
 
     define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define )
 
@@ -53,7 +60,7 @@ bnf_rules!{
 
     exchange_statement  ::= expression "<=>" [ line_feed ] expression
 
-    expression          ::= or_expr | return_expression | closure
+    expression          ::= return_expression | closure | or_expr
     or_expr             ::= and_expr { "or" [ line_feed ] and_expr }
     and_expr            ::= equ_or_ine_expr { "and" [ line_feed ] equ_or_ine_expr }
     equ_or_ine_expr     ::= les_or_gre_expr { ( "==" | "!=" ) [ line_feed ] les_or_gre_expr }
@@ -62,10 +69,31 @@ bnf_rules!{
     mul_or_div_expr     ::= factor { ( "*" | "/" ) [ line_feed ] factor }
     factor              ::= "-" [ line_feed ] primary | primary
     primary             ::= primary_left { primary_right }
-    primary_left        ::= ( simple_primary [ ":" generics_info ] [ function_call ] | new_expression | if_expression | loop_expression ) [ mapping_operator ]
+    primary_left        ::= (
+                                simple_primary [ ":" generics_info ] [ function_call ]
+                                | new_array_init_expr
+                                | new_array_expr
+                                | new_expression
+                                | if_expression
+                                | loop_expression
+                            )
+                            [ mapping_operator ]
+    
     primary_right       ::= ( "." | "::" ) [ line_feed ] ( literal [ ":" generics_info ] [ function_call ] | mapping_operator )
-    simple_primary      ::= "(" expression ")" | literal | "null" | "true" | "false" | "this" | "This"
-    mapping_operator    ::= "?" | "?" "!" | "!" | "!" "!" | ( "?" | "!" ) ":" block
+    
+    simple_primary      ::= "(" expression ")"
+                            | literal
+                            | "null"
+                            | "true"
+                            | "false"
+                            | "this"
+                            | "This"
+                            
+    mapping_operator    ::= "?"
+                            | "?" "!"
+                            | "!"
+                            | "!" "!"
+                            | ( "?" | "!" ) ":" block
 
     if_expression       ::= if_statement { "else" ( if_statement | block ) }
     if_statement        ::= "if" expression block
@@ -73,18 +101,33 @@ bnf_rules!{
     loop_expression     ::= "loop" block
 
     closure             ::= ( closure_args | literal ) "=>" ( expression | block )
-    closure_args        ::= "|" [ [ line_feed ] ( function_argument | literal ) [ line_feed ] ] { "," [ line_feed ] [ ( function_argument | literal ) [ line_feed ] ] } "|"
+    closure_args        ::= "|"
+                                [ [ line_feed ] ( function_argument | literal ) [ line_feed ] ]
+                                { "," [ line_feed ] [ ( function_argument | literal ) [ line_feed ] ] }
+                            "|"
 
     function_call       ::= "(" [ [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
 
     new_expression      ::= "new" [ "acyclic" ] ( literal | "This" ) { "::" [ line_feed ] literal } field_assign
-    field_assign        ::= "{" [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ] { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] } "}"
+    field_assign        ::= "{"
+                                [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ]
+                                { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] }
+                            "}"
+    
+    new_array_expr      ::= "new" [ "acyclic" ] "{"
+                                [ [ line_feed ] expression [ line_feed ] ]
+                                { "," [ line_feed ] [ expression [ line_feed ] ] }
+                            "}"
+
+    new_array_init_expr ::= "new" [ "acyclic" ] "[" [ line_feed ] expression [ line_feed ] ";" [ line_feed ] expression [ line_feed ] "]"
 
     return_expression   ::= "return" [ expression ]
 
     type_tag            ::= ":" type_info
     function_type_tag   ::= "->" type_info
-    type_info           ::= ( literal | "This" ) { "::" [ line_feed ] literal } [ generics_info ] { type_attribute }
+    type_info           ::= array_type_info | base_type_info
+    array_type_info     ::= "[" [ line_feed ] type_info [ line_feed ] "]"
+    base_type_info      ::= ( literal | "This" ) { "::" [ line_feed ] literal } [ generics_info ] { type_attribute }
     type_attribute      ::= "?" | ( "!" [ generics_info ] )
     generics_info       ::= "<" [ line_feed ] [ type_info [ line_feed ] ] { "," [ line_feed ] [ type_info [ line_feed ] ] } ">"
 

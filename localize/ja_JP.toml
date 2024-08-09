@@ -25,6 +25,7 @@ type_info = "型情報が必要です"
 greater_than = "括弧を'>'で閉じる必要があります"
 field_assign = "フィールドの初期化式が必要です"
 this = "'let'もしくは'var'の後には'this'が必要です"
+semicolon = "';'が必要です"
 
 [advice]
 message = "以下のように修正すると解決できるかもしれません"
@@ -281,3 +282,9 @@ note = "実装を記述できるのはどちらかの型が定義されている
 [error.0063]
 message = "else節が記述されていません"
 label_0 = "このif文は式として扱われているためelse節が必要です"
+[error.0064]
+message = "配列の初期化式の記述形式が正しくありません"
+label_0 = ""
+[error.0065]
+message = "配列型の記述方法が正しくありません"
+label_0 = ""

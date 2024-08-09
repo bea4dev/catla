@@ -837,6 +837,10 @@ pub fn parse_block<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'inp
     } else {
         Err(unexpected_token_error(allocator, last))
     };
+    
+    if brace_right.is_err() {
+        cursor.prev();
+    }
 
     return Some(Block { program, brace_right, span: span.elapsed(cursor) })
 }

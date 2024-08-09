@@ -450,6 +450,8 @@ pub struct PrimaryLeft<'allocator, 'input> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrimaryLeftExpr<'allocator, 'input> {
     Simple((SimplePrimary<'allocator, 'input>, Option<GenericsResult<'allocator, 'input>>, Option<FunctionCall<'allocator, 'input>>)),
+    NewArrayInitExpression(NewArrayInitExpression<'allocator, 'input>),
+    NewArrayExpression(NewArrayExpression<'allocator, 'input>),
     NewExpression(NewExpression<'allocator, 'input>),
     IfExpression(IfExpression<'allocator, 'input>),
     LoopExpression(LoopExpression<'allocator, 'input>)
@@ -477,6 +479,8 @@ impl PrimaryLeftExpr<'_, '_> {
                     }
                 }
             },
+            PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => new_array_init_expression.span.clone(),
+            PrimaryLeftExpr::NewArrayExpression(new_array_expression) => new_array_expression.span.clone(),
             PrimaryLeftExpr::NewExpression(new_expression) => new_expression.span.clone(),
             PrimaryLeftExpr::IfExpression(if_expression) => if_expression.span.clone(),
             PrimaryLeftExpr::LoopExpression(loop_expression) => loop_expression.span.clone()
@@ -580,7 +584,7 @@ pub struct NewExpression<'allocator, 'input> {
     pub acyclic_keyword_span: Option<Range<usize>>,
     pub path: Vec<Literal<'input>, &'allocator Bump>,
     pub field_assigns: FieldAssignsResult<'allocator, 'input>,
-    pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
+    pub error_tokens: Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>,
     pub span: Range<usize>
 }
 
@@ -590,6 +594,27 @@ pub type FieldAssignsResult<'allocator, 'input> = ParseResult<'allocator, 'input
 pub struct FieldAssign<'allocator, 'input> {
     pub name: Literal<'input>,
     pub expression: ExpressionResult<'allocator, 'input>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewArrayInitExpression<'allocator, 'input> {
+    pub new_keyword_span: Range<usize>,
+    pub acyclic_keyword_span: Option<Range<usize>>,
+    pub init_expression: ParseResult<'allocator, 'input, Expression<'allocator, 'input>>,
+    pub semicolon: ParseResult<'allocator, 'input, ()>,
+    pub length_expression: ParseResult<'allocator, 'input, Expression<'allocator, 'input>>,
+    pub bracket_right: ParseResult<'allocator, 'input, ()>,
+    pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
+    pub span: Range<usize>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewArrayExpression<'allocator, 'input> {
+    pub new_keyword_span: Range<usize>,
+    pub acyclic_keyword_span: Option<Range<usize>>,
+    pub value_expressions: Vec<ExpressionResult<'allocator, 'input>, &'allocator Bump>,
+    pub error_tokens: Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>,
+    pub span: Range<usize>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -639,7 +664,21 @@ pub enum TypeTagKindEnum {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeInfo<'allocator, 'input> {
+pub enum TypeInfo<'allocator, 'input> {
+    BaseType(BaseTypeInfo<'allocator, 'input>),
+    ArrayType(ArrayTypeInfo<'allocator, 'input>)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArrayTypeInfo<'allocator, 'input> {
+    pub type_info: ParseResult<'allocator, 'input, &'allocator TypeInfo<'allocator, 'input>>,
+    pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
+    pub bracket_right: ParseResult<'allocator, 'input, ()>,
+    pub span: Range<usize>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaseTypeInfo<'allocator, 'input> {
     pub path: Vec<Literal<'input>, &'allocator Bump>,
     pub generics: Option<Generics<'allocator, 'input>>,
     pub type_attributes: Vec<TypeAttribute<'allocator, 'input>, &'allocator Bump>,

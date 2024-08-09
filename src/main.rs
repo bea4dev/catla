@@ -121,8 +121,8 @@ implements<T> TestInterface4 for T {
 let d = int::test3()
 let e = int::test4()
 
-let func = |i| => { return i }
-let a: int = func(100)
+let func = |i, j| => i + j
+let a = func(100, 200)
 
 ";
 let source1 = 

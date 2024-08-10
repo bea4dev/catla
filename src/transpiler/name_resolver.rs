@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::Range};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
-use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause}};
+use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause}};
 use either::Either::{Left, Right};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -1140,6 +1140,45 @@ fn name_resolve_primary_left<'allocator>(
                 );
             }
         },
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
+            if let Ok(init_expression) = new_array_init_expression.init_expression {
+                name_resolve_expression(
+                    init_expression,
+                    environment_id,
+                    name_environments,
+                    resolved_map,
+                    errors,
+                    warnings,
+                    allocator
+                );
+            }
+            if let Ok(length_expression) = new_array_init_expression.length_expression {
+                name_resolve_expression(
+                    length_expression,
+                    environment_id,
+                    name_environments,
+                    resolved_map,
+                    errors,
+                    warnings,
+                    allocator
+                );
+            }
+        },
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {
+            for value_expression in new_array_expression.value_expressions.iter() {
+                if let Ok(value_expression) = value_expression {
+                    name_resolve_expression(
+                        value_expression,
+                        environment_id,
+                        name_environments,
+                        resolved_map,
+                        errors,
+                        warnings,
+                        allocator
+                    );
+                }
+            }
+        },
         PrimaryLeftExpr::NewExpression(new_expression) => {
             if let Some(first_literal) = new_expression.path.first() {
                 let collect_error = new_expression.path.len() == 1;
@@ -1441,6 +1480,63 @@ fn name_resolve_type_tag<'allocator>(
 
 fn name_resolve_type_info<'allocator>(
     ast: &'allocator TypeInfo<'allocator, '_>,
+    environment_id: EntityID,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    allocator: &'allocator Bump
+) {
+    match ast {
+        TypeInfo::BaseType(base_type_info) => {
+            name_resolve_base_type_info(
+                base_type_info,
+                environment_id,
+                name_environments,
+                resolved_map,
+                errors,
+                warnings,
+                allocator
+            );
+        },
+        TypeInfo::ArrayType(array_type_info) => {
+            name_resolve_array_type_info(
+                array_type_info,
+                environment_id,
+                name_environments,
+                resolved_map,
+                errors,
+                warnings,
+                allocator
+            );
+        }
+    }
+}
+
+fn name_resolve_array_type_info<'allocator>(
+    ast: &'allocator ArrayTypeInfo<'allocator, '_>,
+    environment_id: EntityID,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    allocator: &'allocator Bump
+) {
+    if let Ok(type_info) = ast.type_info {
+        name_resolve_type_info(
+            type_info,
+            environment_id,
+            name_environments,
+            resolved_map,
+            errors,
+            warnings,
+            allocator
+        );
+    }
+}
+
+fn name_resolve_base_type_info<'allocator>(
+    ast: &'allocator BaseTypeInfo<'allocator, '_>,
     environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,

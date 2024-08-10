@@ -359,6 +359,39 @@ fn validate_syntax_primary_left(
                 }
             }
         },
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
+            if let Ok(init_expression) = new_array_init_expression.init_expression {
+                if !is_valid_format_for_array_init_expr(init_expression) {
+                    let mut error = SimpleError::new(
+                        0066,
+                        init_expression.get_span(),
+                        vec![],
+                        vec![((context.module_name.clone(), init_expression.get_span()), Color::Red)]
+                    );
+                    error.add_advice(
+                        context.module_name.clone(),
+                        Advice::Add {
+                            add: "i =>".to_string(),
+                            position: init_expression.get_span().start,
+                            message_override: Some("advice.replace_with_closure")
+                        }
+                    );
+                    errors.push(error);
+                }
+
+                validate_syntax_expression(init_expression, context, errors, warnings);
+            }
+            if let Ok(length_expression) = new_array_init_expression.length_expression {
+                validate_syntax_expression(length_expression, context, errors, warnings);
+            }
+        },
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {
+            for value_expression in new_array_expression.value_expressions.iter() {
+                if let Ok(value_expression) = value_expression {
+                    validate_syntax_expression(*value_expression, context, errors, warnings);
+                }
+            }
+        },
         PrimaryLeftExpr::IfExpression(if_expression) => {
             let if_statement = &if_expression.if_statement;
             if let Ok(condition) = &if_statement.condition {
@@ -378,6 +411,75 @@ fn validate_syntax_primary_left(
     if let Some(mapping_operator) = &ast.mapping_operator {
         validate_syntax_mapping_operator(&mapping_operator.value, context,errors, warnings);
     }
+}
+
+fn is_valid_format_for_array_init_expr(
+    ast: Expression
+) -> bool {
+    let or_expression = match ast {
+        ExpressionEnum::OrExpression(or_expression) => or_expression,
+        ExpressionEnum::ReturnExpression(_) => return true,
+        ExpressionEnum::Closure(_) => return true
+    };
+
+    if !or_expression.right_exprs.is_empty() {
+        return false;
+    }
+
+    let and_expression = &or_expression.left_expr;
+    if !and_expression.right_exprs.is_empty() {
+        return false;
+    }
+
+    let eq_expression = &and_expression.left_expr;
+    if !eq_expression.right_exprs.is_empty() {
+        return false;
+    }
+
+    let compare_expression = &eq_expression.left_expr;
+    if !compare_expression.right_exprs.is_empty() {
+        return false;
+    }
+
+    let add_expression = &compare_expression.left_expr;
+    if !add_expression.right_exprs.is_empty() {
+        return false;
+    }
+
+    let mul_expression = &add_expression.left_expr;
+    if !mul_expression.right_exprs.is_empty() {
+        return false;
+    }
+
+    let factor = &mul_expression.left_expr;
+    if let Ok(primary) = &factor.primary {
+        if !primary.chain.is_empty() {
+            return false;
+        }
+        
+        let left = &primary.left;
+        if left.mapping_operator.is_some() {
+            return false;
+        }
+
+        return if let PrimaryLeftExpr::Simple((simple_primary, generics, function_call)) = &left.first_expr {
+            if generics.is_some() {
+                return false;
+            }
+            if function_call.is_some() {
+                return false;
+            }
+            
+            match simple_primary {
+                SimplePrimary::Expression { expression: _, error_tokens: _, span: _ } => false,
+                _ => true
+            }
+        } else {
+            false
+        }
+    }
+
+    true
 }
 
 fn validate_syntax_primary_right(

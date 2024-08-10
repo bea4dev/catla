@@ -37,6 +37,7 @@ pub enum Type {
     Function{ function_info: Arc<FunctionType>, generics: Arc<Vec<Type>> },
     Generic(Arc<GenericType>),
     LocalGeneric(LocalGenericID),
+    Array(Arc<Type>),
     Option(Arc<Type>),
     Result { value: Arc<Type>, error: Arc<Type> },
     This,
@@ -93,6 +94,10 @@ impl Type {
                     Some(index) => replace_generics.get(index).cloned().unwrap_or(ty.clone()),
                     _ => ty.clone()
                 }
+            },
+            Type::Array(base_type) => {
+                let new_base_type = Type::get_type_with_replaced_generics(&base_type, generics_define, replace_generics);
+                Type::Array(Arc::new(new_base_type))
             },
             Type::Option(value_type) => {
                 let new_value_type = Type::get_type_with_replaced_generics(&value_type, generics_define, replace_generics);
@@ -190,6 +195,7 @@ impl Type {
                     location: generic.location.clone()
                 }))
             },
+            Type::Array(base_type) => Type::Array(Arc::new(base_type.replace_this_type(new_this_type, replace_field_recursive))),
             Type::Option(value) => Type::Option(Arc::new(value.replace_this_type(new_this_type, replace_field_recursive))),
             Type::Result { value, error } => {
                 Type::Result {
@@ -491,6 +497,7 @@ impl Type {
                 generics.bounds.freeze_and_get().iter()
                     .any(|bound| { bound.ty.contains_unknown() })
             },
+            Type::Array(base_type) => base_type.contains_unknown(),
             Type::Option(value_type) => value_type.contains_unknown(),
             Type::Result { value, error } => {
                 value.contains_unknown() || error.contains_unknown()
@@ -926,6 +933,20 @@ impl ImplementsInfo {
                 true
             },
             Type::LocalGeneric(_) => unreachable!(),
+            Type::Array(self_base_type) => {
+                if let Type::Array(base_type) = ty {
+                    ImplementsInfo::contains_target_type(
+                        &self_base_type,
+                        &base_type,
+                        global_implements_info_set,
+                        current_scope_implements_info_set,
+                        type_environment,
+                        allow_unknown
+                    )
+                } else {
+                    false
+                }
+            },
             Type::Option(self_value_type) => {
                 if let Type::Option(value_type) = ty {
                     ImplementsInfo::contains_target_type(
@@ -1432,6 +1453,12 @@ fn is_duplicated_implementation_type(type_1: &Type, type_2: &Type) -> bool {
         },
         Type::Generic(_) => unreachable!(),
         Type::LocalGeneric(_) => unreachable!(),
+        Type::Array(base_type_1) => {
+            if let Type::Array(base_type_2) = type_2 {
+                return is_duplicated_implementation_type(base_type_1, base_type_2);
+            }
+            false
+        },
         Type::Option(value_1) => {
             if let Type::Option(value_2) = type_2 {
                 return is_duplicated_implementation_type(value_1, value_2);

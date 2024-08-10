@@ -1,7 +1,7 @@
 use std::{mem, ops::DerefMut, sync::Arc};
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, TypeAttributeEnum, TypeInfo, UserTypeKindEnum, WhereClause};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, TypeAttributeEnum, TypeInfo, UserTypeKindEnum, WhereClause};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -82,7 +82,7 @@ pub(crate) fn collect_module_element_types_program(
                         errors,
                         warnings,
                         context
-                    ), type_info.span.clone())
+                    ), type_info.get_span())
                 } else {
                     Spanned::new(Type::Unknown, type_define.span.clone())
                 };
@@ -371,7 +371,7 @@ pub(crate) fn collect_module_element_types_program(
 
                             let implements_info = ImplementsInfo {
                                 generics: generics.clone(),
-                                interface: Spanned::new(interface, type_info.span.clone()),
+                                interface: Spanned::new(interface, type_info.get_span()),
                                 concrete: Spanned::new(concrete.clone(), name.span.clone()),
                                 module_name: context.module_name.clone(),
                                 where_bounds: Arc::new(Vec::new()),
@@ -435,7 +435,7 @@ pub(crate) fn collect_module_element_types_program(
                             errors,
                             warnings,
                             context
-                        ), target_type.span.clone());
+                        ), target_type.get_span());
                         module_entity_type_map.insert(EntityID::from(target_type), concrete.value.clone());
 
                         let current_scope_this_type = &ScopeThisType::new(concrete.value.clone());
@@ -452,7 +452,7 @@ pub(crate) fn collect_module_element_types_program(
                             errors,
                             warnings,
                             context
-                        ), interface_info.span.clone());
+                        ), interface_info.get_span());
                         module_entity_type_map.insert(EntityID::from(interface_info), interface.value.clone());
 
                         let where_bounds = get_where_bounds(
@@ -729,7 +729,7 @@ fn get_function_type_and_name<'allocator>(
                         warnings,
                         context
                     );
-                    Spanned::new(ty, type_info.span.clone())
+                    Spanned::new(ty, type_info.get_span())
                 },
                 _ => Spanned::new(Type::Unknown, type_tag.span.clone())
             }
@@ -874,13 +874,13 @@ pub(crate) fn get_where_bounds(
                 // TODO - check sanity of bound types
                 bounds.push(Arc::new(Bound {
                     module_name: context.module_name.clone(),
-                    span: bound.span.clone(),
+                    span: bound.get_span(),
                     ty,
                     entity_id: EntityID::from(bound)
                 }));
             }
             where_bounds.push(WhereBound {
-                target_type: Spanned::new(target_type, element.target_type.span.clone()),
+                target_type: Spanned::new(target_type, element.target_type.get_span()),
                 bounds
             });
         }
@@ -1401,6 +1401,63 @@ fn collect_module_element_types_primary_left(
                 );
             }
         },
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
+            if let Ok(init_expression) = new_array_init_expression.init_expression {
+                collect_module_element_types_expression(
+                    init_expression,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    generics_map,
+                    module_entity_type_map,
+                    implements_infos,
+                    current_scope_this_type,
+                    errors,
+                    warnings,
+                    context
+                );
+            }
+            if let Ok(length_expression) = new_array_init_expression.length_expression {
+                collect_module_element_types_expression(
+                    length_expression,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    generics_map,
+                    module_entity_type_map,
+                    implements_infos,
+                    current_scope_this_type,
+                    errors,
+                    warnings,
+                    context
+                );
+            }
+        },
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {
+            for value_expression in new_array_expression.value_expressions.iter() {
+                if let Ok(value_expression) = value_expression {
+                    collect_module_element_types_expression(
+                        value_expression,
+                        user_type_map,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        generics_map,
+                        module_entity_type_map,
+                        implements_infos,
+                        current_scope_this_type,
+                        errors,
+                        warnings,
+                        context
+                    );
+                }
+            }
+        },
         PrimaryLeftExpr::NewExpression(new_expression) => {
             if let Ok(field_assigns) = &new_expression.field_assigns {
                 for field_assign in field_assigns.iter() {
@@ -1709,6 +1766,85 @@ pub(crate) fn get_type(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) -> Type {
+    match ast {
+        TypeInfo::BaseType(base_type_info) => {
+            get_base_type(
+                base_type_info,
+                user_type_map,
+                import_element_map,
+                name_resolved_map,
+                module_user_type_map,
+                module_element_type_map,
+                generics_map,
+                current_scope_this_type,
+                errors,
+                warnings,
+                context
+            )
+        },
+        TypeInfo::ArrayType(array_type_info) => {
+            get_array_type(
+                array_type_info,
+                user_type_map,
+                import_element_map,
+                name_resolved_map,
+                module_user_type_map,
+                module_element_type_map,
+                generics_map,
+                current_scope_this_type,
+                errors,
+                warnings,
+                context
+            )
+        }
+    }
+}
+
+pub(crate) fn get_array_type(
+    ast: &ArrayTypeInfo,
+    user_type_map: &FxHashMap<String, Type>,
+    import_element_map: &FxHashMap<EntityID, String>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
+    generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
+    current_scope_this_type: &ScopeThisType,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) -> Type {
+    if let Ok(base_type_info) = ast.type_info {
+        Type::Array(Arc::new(get_type(
+            base_type_info,
+            user_type_map,
+            import_element_map,
+            name_resolved_map,
+            module_user_type_map,
+            module_element_type_map,
+            generics_map,
+            current_scope_this_type,
+            errors,
+            warnings,
+            context
+        )))
+    } else {
+        Type::Unknown
+    }
+}
+
+pub(crate) fn get_base_type(
+    ast: &BaseTypeInfo,
+    user_type_map: &FxHashMap<String, Type>,
+    import_element_map: &FxHashMap<EntityID, String>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
+    generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
+    current_scope_this_type: &ScopeThisType,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) -> Type {
     if ast.path.is_empty() {
         return Type::Unknown;
     }
@@ -1791,7 +1927,7 @@ pub(crate) fn get_type(
                 context
             );
             generics_types.push(ty);
-            generics_span.push(element.span.clone());
+            generics_span.push(element.get_span());
         }
 
         type_info = match &type_info {
@@ -1940,7 +2076,7 @@ fn get_generic_type<'allocator>(
             // TODO - check sanity of bound types
             bounds.push(Arc::new(Bound {
                 module_name: context.module_name.clone(),
-                span: bound.span.clone(),
+                span: bound.get_span(),
                 ty,
                 entity_id: EntityID::from(bound)
             }));

@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, NewExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, NewExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -407,6 +407,21 @@ fn collect_import_module_primary_left(
                 collect_import_module_function_call(function_call, import_element_map, name_resolved_map, errors,warnings, context);
             }
         },
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
+            if let Ok(init_expression) = new_array_init_expression.init_expression {
+                collect_import_module_expression(init_expression, import_element_map, name_resolved_map, errors, warnings, context);
+            }
+            if let Ok(length_expression) = new_array_init_expression.length_expression {
+                collect_import_module_expression(length_expression, import_element_map, name_resolved_map, errors, warnings, context);
+            }
+        },
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {
+            for value_expression in new_array_expression.value_expressions.iter() {
+                if let Ok(value_expression) = value_expression {
+                    collect_import_module_expression(value_expression, import_element_map, name_resolved_map, errors, warnings, context);
+                }
+            }
+        },
         PrimaryLeftExpr::NewExpression(new_expression) => {
             if new_expression.path.len() > 1 {
                 let module_name = get_module_name_from_new_expression(new_expression, import_element_map, name_resolved_map);
@@ -571,6 +586,37 @@ fn collect_import_module_type_tag(
 
 fn collect_import_module_type_info(
     ast: &TypeInfo,
+    import_element_map: &mut FxHashMap<EntityID, String>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    match ast {
+        TypeInfo::BaseType(base_type_info) => {
+            collect_import_module_base_type_info(base_type_info, import_element_map, name_resolved_map, errors, warnings, context);
+        },
+        TypeInfo::ArrayType(array_type_info) => {
+            collect_import_module_array_type_info(array_type_info, import_element_map, name_resolved_map, errors, warnings, context);
+        }
+    }
+}
+
+fn collect_import_module_array_type_info(
+    ast: &ArrayTypeInfo,
+    import_element_map: &mut FxHashMap<EntityID, String>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    if let Ok(base_type_info) = ast.type_info {
+        collect_import_module_type_info(base_type_info, import_element_map, name_resolved_map, errors, warnings, context);
+    }
+}
+
+fn collect_import_module_base_type_info(
+    ast: &BaseTypeInfo,
     import_element_map: &mut FxHashMap<EntityID, String>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,

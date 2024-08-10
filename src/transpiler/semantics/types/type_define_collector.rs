@@ -284,6 +284,21 @@ fn collect_user_type_primary_left(
                 collect_user_type_function_call(function_call, user_type_map, context);
             }
         },
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
+            if let Ok(init_expression) = new_array_init_expression.init_expression {
+                collect_user_type_expression(init_expression, user_type_map, context);
+            }
+            if let Ok(length_expression) = new_array_init_expression.length_expression {
+                collect_user_type_expression(length_expression, user_type_map, context);
+            }
+        },
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {
+            for value_expression in new_array_expression.value_expressions.iter() {
+                if let Ok(value_expression) = value_expression {
+                    collect_user_type_expression(value_expression, user_type_map, context);
+                }
+            }
+        },
         PrimaryLeftExpr::NewExpression(new_expression) => {
             if let Ok(field_assigns) = &new_expression.field_assigns {
                 for field_assign in field_assigns.iter() {

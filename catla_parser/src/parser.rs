@@ -93,6 +93,8 @@ impl_ast!{
     ClosureArguments<'_, '_>,
     TypeTag<'_, '_>,
     TypeInfo<'_, '_>,
+    BaseTypeInfo<'_, '_>,
+    ArrayTypeInfo<'_, '_>,
     TypeAttributeEnum<'_, '_>,
     Generics<'_, '_>,
     Literal<'_>
@@ -667,6 +669,15 @@ pub enum TypeTagKindEnum {
 pub enum TypeInfo<'allocator, 'input> {
     BaseType(BaseTypeInfo<'allocator, 'input>),
     ArrayType(ArrayTypeInfo<'allocator, 'input>)
+}
+
+impl TypeInfo<'_, '_> {
+    pub fn get_span(&self) -> Range<usize> {
+        match self {
+            TypeInfo::BaseType(base_type_info) => base_type_info.span.clone(),
+            TypeInfo::ArrayType(array_type_info) => array_type_info.span.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

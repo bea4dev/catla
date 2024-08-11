@@ -602,6 +602,7 @@ pub struct FieldAssign<'allocator, 'input> {
 pub struct NewArrayInitExpression<'allocator, 'input> {
     pub new_keyword_span: Range<usize>,
     pub acyclic_keyword_span: Option<Range<usize>>,
+    pub for_keyword_span: Option<Range<usize>>,
     pub init_expression: ParseResult<'allocator, 'input, Expression<'allocator, 'input>>,
     pub semicolon: ParseResult<'allocator, 'input, ()>,
     pub length_expression: ParseResult<'allocator, 'input, Expression<'allocator, 'input>>,

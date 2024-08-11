@@ -458,6 +458,12 @@ fn parse_new_array_init_expression<'allocator, 'input>(cursor: &mut TokenCursor<
     
     skip(cursor, &[TokenKind::LineFeed]);
     
+    let for_keyword_span = if cursor.current().get_kind() == TokenKind::For {
+        Some(cursor.next().unwrap().span.clone())
+    } else {
+        None
+    };
+    
     let init_expression = parse_expression(cursor)
         .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
     
@@ -487,6 +493,7 @@ fn parse_new_array_init_expression<'allocator, 'input>(cursor: &mut TokenCursor<
     return Some(NewArrayInitExpression {
         new_keyword_span,
         acyclic_keyword_span,
+        for_keyword_span,
         init_expression,
         semicolon,
         length_expression,

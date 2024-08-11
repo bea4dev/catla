@@ -361,7 +361,10 @@ fn validate_syntax_primary_left(
         },
         PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
             if let Ok(init_expression) = new_array_init_expression.init_expression {
-                if !is_valid_format_for_array_init_expr(init_expression) {
+                if !is_valid_format_for_array_init_expr(
+                    new_array_init_expression.for_keyword_span.is_some(),
+                    init_expression
+                ) {
                     let mut error = SimpleError::new(
                         0066,
                         init_expression.get_span(),
@@ -371,7 +374,7 @@ fn validate_syntax_primary_left(
                     error.add_advice(
                         context.module_name.clone(),
                         Advice::Add {
-                            add: "i =>".to_string(),
+                            add: "for i =>".to_string(),
                             position: init_expression.get_span().start,
                             message_override: Some("advice.replace_with_closure")
                         }
@@ -414,12 +417,13 @@ fn validate_syntax_primary_left(
 }
 
 fn is_valid_format_for_array_init_expr(
+    has_for_keyword: bool,
     ast: Expression
 ) -> bool {
     let or_expression = match ast {
         ExpressionEnum::OrExpression(or_expression) => or_expression,
         ExpressionEnum::ReturnExpression(_) => return true,
-        ExpressionEnum::Closure(_) => return true
+        ExpressionEnum::Closure(_) => return has_for_keyword
     };
 
     if !or_expression.right_exprs.is_empty() {

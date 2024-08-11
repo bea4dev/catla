@@ -119,7 +119,7 @@ bnf_rules!{
                                 { "," [ line_feed ] [ expression [ line_feed ] ] }
                             "}"
 
-    new_array_init_expr ::= "new" [ "acyclic" ] "[" [ line_feed ] expression [ line_feed ] ";" [ line_feed ] expression [ line_feed ] "]"
+    new_array_init_expr ::= "new" [ "acyclic" ] "[" [ line_feed ] [ "for" ] expression [ line_feed ] ";" [ line_feed ] expression [ line_feed ] "]"
 
     return_expression   ::= "return" [ expression ]
 

@@ -24,6 +24,8 @@ const WHERE_BOUNDS_NOT_SATISFIED_ERROR: usize = 0050;
 const DUPLICATED_ELEMENT_ERROR: usize = 0051;
 const UNRESOLVED_INTERFACE: usize = 0052;
 const INVALID_OVERRIDE_ERROR: usize = 0056;
+const INVALID_ARRAY_INIT_EXPR_TYPE: usize = 0067;
+const INVALID_ARRAY_LENGTH_EXPR_TYPE: usize = 0068;
 
 
 pub(crate) struct TypeEnvironment<'allocator, 'input> {
@@ -194,7 +196,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         first_resolved.1.span = first_entity_id.span.clone();
         second_resolved.1.span = second_entity_id.span.clone();
 
-        match (first_resolved.1.value.is_replaceable(), second_resolved.1.value.is_replaceable()) {
+        match (
+            first_resolved.1.value.is_replaceable_with(&second_resolved.1.value),
+            second_resolved.1.value.is_replaceable_with(&first_resolved.1.value)
+        ) {
             (true, true) => {
                 self.entity_type_map.insert(second_resolved.0, Either::Left(first_resolved.0));
             },
@@ -233,7 +238,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         first_resolved.1.span = first_entity_id.span.clone();
         second_resolved.1.span = second_entity_id.span.clone();
 
-        match (first_resolved.1.value.is_replaceable(), second_resolved.1.value.is_replaceable()) {
+        match (
+            first_resolved.1.value.is_replaceable_with(&second_resolved.1.value),
+            second_resolved.1.value.is_replaceable_with(&first_resolved.1.value)
+        ) {
             (true, true) => {
                 self.entity_type_map.insert(second_resolved.0, Either::Left(first_resolved.0));
             },
@@ -477,7 +485,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             if let Type::LocalGeneric(second_generic_id) = second_type {
                 let second_resolved_type = self.resolve_generic_type(*second_generic_id);
 
-                match (first_resolved_type.1.value.is_replaceable(), second_resolved_type.1.value.is_replaceable()) {
+                match (
+                    first_resolved_type.1.value.is_replaceable_with(&second_resolved_type.1.value),
+                    second_resolved_type.1.value.is_replaceable_with(&first_resolved_type.1.value)
+                ) {
                     (true, true) => {
                         self.generic_type_map.insert(second_resolved_type.0, Either::Left(first_resolved_type.0));
                     },
@@ -602,6 +613,21 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 }
             },
             Type::LocalGeneric(_) => unreachable!(),
+            Type::Array(first_type) => {
+                if let Type::Array(second_type) = second_type {
+                    self.unify_type_recursive(
+                        &first_type,
+                        first_span,
+                        &second_type,
+                        second_span,
+                        current_scope_this_type,
+                        allow_unknown
+                    )?;
+                    true
+                } else {
+                    false
+                }
+            },
             Type::Option(first_type) => {
                 if let Type::Option(second_type) = second_type {
                     self.unify_type_recursive(
@@ -745,8 +771,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             Type::Uint16 => "uint16".to_string(),
             Type::Uint32 => "uint32".to_string(),
             Type::Uint64 => "uint64".to_string(),
+            Type::IntegerLiteral(_) => "int".to_string(),
             Type::Float32 => "float32".to_string(),
             Type::Float64 => "float64".to_string(),
+            Type::FloatLiteral(_) => "float".to_string(),
             Type::Bool => "bool".to_string(),
             Type::Unit => "unit".to_string(),
             Type::UserType { user_type_info, generics, generics_span: _ } => {
@@ -780,6 +808,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             Type::LocalGeneric(generic_id) => {
                 self.get_type_display_string(&self.resolve_generic_type(*generic_id).1.value)
             },
+            Type::Array(base_type) => format!("[{}]", self.get_type_display_string(base_type)),
             Type::Option(value_type) => format!("{}?", self.get_type_display_string(value_type)),
             Type::Result { value, error } => {
                 format!("{}!<{}>", self.get_type_display_string(value), self.get_type_display_string(error))
@@ -807,6 +836,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 Type::Function { function_info: function_info.clone(), generics: Arc::new(new_generics) }
             },
             Type::LocalGeneric(generic_id) => self.resolve_generic_type(*generic_id).1.value,
+            Type::Array(base_type) => Type::Array(Arc::new(self.resolve_type(&base_type))),
             Type::Option(value) => Type::Option(Arc::new(self.resolve_type(&value))),
             Type::Result { value, error } => {
                 Type::Result {
@@ -1404,10 +1434,10 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
 
                         let super_type = module_entity_type_map.get(&EntityID::from(type_info)).unwrap();
 
-                        implements_interfaces.push(Spanned::new(super_type.clone(), type_info.span.clone()));
+                        implements_interfaces.push(Spanned::new(super_type.clone(), type_info.get_span()));
 
                         type_environment.add_check_type_info_bounds(
-                            Spanned::new(super_type.clone(), type_info.span.clone()),
+                            Spanned::new(super_type.clone(), type_info.get_span()),
                             &user_type,
                             true,
                             &current_scope_implements_info_set
@@ -1421,7 +1451,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                             };
                             implements_infos.insert(EntityID::from(type_info), ImplementsInfo {
                                 generics: Arc::new(Vec::new()),
-                                interface: Spanned::new(super_type.clone(), type_info.span.clone()),
+                                interface: Spanned::new(super_type.clone(), type_info.get_span()),
                                 concrete: Spanned::new(concrete, name.span.clone()),
                                 module_name: context.module_name.clone(),
                                 where_bounds: Arc::new(Vec::new()),
@@ -1521,7 +1551,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                 
                 if let Ok(target_type) = &implements.target_user_type {
                     type_environment.add_check_type_info_bounds(
-                        Spanned::new(concrete.clone(), target_type.span.clone()),
+                        Spanned::new(concrete.clone(), target_type.get_span()),
                         &concrete,
                         true,
                         &current_scope_implements_info_set
@@ -1533,10 +1563,10 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                 if let Ok(interface_info) = &implements.interface {
                     let interface = module_entity_type_map.get(&EntityID::from(interface_info)).unwrap();
 
-                    implements_interfaces.push(Spanned::new(interface.clone(), interface_info.span.clone()));
+                    implements_interfaces.push(Spanned::new(interface.clone(), interface_info.get_span()));
 
                     type_environment.add_check_type_info_bounds(
-                        Spanned::new(interface.clone(), interface_info.span.clone()),
+                        Spanned::new(interface.clone(), interface_info.get_span()),
                         &concrete,
                         true,
                         &current_scope_implements_info_set
@@ -1712,7 +1742,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                         } else {
                             let tag_type_span = variable_define.type_tag.as_ref()
                             .map(|type_tag| {
-                                type_tag.type_info.as_ref().map(|type_info| { type_info.span.clone() }).ok()
+                                type_tag.type_info.as_ref().map(|type_info| { type_info.get_span() }).ok()
                             }).flatten().unwrap_or(variable_define.span.clone());
 
                             let result = type_environment.unify_with_implicit_convert(
@@ -3137,16 +3167,32 @@ fn type_inference_primary_left<'allocator, 'input>(
                         }
                     } else {
                         let text = identifier.value;
-                        let ty = if text.parse::<i32>().is_ok() {
-                            Type::Int32
-                        } else if text.parse::<i64>().is_ok() {
-                            Type::Int64
+                        let ty = if text.parse::<u8>().is_ok() {
+                            Type::IntegerLiteral(Arc::new(Type::Uint8))
+                        } else if text.parse::<u16>().is_ok() {
+                            Type::IntegerLiteral(Arc::new(Type::Uint16))
+                        } else if text.parse::<u32>().is_ok() {
+                            Type::IntegerLiteral(Arc::new(Type::Uint32))
+                        } else if text.parse::<u64>().is_ok() {
+                            Type::IntegerLiteral(Arc::new(Type::Uint64))
                         } else if text.parse::<f32>().is_ok() {
-                            Type::Float32
+                            Type::IntegerLiteral(Arc::new(Type::Float32))
                         } else if text.parse::<f64>().is_ok() {
-                            Type::Float64
+                            Type::IntegerLiteral(Arc::new(Type::Float64))
                         } else {
                             parse_primitive_type(text, current_scope_this_type)
+                        };
+                        
+                        let ty = match ty {
+                            Type::IntegerLiteral(min_type) | Type::FloatLiteral(min_type) => {
+                                let new_generic_id = type_environment.new_local_generic_id(identifier.span.clone());
+                                type_environment.set_generic_type(
+                                    new_generic_id,
+                                    Spanned::new(min_type.as_ref().clone(), identifier.span.clone())
+                                );
+                                Type::LocalGeneric(new_generic_id)
+                            },
+                            _ => ty
                         };
 
                         type_environment.set_entity_type(
@@ -3245,6 +3291,119 @@ fn type_inference_primary_left<'allocator, 'input>(
                     EntityID::from(&ast.first_expr)
                 );
             }
+        },
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
+            let base_type = if let Ok(init_expression) = new_array_init_expression.init_expression {
+                type_inference_expression(
+                    init_expression,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    generics_map,
+                    module_entity_type_map,
+                    global_implements_info_set,
+                    current_scope_this_type,
+                    current_scope_implements_info_set,
+                    force_be_expression,
+                    type_environment,
+                    implicit_convert_map,
+                    allocator,
+                    errors,
+                    warnings,
+                    context
+                );
+                
+                let init_expression_type = type_environment.resolve_entity_type(EntityID::from(init_expression));
+                
+                if new_array_init_expression.for_keyword_span.is_some() {
+                    let return_type = Type::LocalGeneric(type_environment.new_local_generic_id(init_expression.get_span()));
+                    
+                    let define_info = FunctionDefineInfo {
+                        module_name: context.module_name.clone(),
+                        generics_define_span: None,
+                        arguments_span: init_expression.get_span(),
+                        is_closure: true,
+                        span: init_expression.get_span()
+                    };
+                    
+                    let function_info = FunctionType {
+                        is_extension: false,
+                        generics_define: Vec::new(),
+                        argument_types: vec![Type::Uint64],
+                        return_type: Spanned::new(return_type.clone(), init_expression.get_span()),
+                        define_info,
+                        where_bounds: FreezableMutex::new(Vec::new())
+                    };
+                    
+                    let expected_type = Type::Function {
+                        function_info: Arc::new(function_info),
+                        generics: Arc::new(Vec::new())
+                    };
+                    
+                    if type_environment.unify_type(
+                        &expected_type,
+                        &init_expression.get_span(),
+                        &init_expression_type.value,
+                        &init_expression_type.span,
+                        current_scope_this_type,
+                        false
+                    ).is_err() {
+                        let error = SimpleError::new(
+                            INVALID_ARRAY_INIT_EXPR_TYPE,
+                            init_expression.get_span(),
+                            vec![
+                                ("function<T>(uint64) -> T".to_string(), Color::Cyan),
+                                (type_environment.get_type_display_string(&init_expression_type.value), Color::Red)
+                            ],
+                            vec![
+                                ((context.module_name.clone(), new_array_init_expression.for_keyword_span.unwrap().clone()), Color::Yellow),
+                                ((context.module_name.clone(), init_expression.get_span()), Color::Red)
+                            ]
+                        );
+                        errors.push(TranspileError::new(error));
+                    }
+                    
+                    return_type
+                } else {
+                    init_expression_type.value
+                }
+            } else {
+                Type::Unknown
+            };
+            
+            if let Ok(length_expression) = new_array_init_expression.length_expression {
+                let length_expression_type = type_environment.resolve_entity_type(EntityID::from(length_expression));
+                
+                if type_environment.unify_type(
+                    &length_expression_type.value,
+                    &length_expression_type.span,
+                    &Type::Uint64,
+                    &length_expression.get_span(),
+                    current_scope_this_type,
+                    false
+                ).is_err() {
+                    let error = SimpleError::new(
+                        INVALID_ARRAY_LENGTH_EXPR_TYPE,
+                        length_expression.get_span(),
+                        vec![
+                            (type_environment.get_type_display_string(&Type::Uint64), Color::Cyan),
+                            (type_environment.get_type_display_string(&length_expression_type.value), Color::Red)
+                        ],
+                        vec![
+                            ((context.module_name.clone(), length_expression.get_span()), Color::Red)
+                        ]
+                    );
+                    errors.push(TranspileError::new(error));
+                }
+            }
+            
+            type_environment.set_entity_type(
+                EntityID::from(&ast.first_expr),
+                Spanned::new(Type::Array(Arc::new(base_type)), new_array_init_expression.span.clone())
+            );
         },
         PrimaryLeftExpr::NewExpression(new_expression) => {
             let user_type = if new_expression.path.len() > 1 {

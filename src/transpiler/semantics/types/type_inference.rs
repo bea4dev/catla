@@ -253,6 +253,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 self.entity_type_map.insert(second_resolved.0, Either::Left(first_resolved.0));
             },
             (false, false) => {
+                dbg!(1);
+                
                 let result = self.unify_type_with_implicit_convert(
                     &first_resolved.1.value,
                     &first_resolved.1.span,
@@ -287,7 +289,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
     ) -> Result<Option<ImplicitConvertKind>, TypeMismatchError> {
         if first_is_expr {
             if second_type.is_option_or_result() {
-                let ty = if let Type::LocalGeneric(generic_id) = first_type {
+                let first_resolved_type = if let Type::LocalGeneric(generic_id) = first_type {
                     self.resolve_generic_type(*generic_id).1.value
                 } else {
                     first_type.clone()
@@ -296,22 +298,22 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 let mut implicit_convert = None;
 
                 let new_first_type = if let Type::Option(_) = second_type {
-                    if let Type::Option(_) = &ty {
-                        ty
+                    if let Type::Option(_) = &first_resolved_type {
+                        first_type.clone()
                     } else {
                         implicit_convert = Some(ImplicitConvertKind::Some);
-                        Type::Option(Arc::new(ty))
+                        Type::Option(Arc::new(first_type.clone()))
                     }
                 } else if let Type::Result { value, error } = second_type {
-                    if let Type::Result { value: _, error: _ } = &ty {
-                        ty
-                    } else if let Type::Unit = &ty {
+                    if let Type::Result { value: _, error: _ } = &first_resolved_type {
+                        first_type.clone()
+                    } else if let Type::Unit = &first_resolved_type {
                         // TODO - replace with std error type
                         implicit_convert = Some(ImplicitConvertKind::Error);
-                        Type::Result { value: value.clone(), error: Arc::new(ty) }
+                        Type::Result { value: value.clone(), error: Arc::new(first_type.clone()) }
                     } else {
                         implicit_convert = Some(ImplicitConvertKind::Ok);
-                        Type::Result { value: Arc::new(ty), error: error.clone() }
+                        Type::Result { value: Arc::new(first_type.clone()), error: error.clone() }
                     }
                 } else {
                     unreachable!()
@@ -339,7 +341,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             }
         } else {
             if first_type.is_option_or_result() {
-                let ty = if let Type::LocalGeneric(generic_id) = second_type {
+                let second_resolved_type = if let Type::LocalGeneric(generic_id) = second_type {
                     self.resolve_generic_type(*generic_id).1.value
                 } else {
                     second_type.clone()
@@ -348,22 +350,22 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 let mut implicit_convert = None;
 
                 let new_second_type = if let Type::Option(_) = &first_type {
-                    if let Type::Option(_) = &ty {
-                        ty
+                    if let Type::Option(_) = &second_resolved_type {
+                        second_type.clone()
                     } else {
                         implicit_convert = Some(ImplicitConvertKind::Some);
-                        Type::Option(Arc::new(ty))
+                        Type::Option(Arc::new(second_type.clone()))
                     }
                 } else if let Type::Result { value, error } = &first_type {
-                    if let Type::Result { value: _, error: _ } = &ty {
-                        ty
-                    } else if let Type::Unit = &ty {
+                    if let Type::Result { value: _, error: _ } = &second_resolved_type {
+                        second_type.clone()
+                    } else if let Type::Unit = &second_resolved_type {
                         // TODO - replace with std error type
                         implicit_convert = Some(ImplicitConvertKind::Error);
-                        Type::Result { value: value.clone(), error: Arc::new(ty) }
+                        Type::Result { value: value.clone(), error: Arc::new(second_type.clone()) }
                     } else {
                         implicit_convert = Some(ImplicitConvertKind::Ok);
-                        Type::Result { value: Arc::new(ty), error: error.clone() }
+                        Type::Result { value: Arc::new(second_type.clone()), error: error.clone() }
                     }
                 } else {
                     unreachable!()
@@ -379,6 +381,9 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 )?;
                 Ok(implicit_convert)
             } else {
+                dbg!(self.get_type_display_string(first_type));
+                dbg!(self.get_type_display_string(&second_type));
+                
                 self.unify_type(
                     first_type,
                     first_span,
@@ -513,19 +518,43 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
                 return Ok(());
             } else {
-                self.set_generic_type(
-                    *first_generic_id,
-                    Spanned::new(second_type.clone(), second_span.clone())
-                );
-                return Ok(());
+                if first_resolved_type.1.value.is_replaceable_with(second_type) {
+                    self.set_generic_type(
+                        *first_generic_id,
+                        Spanned::new(second_type.clone(), second_span.clone())
+                    );
+                    return Ok(());
+                } else {
+                    return self.unify_type_recursive(
+                        &first_resolved_type.1.value,
+                        &first_resolved_type.1.span,
+                        &second_type,
+                        &second_span,
+                        current_scope_this_type,
+                        allow_unknown
+                    );
+                }
             }
         } else {
             if let Type::LocalGeneric(second_generic_id) = second_type {
-                self.set_generic_type(
-                    *second_generic_id,
-                    Spanned::new(first_type.clone(), first_span.clone())
-                );
-                return Ok(());
+                let second_resolved_type = self.resolve_generic_type(*second_generic_id);
+                
+                if second_resolved_type.1.value.is_replaceable_with(first_type) {
+                    self.set_generic_type(
+                        *second_generic_id,
+                        Spanned::new(first_type.clone(), first_span.clone())
+                    );
+                    return Ok(());
+                } else {
+                    return self.unify_type_recursive(
+                        &first_type,
+                        &first_span,
+                        &second_resolved_type.1.value,
+                        &second_resolved_type.1.span,
+                        current_scope_this_type,
+                        allow_unknown
+                    );
+                }
             }
         }
 
@@ -1870,7 +1899,6 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
 
     for var_type_and_span in var_entity_id_and_spans {
         let ty = type_environment.resolve_entity_type(var_type_and_span.1).value;
-        dbg!(&ty);
         
         builder.add_label(
             Label::new((&context.module_name, var_type_and_span.0))
@@ -3414,7 +3442,7 @@ fn type_inference_primary_left<'allocator, 'input>(
                 }
             }
             
-            type_inference_blocks(
+            type_inference_blocks_or_expressions(
                 expressions,
                 Spanned::new(EntityID::from(&ast.first_expr), new_array_expression.span.clone()),
                 user_type_map,
@@ -3691,7 +3719,7 @@ fn type_inference_primary_left<'allocator, 'input>(
                 errors.push(TranspileError::new(error));
             }
 
-            type_inference_blocks(
+            type_inference_blocks_or_expressions(
                 blocks,
                 Spanned::new(EntityID::from(&ast.first_expr), if_expression.span.clone()),
                 user_type_map,
@@ -3780,8 +3808,8 @@ fn type_inference_primary_left<'allocator, 'input>(
     }
 }
 
-fn type_inference_blocks<'allocator, 'input>(
-    blocks: Vec<Either<&'allocator Block<'allocator, 'input>, Expression<'allocator, 'input>>, &'allocator Bump>,
+fn type_inference_blocks_or_expressions<'allocator, 'input>(
+    blocks_or_expressions: Vec<Either<&'allocator Block<'allocator, 'input>, Expression<'allocator, 'input>>, &'allocator Bump>,
     parent_ast_entity_id: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, String>,
@@ -3802,7 +3830,7 @@ fn type_inference_blocks<'allocator, 'input>(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
-    let mut first_type = match blocks.first() {
+    let mut first_type = match blocks_or_expressions.first() {
         Some(block_or_expression) => {
             match block_or_expression {
                 Either::Left(block) => {
@@ -3873,8 +3901,8 @@ fn type_inference_blocks<'allocator, 'input>(
 
     let mut has_implicit_convert = false;
 
-    for i in 1..blocks.len() {
-        let block_or_expression = blocks[i];
+    for i in 1..blocks_or_expressions.len() {
+        let block_or_expression = blocks_or_expressions[i];
         
         let block_or_expression_entity_id = match block_or_expression {
             Either::Left(block) => {
@@ -3935,6 +3963,9 @@ fn type_inference_blocks<'allocator, 'input>(
         if !force_be_expression {
             continue;
         }
+        
+        dbg!(type_environment.get_type_display_string(&first_type.value));
+        dbg!(type_environment.get_type_display_string(&type_environment.resolve_entity_type(block_or_expression_entity_id.value).value));
 
         let result = type_environment.unify_with_implicit_convert(
             Spanned::new(parent_ast_entity_id.value, first_type.span.clone()),
@@ -3942,6 +3973,8 @@ fn type_inference_blocks<'allocator, 'input>(
             current_scope_this_type,
             false
         );
+        
+        dbg!(&result);
 
         let second_type = type_environment.resolve_entity_type(block_or_expression_entity_id.value);
 
@@ -3953,7 +3986,7 @@ fn type_inference_blocks<'allocator, 'input>(
                         value: Arc::new(first_type.value.clone()),
                         error: Arc::new(Type::Unit)
                     };
-                    for block_or_expression in blocks[0..=i].iter() {
+                    for block_or_expression in blocks_or_expressions[0..=i].iter() {
                         let entity_id = match block_or_expression {
                             Either::Left(block) => EntityID::from(block.program),
                             Either::Right(expression) => EntityID::from(*expression)
@@ -3963,6 +3996,8 @@ fn type_inference_blocks<'allocator, 'input>(
                     }
                     has_implicit_convert = true;
                 } else if second_type.value.is_option_or_result() {
+                    dbg!(type_environment.get_type_display_string(&second_type.value));
+                    
                     let result = if let Type::Option(value_type) = &second_type.value {
                         type_environment.unify_type(
                             &first_type.value,
@@ -3973,6 +4008,9 @@ fn type_inference_blocks<'allocator, 'input>(
                             false
                         )
                     } else if let Type::Result { value, error: _ } = &second_type.value {
+                        dbg!(type_environment.get_type_display_string(value));
+                        dbg!(type_environment.get_type_display_string(&first_type.value));
+                        
                         type_environment.unify_type(
                             &first_type.value,
                             &first_type.span,
@@ -4001,7 +4039,7 @@ fn type_inference_blocks<'allocator, 'input>(
                         } else {
                             ImplicitConvertKind::Ok
                         };
-                        for block_or_expression in blocks[0..=i].iter() {
+                        for block_or_expression in blocks_or_expressions[0..=i].iter() {
                             let entity_id = match block_or_expression {
                                 Either::Left(block) => EntityID::from(block.program),
                                 Either::Right(expression) => EntityID::from(*expression)
@@ -4699,6 +4737,7 @@ pub(crate) trait LazyTypeReport {
 }
 
 
+#[derive(Debug)]
 pub(crate) struct TypeMismatchError {
     type_0: Spanned<Type>,
     type_1: Spanned<Type>,

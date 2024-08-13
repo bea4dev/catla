@@ -820,8 +820,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
     }
 
     pub fn resolve_generic_type(&self, generic_id: LocalGenericID) -> (LocalGenericID, Spanned<Type>) {
+        dbg!(generic_id);
         let mut current_id = generic_id;
         loop {
+            dbg!(current_id);
             let generic_id_or_type = self.generic_type_map.get(&current_id).unwrap();
             match &generic_id_or_type {
                 Either::Left(entity_id) => current_id = *entity_id,
@@ -1945,7 +1947,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
     }
 
     dbg!(6);
-    /*let mut builder = Report::build(ReportKind::Custom("Debug", Color::Cyan), &context.module_name, 0);
+    let mut builder = Report::build(ReportKind::Custom("Debug", Color::Cyan), &context.module_name, 0);
 
     for var_type_and_span in var_entity_id_and_spans {
         let ty = type_environment.resolve_entity_type(var_type_and_span.1).value;
@@ -1957,7 +1959,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
         );
     }
     
-    builder.finish().print((&context.module_name, Source::from(context.source_code.code.as_str()))).unwrap();*/
+    builder.finish().print((&context.module_name, Source::from(context.source_code.code.as_str()))).unwrap();
 
     dbg!(7);
 }

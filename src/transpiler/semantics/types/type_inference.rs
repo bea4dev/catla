@@ -398,7 +398,9 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 Ok(implicit_convert)
             } else {
                 dbg!(self.get_type_display_string(first_type));
-                dbg!(self.get_type_display_string(&second_type));
+                dbg!(self.get_type_display_string(second_type));
+                dbg!(first_type);
+                dbg!(second_type);
                 
                 self.unify_type(
                     first_type,
@@ -1219,6 +1221,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
+    dbg!(2);
     let mut has_type = false;
     let mut var_entity_id_and_spans = Vec::new_in(allocator);
 
@@ -1832,6 +1835,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
             _ => {}
         }
     }
+
+    dbg!(3);
     
     if !is_closure_scope {
         for i in 0..type_environment.closures.len() {
@@ -1924,18 +1929,23 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
         }
     }
 
+    dbg!(4);
+
     if !has_type {
         type_environment.set_entity_type(
             EntityID::from(ast),
             Spanned::new(Type::Unit, ast.span.clone())
         );
     }
+
+    dbg!(5);
     
     if !is_interface_scope {
         override_elements_environment.collect_errors(errors, context);
     }
 
-    let mut builder = Report::build(ReportKind::Custom("Debug", Color::Cyan), &context.module_name, 0);
+    dbg!(6);
+    /*let mut builder = Report::build(ReportKind::Custom("Debug", Color::Cyan), &context.module_name, 0);
 
     for var_type_and_span in var_entity_id_and_spans {
         let ty = type_environment.resolve_entity_type(var_type_and_span.1).value;
@@ -1947,7 +1957,9 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
         );
     }
     
-    builder.finish().print((&context.module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+    builder.finish().print((&context.module_name, Source::from(context.source_code.code.as_str()))).unwrap();*/
+
+    dbg!(7);
 }
 
 fn get_and_check_where_bounds_implements_info(

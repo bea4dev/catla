@@ -217,7 +217,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     &second_resolved.1.value,
                     &second_resolved.1.span,
                     current_scope_this_type,
-                    false
+                    false,
+                    true
                 );
             }
         }
@@ -288,7 +289,13 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         first_is_expr: bool
     ) -> Result<Option<ImplicitConvertKind>, TypeMismatchError> {
         if first_is_expr {
-            if second_type.is_option_or_result() {
+            let second_resolved_type = if let Type::LocalGeneric(generic_id) = second_type {
+                self.resolve_generic_type(*generic_id).1.value
+            } else {
+                second_type.clone()
+            };
+
+            if second_resolved_type.is_option_or_result() {
                 let first_resolved_type = if let Type::LocalGeneric(generic_id) = first_type {
                     self.resolve_generic_type(*generic_id).1.value
                 } else {
@@ -297,14 +304,14 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
                 let mut implicit_convert = None;
 
-                let new_first_type = if let Type::Option(_) = second_type {
+                let new_first_type = if let Type::Option(_) = &second_resolved_type {
                     if let Type::Option(_) = &first_resolved_type {
                         first_type.clone()
                     } else {
                         implicit_convert = Some(ImplicitConvertKind::Some);
                         Type::Option(Arc::new(first_type.clone()))
                     }
-                } else if let Type::Result { value, error } = second_type {
+                } else if let Type::Result { value, error } = &second_resolved_type {
                     if let Type::Result { value: _, error: _ } = &first_resolved_type {
                         first_type.clone()
                     } else if let Type::Unit = &first_resolved_type {
@@ -325,7 +332,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     second_type,
                     second_span,
                     current_scope_this_type,
-                    false
+                    false,
+                    true
                 )?;
                 Ok(implicit_convert)
             } else {
@@ -335,12 +343,19 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     second_type,
                     second_span,
                     current_scope_this_type,
-                    false
+                    false,
+                    true
                 )?;
                 Ok(None)
             }
         } else {
-            if first_type.is_option_or_result() {
+            let first_resolved_type = if let Type::LocalGeneric(generic_id) = first_type {
+                self.resolve_generic_type(*generic_id).1.value
+            } else {
+                first_type.clone()
+            };
+
+            if first_resolved_type.is_option_or_result() {
                 let second_resolved_type = if let Type::LocalGeneric(generic_id) = second_type {
                     self.resolve_generic_type(*generic_id).1.value
                 } else {
@@ -349,14 +364,14 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
                 let mut implicit_convert = None;
 
-                let new_second_type = if let Type::Option(_) = &first_type {
+                let new_second_type = if let Type::Option(_) = &first_resolved_type {
                     if let Type::Option(_) = &second_resolved_type {
                         second_type.clone()
                     } else {
                         implicit_convert = Some(ImplicitConvertKind::Some);
                         Type::Option(Arc::new(second_type.clone()))
                     }
-                } else if let Type::Result { value, error } = &first_type {
+                } else if let Type::Result { value, error } = &first_resolved_type {
                     if let Type::Result { value: _, error: _ } = &second_resolved_type {
                         second_type.clone()
                     } else if let Type::Unit = &second_resolved_type {
@@ -377,7 +392,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     &new_second_type,
                     second_span,
                     current_scope_this_type,
-                    false
+                    false,
+                    true
                 )?;
                 Ok(implicit_convert)
             } else {
@@ -390,7 +406,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     second_type,
                     second_span,
                     current_scope_this_type,
-                    false
+                    false,
+                    true
                 )?;
                 Ok(None)
             }
@@ -436,7 +453,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         second_type: &Type,
         second_span: &Range<usize>,
         current_scope_this_type: &ScopeThisType,
-        allow_unknown: bool
+        allow_unknown: bool,
+        is_first_layer: bool
     ) -> Result<(), TypeMismatchError> {
 
         let result = self.unify_type_recursive(
@@ -445,15 +463,16 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             second_type,
             second_span,
             current_scope_this_type,
-            allow_unknown
+            allow_unknown,
+            is_first_layer
         );
 
-        result.map_err(|mut err| {
+        result.map_err(|err| {
             let first = Spanned::new(first_type.clone(), first_span.clone());
             let second = Spanned::new(second_type.clone(), second_span.clone());
 
-            let remove = (first.clone(), second.clone());
-            err.retain(|element| { element != &remove });
+            //let remove = (first.clone(), second.clone());
+            //err.retain(|element| { element != &remove });
 
             TypeMismatchError {
                 type_0: first,
@@ -471,7 +490,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         second_type: &Type,
         second_span: &Range<usize>,
         current_scope_this_type: &ScopeThisType,
-        allow_unknown: bool
+        allow_unknown: bool,
+        is_first_layer: bool
     ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
 
         if allow_unknown {
@@ -511,7 +531,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                             &second_resolved_type.1.value,
                             &second_resolved_type.1.span,
                             current_scope_this_type,
-                            allow_unknown
+                            allow_unknown,
+                            is_first_layer
                         );
                     }
                 }
@@ -525,13 +546,18 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     );
                     return Ok(());
                 } else {
+                    dbg!(self.get_type_display_string(&first_resolved_type.1.value));
+                    dbg!(self.get_type_display_string(second_type));
+                    dbg!(is_first_layer);
+
                     return self.unify_type_recursive(
                         &first_resolved_type.1.value,
                         &first_resolved_type.1.span,
-                        &second_type,
-                        &second_span,
+                        second_type,
+                        second_span,
                         current_scope_this_type,
-                        allow_unknown
+                        allow_unknown,
+                        is_first_layer
                     );
                 }
             }
@@ -552,7 +578,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &second_resolved_type.1.value,
                         &second_resolved_type.1.span,
                         current_scope_this_type,
-                        allow_unknown
+                        allow_unknown,
+                        is_first_layer
                     );
                 }
             }
@@ -567,7 +594,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     second_type,
                     second_span,
                     current_scope_this_type,
-                    allow_unknown
+                    allow_unknown,
+                    is_first_layer
                 );
             }
             if let Type::This = second_type {
@@ -577,7 +605,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     &current_scope_this_type.ty,
                     second_span,
                     current_scope_this_type,
-                    allow_unknown
+                    allow_unknown,
+                    is_first_layer
                 );
             }
         }
@@ -614,7 +643,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                                 second,
                                 second_span,
                                 current_scope_this_type,
-                                allow_unknown
+                                allow_unknown,
+                                false
                             )?;
                         }
 
@@ -624,7 +654,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                             &second_function_info.return_type.value,
                             second_span,
                             current_scope_this_type,
-                            allow_unknown
+                            allow_unknown,
+                            false
                         )?;
 
                         self.unify_generics(
@@ -650,7 +681,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &second_type,
                         second_span,
                         current_scope_this_type,
-                        allow_unknown
+                        allow_unknown,
+                        false
                     )?;
                     true
                 } else {
@@ -665,7 +697,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &second_type,
                         second_span,
                         current_scope_this_type,
-                        allow_unknown
+                        allow_unknown,
+                        false
                     )?;
                     true
                 } else {
@@ -680,7 +713,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &second_value_type,
                         second_span,
                         current_scope_this_type,
-                        allow_unknown
+                        allow_unknown,
+                        false
                     );
                     let error_type_result = self.unify_type_recursive(
                         &first_error_type,
@@ -688,7 +722,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &second_error_type,
                         second_span,
                         current_scope_this_type,
-                        allow_unknown
+                        allow_unknown,
+                        false
                     );
 
                     let mut errors = Vec::new();
@@ -714,10 +749,14 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         if eq {
             Ok(())
         } else {
-            Err(vec![(
-                Spanned::new(first_type.clone(), first_span.clone()),
-                Spanned::new(second_type.clone(), second_span.clone())
-            )])
+            if is_first_layer {
+                Err(Vec::new())
+            } else {
+                Err(vec![(
+                    Spanned::new(first_type.clone(), first_span.clone()),
+                    Spanned::new(second_type.clone(), second_span.clone())
+                )])
+            }
         }
     }
 
@@ -740,7 +779,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 &second_generics[i],
                 second_span,
                 current_scope_this_type,
-                allow_unknown
+                allow_unknown,
+                false
             );
             
             if let Err(error) = result {
@@ -3378,7 +3418,8 @@ fn type_inference_primary_left<'allocator, 'input>(
                         &init_expression_type.value,
                         &init_expression_type.span,
                         current_scope_this_type,
-                        false
+                        false,
+                        true
                     ).is_err() {
                         let error = SimpleError::new(
                             INVALID_ARRAY_INIT_EXPR_TYPE,
@@ -3412,7 +3453,8 @@ fn type_inference_primary_left<'allocator, 'input>(
                     &Type::Uint64,
                     &length_expression.get_span(),
                     current_scope_this_type,
-                    false
+                    false,
+                    true
                 ).is_err() {
                     let error = SimpleError::new(
                         INVALID_ARRAY_LENGTH_EXPR_TYPE,
@@ -3642,7 +3684,8 @@ fn type_inference_primary_left<'allocator, 'input>(
                     &condition_type.value,
                     &condition_type.span,
                     current_scope_this_type,
-                    false
+                    false,
+                    true
                 );
                 if result.is_err() {
                     type_environment.add_lazy_type_error_report(
@@ -3689,7 +3732,8 @@ fn type_inference_primary_left<'allocator, 'input>(
                                     &condition_type.value,
                                     &condition_type.span,
                                     current_scope_this_type,
-                                    false
+                                    false,
+                                    true
                                 );
                                 if result.is_err() {
                                     type_environment.add_lazy_type_error_report(
@@ -3978,9 +4022,15 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
 
         let second_type = type_environment.resolve_entity_type(block_or_expression_entity_id.value);
 
+        let second_resolved_type = if let Type::LocalGeneric(generic_id) = &second_type.value {
+            type_environment.resolve_generic_type(*generic_id).1.value
+        } else {
+            second_type.value.clone()
+        };
+
         if let Err(error) = result {
             if error.generics.is_empty() && !has_implicit_convert {
-                if let Type::Unit = &second_type.value {
+                if let Type::Unit = &second_resolved_type {
                     // TODO - replace with std error type
                     first_type.value = Type::Result {
                         value: Arc::new(first_type.value.clone()),
@@ -3998,16 +4048,17 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
                 } else if second_type.value.is_option_or_result() {
                     dbg!(type_environment.get_type_display_string(&second_type.value));
                     
-                    let result = if let Type::Option(value_type) = &second_type.value {
+                    let result = if let Type::Option(value_type) = &second_resolved_type {
                         type_environment.unify_type(
                             &first_type.value,
                             &first_type.span,
                             &value_type,
                             &second_type.span,
                             current_scope_this_type,
-                            false
+                            false,
+                            true
                         )
-                    } else if let Type::Result { value, error: _ } = &second_type.value {
+                    } else if let Type::Result { value, error: _ } = &second_resolved_type {
                         dbg!(type_environment.get_type_display_string(value));
                         dbg!(type_environment.get_type_display_string(&first_type.value));
                         
@@ -4017,7 +4068,8 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
                             &value,
                             &second_type.span,
                             current_scope_this_type,
-                            false
+                            false,
+                            true
                         )
                     } else {
                         unreachable!()
@@ -4026,9 +4078,9 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
                     if let Err(_) = result {
                         type_environment.add_lazy_type_error_report(error);
                     } else {
-                        first_type.value = if let Type::Option(_) = &second_type.value {
+                        first_type.value = if let Type::Option(_) = &second_resolved_type {
                             Type::Option(Arc::new(first_type.value))
-                        } else if let Type::Result { value: _, error } = &second_type.value {
+                        } else if let Type::Result { value: _, error } = &second_resolved_type {
                             Type::Result { value: Arc::new(first_type.value), error: error.clone() }
                         } else {
                             unreachable!()

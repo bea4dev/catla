@@ -1166,7 +1166,8 @@ impl ImplementsInfoSet {
                     &resolved_ty,
                     &(0..0),
                     &ScopeThisType::new(Type::This),
-                    allow_unknown
+                    allow_unknown,
+                    false
                 );
                 let result2 = type_environment.unify_type(
                     &impl_interface,
@@ -1174,7 +1175,8 @@ impl ImplementsInfoSet {
                     &resolved_interface,
                     &(0..0),
                     &ScopeThisType::new(Type::This),
-                    allow_unknown
+                    allow_unknown,
+                    false
                 );
 
                 if result1.is_err() || result2.is_err() {
@@ -1302,7 +1304,8 @@ impl ImplementsInfoSet {
                 &resolved_ty,
                 &(0..0),
                 &ScopeThisType::new(impl_concrete.clone()),
-                true
+                true,
+                false
             );
 
             if result.is_err() {
@@ -1588,7 +1591,8 @@ impl OverrideElementsEnvironment {
                     &element_type_replaced,
                     &(0..0),
                     &ScopeThisType::new(concrete_type.clone()),
-                    true
+                    true,
+                    false
                 ).is_ok() {
                     
                     if interface_element_type.value.get_generics_define_length() != element_type_replaced.get_generics_define_length() {

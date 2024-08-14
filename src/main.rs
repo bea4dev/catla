@@ -35,6 +35,7 @@ let a = new TestClass { field: 100.0 }
 let b = a.test().field
 
 let c = if true { error(0) } else { 100 }
+let d = if true { 100 } else { error(0) }
 
 
 function <T> some(value: T) -> T? {
@@ -119,6 +120,11 @@ let e = int::test4()
 
 let func = |i, j| => i + j
 let a = func(100, 200)
+
+let array1 = new [for i => i * 2; 10]
+let array2 = new [0; 100]
+let array3 = new { 0, 10, 20 }
+let array4 = new [for i => new TestClass { field: 0 }; 10]
 
 ";
 let source1 = 

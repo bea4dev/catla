@@ -196,6 +196,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         first_resolved.1.span = first_entity_id.span.clone();
         second_resolved.1.span = second_entity_id.span.clone();
 
+        if first_resolved.0 == second_resolved.0 {
+            return Ok(());
+        }
+
         match (
             first_resolved.1.value.is_replaceable_with(&second_resolved.1.value),
             second_resolved.1.value.is_replaceable_with(&first_resolved.1.value)
@@ -239,6 +243,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         first_resolved.1.span = first_entity_id.span.clone();
         second_resolved.1.span = second_entity_id.span.clone();
 
+        if first_resolved.0 == second_resolved.0 {
+            return Ok(());
+        }
+
         match (
             first_resolved.1.value.is_replaceable_with(&second_resolved.1.value),
             second_resolved.1.value.is_replaceable_with(&first_resolved.1.value)
@@ -254,8 +262,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 self.entity_type_map.insert(second_resolved.0, Either::Left(first_resolved.0));
             },
             (false, false) => {
-                dbg!(1);
-                
                 let result = self.unify_type_with_implicit_convert(
                     &first_resolved.1.value,
                     &first_resolved.1.span,
@@ -397,11 +403,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 )?;
                 Ok(implicit_convert)
             } else {
-                dbg!(self.get_type_display_string(first_type));
-                dbg!(self.get_type_display_string(second_type));
-                dbg!(first_type);
-                dbg!(second_type);
-                
                 self.unify_type(
                     first_type,
                     first_span,
@@ -512,6 +513,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             if let Type::LocalGeneric(second_generic_id) = second_type {
                 let second_resolved_type = self.resolve_generic_type(*second_generic_id);
 
+                if first_resolved_type.0 == second_resolved_type.0 {
+                    return Ok(());
+                }
+
                 match (
                     first_resolved_type.1.value.is_replaceable_with(&second_resolved_type.1.value),
                     second_resolved_type.1.value.is_replaceable_with(&first_resolved_type.1.value)
@@ -548,10 +553,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     );
                     return Ok(());
                 } else {
-                    dbg!(self.get_type_display_string(&first_resolved_type.1.value));
-                    dbg!(self.get_type_display_string(second_type));
-                    dbg!(is_first_layer);
-
                     return self.unify_type_recursive(
                         &first_resolved_type.1.value,
                         &first_resolved_type.1.span,
@@ -820,10 +821,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
     }
 
     pub fn resolve_generic_type(&self, generic_id: LocalGenericID) -> (LocalGenericID, Spanned<Type>) {
-        dbg!(generic_id);
         let mut current_id = generic_id;
         loop {
-            dbg!(current_id);
             let generic_id_or_type = self.generic_type_map.get(&current_id).unwrap();
             match &generic_id_or_type {
                 Either::Left(entity_id) => current_id = *entity_id,
@@ -1223,7 +1222,6 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
-    dbg!(2);
     let mut has_type = false;
     let mut var_entity_id_and_spans = Vec::new_in(allocator);
 
@@ -1837,8 +1835,6 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
             _ => {}
         }
     }
-
-    dbg!(3);
     
     if !is_closure_scope {
         for i in 0..type_environment.closures.len() {
@@ -1931,22 +1927,17 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
         }
     }
 
-    dbg!(4);
-
     if !has_type {
         type_environment.set_entity_type(
             EntityID::from(ast),
             Spanned::new(Type::Unit, ast.span.clone())
         );
     }
-
-    dbg!(5);
     
     if !is_interface_scope {
         override_elements_environment.collect_errors(errors, context);
     }
 
-    dbg!(6);
     let mut builder = Report::build(ReportKind::Custom("Debug", Color::Cyan), &context.module_name, 0);
 
     for var_type_and_span in var_entity_id_and_spans {
@@ -1960,8 +1951,6 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
     }
     
     builder.finish().print((&context.module_name, Source::from(context.source_code.code.as_str()))).unwrap();
-
-    dbg!(7);
 }
 
 fn get_and_check_where_bounds_implements_info(
@@ -3459,6 +3448,28 @@ fn type_inference_primary_left<'allocator, 'input>(
             };
             
             if let Ok(length_expression) = new_array_init_expression.length_expression {
+                type_inference_expression(
+                    length_expression,
+                    user_type_map,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    generics_map,
+                    module_entity_type_map,
+                    global_implements_info_set,
+                    current_scope_this_type,
+                    current_scope_implements_info_set,
+                    force_be_expression,
+                    type_environment,
+                    implicit_convert_map,
+                    allocator,
+                    errors,
+                    warnings,
+                    context
+                );
+
                 let length_expression_type = type_environment.resolve_entity_type(EntityID::from(length_expression));
                 
                 if type_environment.unify_type(
@@ -3497,10 +3508,19 @@ fn type_inference_primary_left<'allocator, 'input>(
                     expressions.push(Either::Right(*value_expression));
                 }
             }
+
+            let base_type_generic = type_environment.new_local_generic_id(new_array_expression.span.clone());
+
+            let ty = Type::Array(Arc::new(Type::LocalGeneric(base_type_generic)));
+
+            type_environment.set_entity_type(
+                EntityID::from(&ast.first_expr),
+                Spanned::new(ty, new_array_expression.span.clone())
+            );
             
             type_inference_blocks_or_expressions(
                 expressions,
-                Spanned::new(EntityID::from(&ast.first_expr), new_array_expression.span.clone()),
+                Spanned::new(EntityID::from(new_array_expression), new_array_expression.span.clone()),
                 user_type_map,
                 import_element_map,
                 name_resolved_map,
@@ -3519,6 +3539,13 @@ fn type_inference_primary_left<'allocator, 'input>(
                 errors,
                 warnings,
                 context
+            );
+
+            let base_type = type_environment.resolve_entity_type(EntityID::from(new_array_expression));
+
+            type_environment.set_generic_type(
+                base_type_generic,
+                base_type
             );
         },
         PrimaryLeftExpr::NewExpression(new_expression) => {
@@ -4021,9 +4048,6 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
         if !force_be_expression {
             continue;
         }
-        
-        dbg!(type_environment.get_type_display_string(&first_type.value));
-        dbg!(type_environment.get_type_display_string(&type_environment.resolve_entity_type(block_or_expression_entity_id.value).value));
 
         let result = type_environment.unify_with_implicit_convert(
             Spanned::new(parent_ast_entity_id.value, first_type.span.clone()),
@@ -4031,8 +4055,6 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
             current_scope_this_type,
             false
         );
-        
-        dbg!(&result);
 
         let second_type = type_environment.resolve_entity_type(block_or_expression_entity_id.value);
 
@@ -4060,8 +4082,6 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
                     }
                     has_implicit_convert = true;
                 } else if second_type.value.is_option_or_result() {
-                    dbg!(type_environment.get_type_display_string(&second_type.value));
-                    
                     let result = if let Type::Option(value_type) = &second_resolved_type {
                         type_environment.unify_type(
                             &first_type.value,
@@ -4073,9 +4093,6 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
                             true
                         )
                     } else if let Type::Result { value, error: _ } = &second_resolved_type {
-                        dbg!(type_environment.get_type_display_string(value));
-                        dbg!(type_environment.get_type_display_string(&first_type.value));
-                        
                         type_environment.unify_type(
                             &first_type.value,
                             &first_type.span,

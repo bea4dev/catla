@@ -85,6 +85,8 @@ impl_ast!{
     SimplePrimary<'_, '_>,
     MappingOperatorKind<'_, '_>,
     FunctionCall<'_, '_>,
+    NewArrayInitExpression<'_, '_>,
+    NewArrayExpression<'_, '_>,
     NewExpression<'_, '_>,
     FieldAssign<'_, '_>,
     ElseIfOrElse<'_, '_>,

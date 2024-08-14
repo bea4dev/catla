@@ -121,7 +121,7 @@ pub(crate) fn validate_syntax_program(
             },
             StatementAST::FunctionDefine(function_define) => {
                 if user_type_environment_span.is_some()
-                    && !function_define.attributes.contains(StatementAttributeKind::Static)
+                    && !function_define.attributes.contains_kind(StatementAttributeKind::Static)
                     && function_define.args.this_mutability.is_none() {
                     
                     let mut error = TranspileError::new(SimpleError::new(

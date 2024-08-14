@@ -740,7 +740,7 @@ fn get_function_type_and_name<'allocator>(
     let mut argument_types = Vec::new();
 
     if let Some(user_type) = current_user_type {
-        if !ast.attributes.contains(StatementAttributeKind::Static) {
+        if !ast.attributes.contains_kind(StatementAttributeKind::Static) {
             argument_types.push(user_type.clone());
         }
     }
@@ -809,7 +809,7 @@ fn get_function_type_and_name<'allocator>(
     );
 
     let function_info = Arc::new(FunctionType {
-        is_extension: current_user_type.is_some() && !ast.attributes.contains(StatementAttributeKind::Static),
+        is_extension: current_user_type.is_some() && !ast.attributes.contains_kind(StatementAttributeKind::Static),
         generics_define,
         argument_types,
         return_type,

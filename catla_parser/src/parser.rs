@@ -966,13 +966,13 @@ impl<'allocator, 'input> MergedExtend for Vec<Token<'input>, &'allocator Bump> {
 
 
 pub trait StatementAttributes {
-    fn contains(&self, kind: StatementAttributeKind) -> bool;
+    fn contains_kind(&self, kind: StatementAttributeKind) -> bool;
     fn get_span(&self, kind: StatementAttributeKind) -> Option<Range<usize>>;
 }
 
 impl<A: Allocator> StatementAttributes for Vec<StatementAttribute, A> {
     
-    fn contains(&self, kind: StatementAttributeKind) -> bool {
+    fn contains_kind(&self, kind: StatementAttributeKind) -> bool {
         self.iter().any(|attribute| { attribute.value == kind })
     }
 

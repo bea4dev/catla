@@ -1,7 +1,7 @@
 use std::{alloc::Allocator, ops::{Deref, Range}, sync::Arc};
 
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
-use bumpalo::Bump;
+use bumpalo::{collections::CollectIn, Bump};
 use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, Closure, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum};
 use either::Either;
 use fxhash::{FxHashMap, FxHashSet};
@@ -1345,7 +1345,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                 let function_type = module_entity_type_map.get(&EntityID::from(function_define)).unwrap();
 
                 if let Ok(name) = &function_define.name {
-                    if function_define.attributes.contains(StatementAttributeKind::Override) {
+                    if function_define.attributes.contains_kind(StatementAttributeKind::Override) {
                         let override_keyword_span = function_define.attributes.get_span(StatementAttributeKind::Override).unwrap();
 
                         if implements_interfaces.is_empty() {
@@ -4175,7 +4175,7 @@ fn type_inference_primary_right<'allocator, 'input>(
 
         let mut pre_element_types = Vec::new_in(allocator);
         if let Some(element_type) = element_type {
-            pre_element_types.push((element_type, user_type.value.clone(), None));
+            pre_element_types.push((element_type, user_type.value.clone(), false, None));
         }
         
         let mut implementations = Vec::new_in(allocator);
@@ -4188,6 +4188,7 @@ fn type_inference_primary_right<'allocator, 'input>(
                     pre_element_types.push((
                         element_type,
                         bound.ty.clone(),
+                        true,
                         None
                     ));
                 } else {
@@ -4247,6 +4248,7 @@ fn type_inference_primary_right<'allocator, 'input>(
                             span: element_type.span.clone()
                         },
                         interface.value.clone(),
+                        implementation.implements_info.is_bounds_info,
                         Some((
                             WithDefineInfo {
                                 value: interface.value,
@@ -4261,50 +4263,68 @@ fn type_inference_primary_right<'allocator, 'input>(
             }
         }
 
-        let mut origin_types = FxHashSet::default();
-        let mut element_types = Vec::new_in(allocator);
-        'root: for (element_type, origin_type, interface_and_where_bounds) in pre_element_types {
-            
-            let ty = type_environment.get_user_or_function_type_with_local_generic_id(
-                Spanned::new(element_type.value, second_expr.0.span.clone()),
-                current_scope_implements_info_set,
-                false
-            ).value;
+        let pre_element_types_from_bounds = pre_element_types.iter()
+            .filter(|(_, _, is_bound_info, _)| { *is_bound_info })
+            .collect_in::<bumpalo::collections::Vec<_>>(allocator);
 
-            if let Some(where_bounds) = ty.get_where_bounds_with_replaced_generic() {
-                for where_bound in where_bounds.iter() {
-                    for bound in where_bound.bounds.iter() {
-                        if !global_implements_info_set.is_implemented(
-                            &where_bound.target_type.value,
-                            &bound.ty,
-                            type_environment,
-                            current_scope_implements_info_set,
-                            true
-                        ) {
-                            continue 'root;
+        let pre_element_types_from_global = pre_element_types.iter()
+            .filter(|(_, _, is_bound_info, _)| { !*is_bound_info })
+            .collect_in::<bumpalo::collections::Vec<_>>(allocator);
+
+        let mut element_types = Vec::new_in(allocator);
+        for i in 0..2 {
+            let pre_element_types = match i {
+                0 => &pre_element_types_from_bounds,
+                1 => &pre_element_types_from_global,
+                _ => unreachable!()
+            };
+
+            let mut origin_types = Vec::new_in(allocator);
+
+            'root: for (element_type, origin_type, _, interface_and_where_bounds) in pre_element_types {
+
+                let ty = type_environment.get_user_or_function_type_with_local_generic_id(
+                    Spanned::new(element_type.value.clone(), second_expr.0.span.clone()),
+                    current_scope_implements_info_set,
+                    false
+                ).value;
+
+                if let Some(where_bounds) = ty.get_where_bounds_with_replaced_generic() {
+                    for where_bound in where_bounds.iter() {
+                        for bound in where_bound.bounds.iter() {
+                            if !global_implements_info_set.is_implemented(
+                                &where_bound.target_type.value,
+                                &bound.ty,
+                                type_environment,
+                                current_scope_implements_info_set,
+                                true
+                            ) {
+                                continue 'root;
+                            }
                         }
                     }
                 }
-            }
-            
-            if let Type::UserType { user_type_info, generics: _, generics_span: _ } = origin_type {
-                let name = (user_type_info.module_name.clone(), user_type_info.name.value.clone());
-                if origin_types.contains(&name) {
+
+                if origin_types.contains(origin_type) {
                     continue;
                 }
-                origin_types.insert(name);
+                origin_types.push(origin_type.clone());
+
+                element_types.push(
+                    (
+                        WithDefineInfo {
+                            value: ty,
+                            module_name: element_type.module_name.clone(),
+                            span: element_type.span.clone()
+                        },
+                        interface_and_where_bounds
+                    )
+                );
             }
 
-            element_types.push(
-                (
-                    WithDefineInfo {
-                        value: ty,
-                        module_name: element_type.module_name.clone(),
-                        span: element_type.span.clone()
-                    },
-                    interface_and_where_bounds
-                )
-            );
+            if !element_types.is_empty() {
+                break;
+            }
         }
 
         let element_type = if element_types.is_empty() {
@@ -4342,7 +4362,7 @@ fn type_inference_primary_right<'allocator, 'input>(
                     }
                 }
 
-                if let Some((interface, concrete, where_bounds)) = &element_types.last().unwrap().1 {
+                if let Some((interface, _, where_bounds)) = &element_types.last().unwrap().1 {
                     type_environment.impl_interface_generics_check.push((second_expr.0.span.clone(), interface.clone()));
 
                     for where_bound in where_bounds.iter() {

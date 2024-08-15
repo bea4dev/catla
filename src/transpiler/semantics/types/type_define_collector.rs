@@ -34,8 +34,10 @@ pub(crate) fn collect_user_type_program(
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
-                if let Some(block) = &function_define.block.value {
-                    collect_user_type_program(block.program, user_type_map, context);
+                if let Some(semicolon_or_block) = &function_define.block_or_semicolon.value {
+                    if let Either::Right(block) = semicolon_or_block {
+                        collect_user_type_program(block.program, user_type_map, context);
+                    }
                 }
             },
             StatementAST::UserTypeDefine(data_struct_define) => {

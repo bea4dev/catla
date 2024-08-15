@@ -337,11 +337,19 @@ fn parse_function_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
 
     let where_clause = parse_where_clause(cursor, TokenKind::BraceLeft);
 
-    let block = parse_with_recover(cursor, parse_block, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
+    let block_or_semicolon = parse_with_recover(cursor, parse_block_or_semicolon, &[TokenKind::BraceLeft, TokenKind::LineFeed, TokenKind::Semicolon]);
 
     let span = statement_attributes.get(0).map_or(span.start_position, |spanned| { spanned.span.start })..span.elapsed(cursor).end;
 
-    return Some(FunctionDefine { attributes: statement_attributes.clone(), generics_define, name, args, type_tag, where_clause, block, span });
+    return Some(FunctionDefine { attributes: statement_attributes.clone(), generics_define, name, args, type_tag, where_clause, block_or_semicolon, span });
+}
+
+fn parse_block_or_semicolon<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Either<Range<usize>, Block<'allocator, 'input>>> {
+    match cursor.current().get_kind() {
+        TokenKind::Semicolon => Some(Either::Left(cursor.next().unwrap().span.clone())),
+        TokenKind::BraceLeft => parse_block(cursor).map(|block| { Either::Right(block) }),
+        _ => None
+    }
 }
 
 pub fn parse_where_clause<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, next_expected_token: TokenKind) -> Option<WhereClause<'allocator, 'input>> {

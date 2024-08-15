@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
-use catla_parser::parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, NewExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, NewExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -10,7 +10,7 @@ use crate::transpiler::{component::EntityID, context::TranspileModuleContext, er
 
 pub(crate) fn collect_import_module_program(
     ast: Program,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -47,8 +47,10 @@ pub(crate) fn collect_import_module_program(
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
-                if let Some(block) = &function_define.block.value {
-                    collect_import_module_program(block.program, import_element_map, name_resolved_map, errors,warnings, context);
+                if let Some(semicolon_or_block) = &function_define.block_or_semicolon.value {
+                    if let Either::Right(block) = semicolon_or_block {
+                        collect_import_module_program(block.program, import_element_map, name_resolved_map, errors,warnings, context);
+                    }
                 }
                 if let Some(generics_define) = &function_define.generics_define {
                     collect_import_module_generics_define(generics_define, import_element_map, name_resolved_map, errors, warnings, context);
@@ -95,7 +97,7 @@ pub(crate) fn collect_import_module_program(
 
 fn collect_import_module_import(
     ast: &Import,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext
 ) {
@@ -109,7 +111,10 @@ fn collect_import_module_import(
         let module_name = element.value.to_string();
 
         if context.source_code_provider.exists_source_code_or_package(&module_name) {
-            import_element_map.insert(EntityID::from(element), module_name.clone());
+            import_element_map.insert(
+                EntityID::from(element),
+                Spanned::new(module_name.clone(), element.span.clone())
+            );
         } else {
             let error = TranspileError::new(ModuleNotFoundError {
                 module_names: Either::Left(module_name),
@@ -146,13 +151,13 @@ fn collect_import_module_import(
             continue
         };
 
-        import_element_map.insert(EntityID::from(element), module_name);
+        import_element_map.insert(EntityID::from(element), Spanned::new(module_name, ast.span.clone()));
     }
 }
 
 fn collect_import_module_generics_define(
     ast: &GenericsDefine,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -167,7 +172,7 @@ fn collect_import_module_generics_define(
 
 fn collect_import_module_expression(
     ast: Expression,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -204,7 +209,7 @@ fn collect_import_module_expression(
 
 fn collect_import_module_and_expression(
     ast: &AndExpression,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -220,7 +225,7 @@ fn collect_import_module_and_expression(
 
 fn collect_import_module_eqne_expression(
     ast: &EQNEExpression,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -236,7 +241,7 @@ fn collect_import_module_eqne_expression(
 
 fn collect_import_module_compare_expression(
     ast: &CompareExpression,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -252,7 +257,7 @@ fn collect_import_module_compare_expression(
 
 fn collect_import_module_add_or_sub_expression(
     ast: &AddOrSubExpression,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -268,7 +273,7 @@ fn collect_import_module_add_or_sub_expression(
 
 fn collect_import_module_mul_or_div_expression(
     ast: &MulOrDivExpression,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -284,7 +289,7 @@ fn collect_import_module_mul_or_div_expression(
 
 fn collect_import_module_factor(
     ast: &Factor,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -297,7 +302,7 @@ fn collect_import_module_factor(
 
 fn collect_import_module_primary(
     ast: &Primary,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -316,14 +321,14 @@ fn collect_import_module_primary(
     ).map(|(module_name, _)| { module_name });
 
     if let Some(module_name) = module_name {
-        import_element_map.insert(EntityID::from(ast), module_name);
+        import_element_map.insert(EntityID::from(ast), Spanned::new(module_name, ast.span.clone()));
     }
 }
 
 pub(crate) fn get_module_name_from_primary(
     ast: &Primary,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     context: &TranspileModuleContext
 ) -> Option<(String, usize)> {
     if ast.left.mapping_operator.is_none() {
@@ -332,7 +337,9 @@ pub(crate) fn get_module_name_from_primary(
                 if let SimplePrimary::Identifier(literal) = &simple.0 {
                     let mut module_name = if let Some(resolved) = name_resolved_map.get(&EntityID::from(literal)) {
                         let import_entity_id = resolved.define_info.entity_id;
-                        import_element_map.get(&import_entity_id).cloned().unwrap_or_else(|| { literal.value.to_string() })
+                        import_element_map.get(&import_entity_id).cloned()
+                            .map(|name| { name.value })
+                            .unwrap_or_else(|| { literal.value.to_string() })
                     } else {
                         literal.value.to_string()
                     };
@@ -380,7 +387,7 @@ pub(crate) fn get_module_name_from_primary(
 
 fn collect_import_module_primary_left(
     ast: &PrimaryLeft,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -427,7 +434,10 @@ fn collect_import_module_primary_left(
                 let module_name = get_module_name_from_new_expression(new_expression, import_element_map, name_resolved_map);
 
                 if context.context.source_code_provider.exists_source_code_or_package(&module_name) {
-                    import_element_map.insert(EntityID::from(new_expression), module_name);
+                    import_element_map.insert(
+                        EntityID::from(new_expression),
+                        Spanned::new(module_name, new_expression.span.clone())
+                    );
                 }
             }
             
@@ -487,7 +497,7 @@ fn collect_import_module_primary_left(
 
 pub(crate) fn get_module_name_from_new_expression(
     new_expression: &NewExpression,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>
 ) -> String {
     if new_expression.path.len() <= 1 {
@@ -496,7 +506,7 @@ pub(crate) fn get_module_name_from_new_expression(
 
     let mut module_name = if let Some(resolved) = name_resolved_map.get(&EntityID::from(&new_expression.path[0])) {
         let import_entity_id = resolved.define_info.entity_id;
-        import_element_map.get(&import_entity_id).unwrap().clone()
+        import_element_map.get(&import_entity_id).unwrap().value.clone()
     } else {
         new_expression.path[0].value.to_string()
     };
@@ -514,7 +524,7 @@ pub(crate) fn get_module_name_from_new_expression(
 
 fn collect_import_module_primary_right(
     ast: &PrimaryRight,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -539,7 +549,7 @@ fn collect_import_module_primary_right(
 
 fn collect_import_module_mapping_operator(
     ast: &MappingOperator,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -558,7 +568,7 @@ fn collect_import_module_mapping_operator(
 
 fn collect_import_module_function_call(
     ast: &FunctionCall,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -573,7 +583,7 @@ fn collect_import_module_function_call(
 
 fn collect_import_module_type_tag(
     ast: &TypeTag,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -586,7 +596,7 @@ fn collect_import_module_type_tag(
 
 fn collect_import_module_type_info(
     ast: &TypeInfo,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -604,7 +614,7 @@ fn collect_import_module_type_info(
 
 fn collect_import_module_array_type_info(
     ast: &ArrayTypeInfo,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -617,7 +627,7 @@ fn collect_import_module_array_type_info(
 
 fn collect_import_module_base_type_info(
     ast: &BaseTypeInfo,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -626,7 +636,7 @@ fn collect_import_module_base_type_info(
     if ast.path.len() > 1 {
         let first_module_name = if let Some(resolved) = name_resolved_map.get(&EntityID::from(&ast.path[0])) {
             let import_entity_id = resolved.define_info.entity_id;
-            import_element_map.get(&import_entity_id).cloned()
+            import_element_map.get(&import_entity_id).cloned().map(|name| { name.value })
         } else {
             None
         };
@@ -645,7 +655,10 @@ fn collect_import_module_base_type_info(
         }
 
         if context.context.source_code_provider.exists_source_code_or_package(&module_name) {
-            import_element_map.insert(EntityID::from(ast), module_name);
+            import_element_map.insert(
+                EntityID::from(ast),
+                Spanned::new(module_name, ast.span.clone())
+            );
         }
     }
 
@@ -664,7 +677,7 @@ fn collect_import_module_base_type_info(
 
 fn collect_import_module_generics(
     ast: &Generics,
-    import_element_map: &mut FxHashMap<EntityID, String>,
+    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,

@@ -70,29 +70,33 @@ impl TranspileContext {
         }
     }
 
-}
+    pub(crate) fn try_create_module_context(context: &Arc<TranspileContext>, module_name: &String) -> Option<Result<Arc<TranspileModuleContext>, String>> {
+        let mut module_context_map = context.module_context_map.lock().unwrap();
+    
+        if module_context_map.contains_key(module_name) {
+            return None;
+        }
+    
+        let source_code = context.source_code_provider.get_source_code(&module_name).unwrap();
 
-
-pub fn try_create_module_context(context: &Arc<TranspileContext>, module_name: &String) -> Option<Arc<TranspileModuleContext>> {
-    let mut module_context_map = context.module_context_map.lock().unwrap();
-
-    if module_context_map.contains_key(module_name) {
-        return None;
+        let source_code = match source_code.as_ref() {
+            Ok(source_code) => source_code.clone(),
+            Err(error) => return Some(Err(error.to_string()))
+        };
+    
+        let module_context = Arc::new(TranspileModuleContext {
+            source_code,
+            module_name: Arc::new(module_name.clone()),
+            context: context.clone(),
+            user_type_future: SharedManualFuture::new(),
+            module_element_type_future: SharedManualFuture::new(),
+            module_type_implements_infos: SharedManualFuture::new()
+        });
+        module_context_map.insert(module_name.clone(), module_context.clone());
+        
+        Some(Ok(module_context))
     }
 
-    let source_code = context.source_code_provider.get_source_code(&module_name).unwrap();
-
-    let module_context = Arc::new(TranspileModuleContext {
-        source_code,
-        module_name: Arc::new(module_name.clone()),
-        context: context.clone(),
-        user_type_future: SharedManualFuture::new(),
-        module_element_type_future: SharedManualFuture::new(),
-        module_type_implements_infos: SharedManualFuture::new()
-    });
-    module_context_map.insert(module_name.clone(), module_context.clone());
-    
-    Some(module_context)
 }
 
 

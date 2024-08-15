@@ -138,7 +138,7 @@ pub struct FunctionDefine<'allocator, 'input> {
     pub args: FunctionArguments<'allocator, 'input>,
     pub type_tag: Option<TypeTag<'allocator, 'input>>,
     pub where_clause: Option<WhereClause<'allocator, 'input>>,
-    pub block: BlockRecovered<'allocator, 'input>,
+    pub block_or_semicolon: Recovered<'allocator, 'input, Either<Range<usize>, Block<'allocator, 'input>>>,
     pub span: Range<usize>
 }
 

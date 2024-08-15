@@ -13,7 +13,7 @@ use super::type_info::{Bound, FreezableMutex, FunctionDefineInfo, FunctionType, 
 pub(crate) fn collect_module_element_types_program(
     ast: Program,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -280,23 +280,25 @@ pub(crate) fn collect_module_element_types_program(
                     }
                 }
 
-                if let Some(block) = &function_define.block.value {
-                    collect_module_element_types_program(
-                        block.program,
-                        user_type_map,
-                        import_element_map,
-                        name_resolved_map,
-                        module_user_type_map,
-                        module_element_type_map,
-                        generics_map,
-                        module_entity_type_map,
-                        implements_infos,
-                        &current_scope_this_type.nest(),
-                        errors,
-                        warnings,
-                        None,
-                        context
-                    );
+                if let Some(semicolon_or_block) = &function_define.block_or_semicolon.value {
+                    if let Either::Right(block) = semicolon_or_block {
+                        collect_module_element_types_program(
+                            block.program,
+                            user_type_map,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            generics_map,
+                            module_entity_type_map,
+                            implements_infos,
+                            &current_scope_this_type.nest(),
+                            errors,
+                            warnings,
+                            None,
+                            context
+                        );
+                    }
                 }
             },
             StatementAST::UserTypeDefine(data_struct_define) => {
@@ -677,7 +679,7 @@ fn set_generics_bounds(user_type: &Type, generic_types: Vec<Arc<GenericType>>) {
 fn get_function_type_and_name<'allocator>(
     ast: &'allocator FunctionDefine,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -767,25 +769,6 @@ fn get_function_type_and_name<'allocator>(
         argument_types.push(type_info);
     }
 
-    if let Some(block) = &ast.block.value {
-        collect_module_element_types_program(
-            block.program,
-            user_type_map,
-            import_element_map,
-            name_resolved_map,
-            module_user_type_map,
-            module_element_type_map,
-            generics_map,
-            module_entity_type_map,
-            implements_infos,
-            current_scope_this_type,
-            errors,
-            warnings,
-            None,
-            context
-        );
-    }
-
     let define_info = FunctionDefineInfo {
         module_name: context.module_name.clone(),
         generics_define_span,
@@ -830,7 +813,7 @@ fn get_function_type_and_name<'allocator>(
 pub(crate) fn get_where_bounds(
     ast: &Option<WhereClause>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -893,7 +876,7 @@ pub(crate) fn get_where_bounds(
 fn collect_module_element_types_expression(
     ast: Expression,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1008,7 +991,7 @@ fn collect_module_element_types_expression(
 fn collect_module_element_types_and_expression(
     ast: &AndExpression,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1059,7 +1042,7 @@ fn collect_module_element_types_and_expression(
 fn collect_module_element_types_eqne_expression(
     ast: &EQNEExpression,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1110,7 +1093,7 @@ fn collect_module_element_types_eqne_expression(
 fn collect_module_element_types_compare_expression(
     ast: &CompareExpression,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1161,7 +1144,7 @@ fn collect_module_element_types_compare_expression(
 fn collect_module_element_types_add_or_sub_expression(
     ast: &AddOrSubExpression,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1212,7 +1195,7 @@ fn collect_module_element_types_add_or_sub_expression(
 fn collect_module_element_types_mul_or_div_expression(
     ast: &MulOrDivExpression,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1263,7 +1246,7 @@ fn collect_module_element_types_mul_or_div_expression(
 fn collect_module_element_types_factor(
     ast: &Factor,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1297,7 +1280,7 @@ fn collect_module_element_types_factor(
 fn collect_module_element_types_primary(
     ast: &Primary,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1346,7 +1329,7 @@ fn collect_module_element_types_primary(
 fn collect_module_element_types_primary_left(
     ast: &PrimaryLeft,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1625,7 +1608,7 @@ fn collect_module_element_types_primary_left(
 fn collect_module_element_types_primary_right(
     ast: &PrimaryRight,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1679,7 +1662,7 @@ fn collect_module_element_types_primary_right(
 fn collect_module_element_types_mapping_operator(
     ast: &MappingOperator,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1720,7 +1703,7 @@ fn collect_module_element_types_mapping_operator(
 fn collect_module_element_types_function_call(
     ast: &FunctionCall,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,
@@ -1756,7 +1739,7 @@ fn collect_module_element_types_function_call(
 pub(crate) fn get_type(
     ast: &TypeInfo,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -1803,7 +1786,7 @@ pub(crate) fn get_type(
 pub(crate) fn get_array_type(
     ast: &ArrayTypeInfo,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -1835,7 +1818,7 @@ pub(crate) fn get_array_type(
 pub(crate) fn get_base_type(
     ast: &BaseTypeInfo,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -1850,7 +1833,7 @@ pub(crate) fn get_base_type(
     }
 
     let mut type_info = if let Some(module_name) = import_element_map.get(&EntityID::from(ast)) {
-        let type_map = module_user_type_map.get(module_name).unwrap();
+        let type_map = module_user_type_map.get(&module_name.value).unwrap();
         match type_map.get(ast.path.last().unwrap().value) {
             Some(type_info) => type_info.clone(),
             _ => {
@@ -1859,7 +1842,7 @@ pub(crate) fn get_base_type(
                     0030,
                     span.clone(),
                     vec![
-                        (module_name.clone(), Color::Yellow),
+                        (module_name.value.clone(), Color::Yellow),
                         (ast.path.last().unwrap().value.to_string(), Color::Red)
                     ],
                     vec![((context.module_name.clone(), span), Color::Red)]
@@ -1878,7 +1861,7 @@ pub(crate) fn get_base_type(
                     },
                     DefineKind::Import => {
                         let module_name = import_element_map.get(&resolved.define_info.entity_id).unwrap();
-                        let user_type_map = module_user_type_map.get(module_name).unwrap();
+                        let user_type_map = module_user_type_map.get(&module_name.value).unwrap();
                         match user_type_map.get(ast.path[0].value) {
                             Some(user_type) => user_type.clone(),
                             None => Type::Unknown
@@ -2043,7 +2026,7 @@ pub(crate) fn parse_primitive_type(str: &str, current_scope_this_type: &ScopeThi
 fn get_generic_type<'allocator>(
     ast: &GenericsDefine,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &mut FxHashMap<String, Type>,

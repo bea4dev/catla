@@ -3,7 +3,7 @@ use std::{cell::RefCell, ops::Range};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
 use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause}};
-use either::Either::{Left, Right};
+use either::Either::{self, Left, Right};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 
@@ -346,8 +346,10 @@ pub(crate) fn name_resolve_program<'allocator>(
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
-                let environment_span = match &function_define.block.value {
-                    Some(block) => block.span.clone(),
+                let environment_span = match &function_define.block_or_semicolon.value {
+                    Some(block) => {
+                        block.as_ref().right().map(|block| { block.span.clone() }).unwrap_or(0..0)
+                    },
                     _ => function_define.span.clone()
                 };
                 let name_environment = NameEnvironment::new(
@@ -417,17 +419,19 @@ pub(crate) fn name_resolve_program<'allocator>(
                 let entity_id = EntityID::from(function_define);
                 name_environments.insert(entity_id, name_environment);
 
-                if let Some(block) = &function_define.block.value {
-                    name_resolve_block(
-                        block,
-                        entity_id,
-                        false,
-                        name_environments,
-                        resolved_map,
-                        errors,
-                        warnings,
-                        allocator
-                    );
+                if let Some(semicolon_or_block) = &function_define.block_or_semicolon.value {
+                    if let Either::Right(block) = semicolon_or_block {
+                        name_resolve_block(
+                            block,
+                            entity_id,
+                            false,
+                            name_environments,
+                            resolved_map,
+                            errors,
+                            warnings,
+                            allocator
+                        );
+                    }
                 }
             },
             StatementAST::UserTypeDefine(data_struct_define) => {

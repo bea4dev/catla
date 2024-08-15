@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use bumpalo::Bump;
 use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FieldAssign, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause, WhereElement}};
 use either::Either::{Right, Left, self};
@@ -149,8 +151,8 @@ pub fn collect_parse_error_program(
                 }
 
                 collect_parse_error_with_recovered(
-                    &function_define.block,
-                    collect_parse_error_block,
+                    &function_define.block_or_semicolon,
+                    collect_parse_error_block_or_semicolon,
                     Expected::Block,
                     0009,
                     errors,
@@ -294,6 +296,12 @@ pub fn collect_parse_error_program(
     }
 
     errors.extend(unexpected_token_error(&statement_errors, Expected::Statement, 0002, context));
+}
+
+fn collect_parse_error_block_or_semicolon(ast: &Either<Range<usize>, Block>, errors: &mut Vec<TranspileError>, warnings: &mut Vec<TranspileWarning>, context: &TranspileModuleContext) {
+    if let Either::Right(block) = ast {
+        collect_parse_error_block(block, errors, warnings, context);
+    }
 }
 
 fn collect_parse_error_generics_define(

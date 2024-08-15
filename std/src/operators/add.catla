@@ -1,0 +1,13 @@
+
+
+interface Add<Other, Out> {
+    function add(let this, other: Other) -> Out;
+}
+
+implements Add<uint8, uint8> for uint8 {
+    override function add(let this, other: uint8) -> uint8 {
+        return this + other
+    }
+}
+
+let a = int

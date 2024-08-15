@@ -23,7 +23,7 @@ bnf_rules!{
     define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define )
 
     function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments
-                            [ function_type_tag ] [ line_feed ] [ where_clause ] block
+                            [ function_type_tag ] [ line_feed ] [ where_clause ] ( block | ";" )
     function_arguments  ::= "(" [ line_feed ] [ ( this_mutability | function_argument) [ line_feed ] ] { "," [ line_feed ] [ function_argument ] } ")"
     this_mutability     ::= ( "var" | "let" ) "this"
     function_argument   ::= literal type_tag

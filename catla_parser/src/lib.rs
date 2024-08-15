@@ -15,6 +15,8 @@ fn test() {
 interface Interface where This: Interface1 {}
 
 let array: [[Interface?]] = new { 0, 100, 200 }
+
+function test();
 ";
 
     let allocator = Bump::new();

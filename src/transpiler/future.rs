@@ -10,9 +10,11 @@ pub struct SharedManualFuture<T: Send> {
 impl<T: Send> SharedManualFuture<T> {
     
     pub fn new() -> SharedManualFuture<T> {
-        Self {
-            value: Mutex::new((None, Vec::new()))
-        }
+        Self { value: Mutex::new((None, Vec::new())) }
+    }
+
+    pub fn new_completed(value: T) -> Self {
+        Self { value: Mutex::new((Some(Arc::new(value)), Vec::new())) }
     }
 
     pub fn get(&self) -> ManualFuture<Arc<T>> {

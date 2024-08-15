@@ -1201,7 +1201,7 @@ pub(crate) enum GenericsBoundCheck {
 pub(crate) fn type_inference_program<'allocator, 'input>(
     ast: Program<'allocator, 'input>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -1409,31 +1409,33 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                         &current_scope_implements_info_set
                     );
 
-                    if let Some(block) = &function_define.block.value {
-                        type_inference_program(
-                            block.program,
-                            user_type_map,
-                            import_element_map,
-                            name_resolved_map,
-                            module_user_type_map,
-                            module_element_type_map,
-                            module_element_type_maps,
-                            generics_map,
-                            module_entity_type_map,
-                            global_implements_info_set,
-                            &current_scope_this_type.nest(),
-                            &current_scope_implements_info_set,
-                            false,
-                            false,
-                            &Vec::new(),
-                            false,
-                            &mut type_environment,
-                            implicit_convert_map,
-                            allocator,
-                            errors,
-                            warnings,
-                            context
-                        );
+                    if let Some(semicolon_or_block) = &function_define.block_or_semicolon.value {
+                        if let Either::Right(block) = semicolon_or_block {
+                            type_inference_program(
+                                block.program,
+                                user_type_map,
+                                import_element_map,
+                                name_resolved_map,
+                                module_user_type_map,
+                                module_element_type_map,
+                                module_element_type_maps,
+                                generics_map,
+                                module_entity_type_map,
+                                global_implements_info_set,
+                                &current_scope_this_type.nest(),
+                                &current_scope_implements_info_set,
+                                false,
+                                false,
+                                &Vec::new(),
+                                false,
+                                &mut type_environment,
+                                implicit_convert_map,
+                                allocator,
+                                errors,
+                                warnings,
+                                context
+                            );
+                        }
                     }
 
                     type_environment.collect_info(implicit_convert_map, global_implements_info_set, errors, warnings, context);
@@ -2005,7 +2007,7 @@ fn get_and_check_where_bounds_implements_info(
 fn type_inference_expression<'allocator, 'input>(
     ast: Expression<'allocator, 'input>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -2232,7 +2234,7 @@ fn type_inference_expression<'allocator, 'input>(
 fn type_inference_and_expression<'allocator, 'input>(
     ast: &'allocator AndExpression<'allocator, 'input>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -2327,7 +2329,7 @@ fn type_inference_and_expression<'allocator, 'input>(
 fn type_inference_eqne_expression<'allocator, 'input>(
     ast: &'allocator EQNEExpression<'allocator, 'input>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -2422,7 +2424,7 @@ fn type_inference_eqne_expression<'allocator, 'input>(
 fn type_inference_compare_expression<'allocator, 'input>(
     ast: &'allocator CompareExpression<'allocator, 'input>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -2517,7 +2519,7 @@ fn type_inference_compare_expression<'allocator, 'input>(
 fn type_inference_add_or_sub_expression<'allocator, 'input>(
     ast: &'allocator AddOrSubExpression<'allocator, 'input>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -2612,7 +2614,7 @@ fn type_inference_add_or_sub_expression<'allocator, 'input>(
 fn type_inference_mul_or_div_expression<'allocator, 'input>(
     ast: &'allocator MulOrDivExpression<'allocator, 'input>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -2707,7 +2709,7 @@ fn type_inference_mul_or_div_expression<'allocator, 'input>(
 fn type_inference_factor<'allocator, 'input>(
     ast: &'allocator Factor<'allocator, 'input>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -2764,7 +2766,7 @@ fn type_inference_factor<'allocator, 'input>(
 fn type_inference_primary<'allocator, 'input>(
     ast: &'allocator Primary<'allocator, 'input>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -3119,7 +3121,7 @@ enum MappingTypeKind {
 fn type_inference_primary_left<'allocator, 'input>(
     ast: &'allocator PrimaryLeft<'allocator, 'input>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -3567,7 +3569,7 @@ fn type_inference_primary_left<'allocator, 'input>(
                         match resolved.define_info.define_kind {
                             DefineKind::Import => {
                                 if let Some(module_name) = import_element_map.get(&resolved.define_info.entity_id) {
-                                    if let Some(user_type_map) = module_user_type_map.get(module_name) {
+                                    if let Some(user_type_map) = module_user_type_map.get(&module_name.value) {
                                         if let Some(user_type) = user_type_map.get(name.value) {
                                             user_type.clone()
                                         } else {
@@ -3897,7 +3899,7 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
     blocks_or_expressions: Vec<Either<&'allocator Block<'allocator, 'input>, Expression<'allocator, 'input>>, &'allocator Bump>,
     parent_ast_entity_id: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -4148,7 +4150,7 @@ fn type_inference_primary_right<'allocator, 'input>(
     ast: &PrimaryRight<'allocator, 'input>,
     previous_primary: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -4495,7 +4497,7 @@ fn type_inference_mapping_operator<'allocator, 'input>(
     ast: &MappingOperator<'allocator, 'input>,
     previous_entity_id: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -4631,7 +4633,7 @@ fn type_inference_generics<'allocator, 'input>(
     ast: &Generics,
     previous: EntityID,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,
@@ -4708,7 +4710,7 @@ fn type_inference_function_call<'allocator, 'input>(
     function: EntityID,
     is_method_call: bool,
     user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, String>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     module_element_type_map: &FxHashMap<String, Type>,

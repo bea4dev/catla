@@ -1,8 +1,8 @@
 #![feature(allocator_api)]
 
-use std::{thread, time::Duration};
+use std::{path::Path, thread, time::Duration};
 
-use transpiler::resource::TestSourceCodeProvider;
+use transpiler::resource::DefaultSourceCodeProvider;
 
 use crate::transpiler::{transpile, context::{TranspileSettings, TranspileContext}};
 
@@ -13,136 +13,18 @@ fn main() {
 
     //unsafe { backtrace_on_stack_overflow::enable() };
 
-    let source = 
-"
-import test::test_module2
-
-class TestClazz<T> {
-    let field: T?
-
-    function test(let this) -> TestClazz<T> {
-        return new TestClass {
-            field: null
-        }
-    }
-
-    function a(let this) -> T {}
-}
-
-type TestClass<T> = TestClazz<T>
-
-let a = new TestClass { field: 100.0 }
-let b = a.test().field
-
-let c = if true { error(0) } else { 100 }
-let d = if true { 100 } else { error(0) }
-
-
-function <T> some(value: T) -> T? {
-    return value
-}
-
-function <T, E> ok(value: T) -> T!<E> {
-    return value
-}
-
-function <T, E> error(error: E) -> T!<E> {}
-
-
-interface TestInterface1 {}
-interface TestInterface2 {
-    function <S> test2(let this) {}
-}
-
-implements<T> TestInterface2 for T? where T: TestInterface1 {
-    override function <S> test2(let this) {}
-}
-
-implements TestInterface2 for int {
-    override function <S> test2(let this) {}
-}
-
-function <T: TestInterface1> aaa(i: T?) {
-    let a = i.test2()
-    ccc(i)
-}
-
-function <T> ccc(i: T) where T: TestInterface2 {}
-
-function bbb(i: TestInterface2) {
-    let b = i.test2()
-}
-
-interface Default {
-    static function default() -> This {}
-}
-
-implements Default for int {
-    override static function default() -> This {
-        return 0
-    }
-}
-
-let a = int::default()
-a = 100
-
-interface TestInterface3: TestInterface4 {
-    static function test3() -> This {
-        return This::test4()
-    }
-}
-
-interface TestInterface4 {
-    static function test4() -> This {}
-}
-
-function <T> aaaa() where T: TestInterface3 {
-    let b = T::test3()
-    let c = T::test4()
-}
-
-implements<T> TestInterface3 for T where T: TestInterface4 {
-    override static function test3() -> This {
-        let a = T::test3()
-        let b = T::test4()
-        return b
-    }
-}
-
-implements<T> TestInterface4 for T {
-    override static function test4() -> This {
-        return This
-    }
-}
-
-let d = int::test3()
-let e = int::test4()
-
-let func = |i, j| => i + j
-let a = func(100, 200)
-
-let array1 = new [for i => i * 2; 10]
-let array2 = new [0; 100]
-let array3 = new { 0, 10, 20 }
-let array4 = new [for i => new TestClass { field: 0 }; 10]
-
-";
-let source1 = 
-"
-";
-
     let settings = TranspileSettings {
         lang: "ja_JP".to_string(),
         num_threads: num_cpus::get()
     };
 
-    let mut resource_provider = TestSourceCodeProvider::new();
-    resource_provider.insert("test::test_module1".to_string(), source.to_string());
-    resource_provider.insert("test::test_module2".to_string(), source1.to_string());
+    let mut resource_provider = DefaultSourceCodeProvider::new();
+    resource_provider.add_entry("std".to_string(), &Path::new("./std/src")).unwrap();
+    resource_provider.add_entry("test".to_string(), &Path::new("./test/src")).unwrap();
 
     let context = TranspileContext::new(settings, resource_provider);
     
-    transpile("test::test_module1".to_string(), context.clone());
+    transpile("test::test".to_string(), context.clone()).unwrap();
 
     thread::sleep(Duration::from_secs(1));
 

@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, StatementAttributes, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, StatementAttributeKind};
-use either::Either::{Left, Right};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum};
+use either::Either::{self, Left, Right};
 
 use crate::transpiler::{advice::{create_space_indent, get_column, Advice}, context::TranspileModuleContext, error::SimpleError, TranspileError, TranspileWarning};
 
@@ -15,6 +15,7 @@ pub(crate) fn validate_syntax_program(
     ast: Program,
     context: &TranspileModuleContext,
     user_type_environment_span: Option<Range<usize>>,
+    is_interface_scope: bool,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>
 ) {
@@ -141,22 +142,42 @@ pub(crate) fn validate_syntax_program(
                     errors.push(error);
                 }
 
-                if let Some(block) = &function_define.block.value {
-                    validate_syntax_program(
-                        block.program,
-                        context,
-                        None,
-                        errors,
-                        warnings
-                    );
+                if let Some(semicolon_or_block) = &function_define.block_or_semicolon.value {
+                    if let Either::Right(block) = semicolon_or_block {
+                        validate_syntax_program(
+                            block.program,
+                            context,
+                            None,
+                            false,
+                            errors,
+                            warnings
+                        );
+                    }
+
+                    if !is_interface_scope && semicolon_or_block.is_left() {
+                        let span = semicolon_or_block.as_ref().left().unwrap().clone();
+
+                        let mut error = SimpleError::new(
+                            0069,
+                            span.clone(),
+                            vec![],
+                            vec![((context.module_name.clone(), span.clone()), Color::Red)]
+                        );
+                        error.add_advice(
+                            context.module_name.clone(),
+                            Advice::Add { add: "{ /* do something */ }".to_string(), position: span.start, message_override: None }
+                        );
+                        errors.push(error);
+                    }
                 }
             },
-            StatementAST::UserTypeDefine(data_struct_define) => {
-                if let Some(block) = &data_struct_define.block.value {
+            StatementAST::UserTypeDefine(user_type_define) => {
+                if let Some(block) = &user_type_define.block.value {
                     validate_syntax_program(
                         block.program,
                         context,
-                        Some(data_struct_define.span.clone()),
+                        Some(user_type_define.span.clone()),
+                        user_type_define.kind.value == UserTypeKindEnum::Interface,
                         errors,
                         warnings
                     );
@@ -168,6 +189,7 @@ pub(crate) fn validate_syntax_program(
                         block.program,
                         context,
                         Some(implements.span.clone()),
+                        false,
                         errors,
                         warnings
                     );
@@ -212,6 +234,7 @@ fn validate_syntax_expression(
                             block.program,
                             context,
                             None,
+                            false,
                             errors,
                             warnings
                         );
@@ -401,12 +424,26 @@ fn validate_syntax_primary_left(
                 validate_syntax_expression(condition, context,errors, warnings);
             }
             if let Some(block) = &if_statement.block.value {
-                validate_syntax_program(block.program, context, None, errors, warnings);
+                validate_syntax_program(
+                    block.program,
+                    context,
+                    None,
+                    false,
+                    errors,
+                    warnings
+                );
             }
         },
         PrimaryLeftExpr::LoopExpression(loop_expression) => {
             if let Ok(block) = &loop_expression.block {
-                validate_syntax_program(block.program, context, None, errors, warnings);
+                validate_syntax_program(
+                    block.program,
+                    context,
+                    None,
+                    false,
+                    errors,
+                    warnings
+                );
             }
         },
     }
@@ -514,7 +551,14 @@ fn validate_syntax_mapping_operator(
         _ => return
     };
     if let Some(block) = &block.value {
-        validate_syntax_program(block.program, context,None, errors, warnings);
+        validate_syntax_program(
+            block.program,
+            context,
+            None,
+            false,
+            errors,
+            warnings
+        );
     }
 }
 

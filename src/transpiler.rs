@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
+use ariadne::Color;
 use async_recursion::async_recursion;
 use bumpalo::Bump;
 use catla_parser::parser::parse_source;
+use error::SimpleError;
 use fxhash::FxHashMap;
 use semantics::types::type_info::{collect_duplicated_implementation_error, ScopeThisType, Type};
 
 use crate::transpiler::semantics::types::{import_module_collector::collect_import_module_program, type_inference::{type_inference_program, TypeEnvironment}, user_type_element_collector::collect_module_element_types_program};
 
-use self::{advice::{Advice, AdviceReport}, component::ComponentContainer, context::{try_create_module_context, TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::{type_define_collector::collect_user_type_program, type_info::ImplementsInfoSet}}};
+use self::{advice::{Advice, AdviceReport}, component::ComponentContainer, context::{TranspileContext, TranspileModuleContext}, error::TranspileReport, name_resolver::name_resolve_program, parse_error::collect_parse_error_program, semantics::{syntax_validation::validate_syntax_program, types::{type_define_collector::collect_user_type_program, type_info::ImplementsInfoSet}}};
 
 pub mod component;
 pub mod name_resolver;
@@ -69,22 +71,18 @@ impl TranspileReport for TranspileWarning {
 
 pub struct SourceCode {
     pub code: String,
-    pub module_name: String,
-    pub resource_type: ResourceType
-}
-
-pub enum ResourceType {
-    SourceCode,
-    Package
+    pub module_name: String
 }
 
 
-pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) {
-    let module_context = try_create_module_context(&context, &entry_module_name).unwrap();
+pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> Result<(), String> {
+    let module_context = TranspileContext::try_create_module_context(&context, &entry_module_name).unwrap()?;
 
     context.future_runtime.block_on(async move {
         transpile_module(entry_module_name, module_context).await;
     });
+
+    Ok(())
 }
 
 
@@ -99,7 +97,7 @@ async fn transpile_module(
 
     // This 'ast' must not be modified after this.(Of course, interior mutability is also not good.)
     // Because, 'ProgramAST' is implemented 'Send' and 'Sync' by 'unsafe impl'.
-    // No one can guarantee your memory safety.
+    // No one can guarantee your memory safety, unless you follow these rules.
     let ast = parse_source(source, &allocator);
 
     let mut errors = Vec::new();
@@ -130,10 +128,26 @@ async fn transpile_module(
     // start transpile imported modules
     let context = &module_context.context;
     for module_name in import_element_map.values() {
-        let module_context = try_create_module_context(&module_context.context, module_name);
+        let new_module_context = TranspileContext::try_create_module_context(&module_context.context, &module_name.value);
 
-        if let Some(module_context) = module_context {
-            let module_name = module_name.clone();
+        if let Some(new_module_context) = new_module_context {
+            let module_context = match new_module_context {
+                Ok(module_context) => module_context,
+                Err(error) => {
+                    let error = SimpleError::new(
+                        0070,
+                        module_name.span.clone(),
+                        vec![
+                            (context.source_code_provider.get_source_code_path(&module_name.value), Color::Yellow),
+                            (error, Color::Red)
+                        ],
+                        vec![((module_context.module_name.clone(), module_name.span.clone()), Color::Red)]
+                    );
+                    errors.push(error);
+                    continue;
+                }
+            };
+            let module_name = module_name.value.clone();
 
             context.future_runtime.spawn(async move {
                 transpile_module(module_name, module_context).await
@@ -141,7 +155,7 @@ async fn transpile_module(
         }
     }
 
-    validate_syntax_program(ast, &module_context, None, &mut errors, &mut warnings);
+    validate_syntax_program(ast, &module_context, None, false, &mut errors, &mut warnings);
 
     let mut user_type_map = FxHashMap::default();
     collect_user_type_program(ast, &mut user_type_map, &module_context);
@@ -151,10 +165,10 @@ async fn transpile_module(
 
     let mut module_user_type_map = FxHashMap::default();
     for module_name in import_element_map.values() {
-        let module_context = context.get_module_context(module_name).unwrap();
+        let module_context = context.get_module_context(&module_name.value).unwrap();
         let user_type_map = module_context.user_type_future.get().await;
 
-        module_user_type_map.insert(module_name.clone(), user_type_map);
+        module_user_type_map.insert(module_name.value.clone(), user_type_map);
     }
 
     let mut module_element_type_map = FxHashMap::default();
@@ -188,11 +202,11 @@ async fn transpile_module(
     let mut merged_implements_infos = ImplementsInfoSet::new();
 
     for module_name in import_element_map.values() {
-        let module_context = context.get_module_context(module_name).unwrap();
+        let module_context = context.get_module_context(&module_name.value).unwrap();
         let module_element_type_map = module_context.module_element_type_future.get().await;
         let module_type_implements_infos = module_context.module_type_implements_infos.get().await;
 
-        module_element_type_maps.insert(module_name.clone(), module_element_type_map);
+        module_element_type_maps.insert(module_name.value.clone(), module_element_type_map);
         merged_implements_infos.merge(&module_type_implements_infos);
     }
 

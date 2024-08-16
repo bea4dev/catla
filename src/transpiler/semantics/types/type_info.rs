@@ -115,14 +115,14 @@ impl Type {
         }
     }
     
-    pub(crate) fn replace_this_type(&self, new_this_type: &Type, replace_field_recursive: bool) -> Self {
+    pub(crate) fn replace_this_type(&self, new_this_type: &Type, replace_field_recursive: bool, replace_bounds: bool) -> Self {
         match self {
             Type::UserType { user_type_info, generics, generics_span } => {
                 let user_type_info = if replace_field_recursive {
                     let mut element_types = user_type_info.element_types.lock().unwrap().clone();
                     for (_, element_type) in element_types.iter_mut() {
                         *element_type = WithDefineInfo {
-                            value: element_type.value.replace_this_type(new_this_type, false),
+                            value: element_type.value.replace_this_type(new_this_type, false, replace_bounds),
                             module_name: element_type.module_name.clone(),
                             span: element_type.span.clone()
                         };
@@ -150,7 +150,7 @@ impl Type {
                 };
                 
                 let generics = generics.iter()
-                    .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive) })
+                    .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive, replace_bounds) })
                     .collect();
                 
                 Type::UserType {
@@ -161,7 +161,7 @@ impl Type {
             },
             Type::Function { function_info, generics } => {
                 let argument_types = function_info.argument_types.iter()
-                    .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive) })
+                    .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive, replace_bounds) })
                     .collect();
                 
                 let where_bounds = Type::replace_where_bounds_this_type(
@@ -173,13 +173,14 @@ impl Type {
                     is_extension: function_info.is_extension,
                     generics_define: Type::replace_generics_define_this_type(&function_info.generics_define, new_this_type),
                     argument_types,
-                    return_type: function_info.return_type.clone().map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive) }),
+                    return_type: function_info.return_type.clone()
+                        .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive, replace_bounds) }),
                     define_info: function_info.define_info.clone(),
                     where_bounds: FreezableMutex::new(where_bounds)
                 };
                 
                 let generics = generics.iter()
-                    .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive) })
+                    .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive, replace_bounds) })
                     .collect();
                 
                 Type::Function {
@@ -188,6 +189,10 @@ impl Type {
                 }
             },
             Type::Generic(generic) => {
+                if !replace_bounds {
+                    return self.clone();
+                }
+
                 let bounds = Type::replace_bounds_this_type(&generic.bounds.freeze_and_get(), new_this_type);
                 
                 Type::Generic(Arc::new(GenericType {
@@ -197,12 +202,12 @@ impl Type {
                     location: generic.location.clone()
                 }))
             },
-            Type::Array(base_type) => Type::Array(Arc::new(base_type.replace_this_type(new_this_type, replace_field_recursive))),
-            Type::Option(value) => Type::Option(Arc::new(value.replace_this_type(new_this_type, replace_field_recursive))),
+            Type::Array(base_type) => Type::Array(Arc::new(base_type.replace_this_type(new_this_type, replace_field_recursive, replace_bounds))),
+            Type::Option(value) => Type::Option(Arc::new(value.replace_this_type(new_this_type, replace_field_recursive, replace_bounds))),
             Type::Result { value, error } => {
                 Type::Result {
-                    value: Arc::new(value.replace_this_type(new_this_type, replace_field_recursive)),
-                    error: Arc::new(error.replace_this_type(new_this_type, replace_field_recursive))
+                    value: Arc::new(value.replace_this_type(new_this_type, replace_field_recursive, replace_bounds)),
+                    error: Arc::new(error.replace_this_type(new_this_type, replace_field_recursive, replace_bounds))
                 }
             },
             Type::This => new_this_type.clone(),
@@ -216,7 +221,7 @@ impl Type {
                 Arc::new(Bound {
                     module_name: bound.module_name.clone(),
                     span: bound.span.clone(),
-                    ty: bound.ty.replace_this_type(new_this_type, false),
+                    ty: bound.ty.replace_this_type(new_this_type, false, false),
                     entity_id: bound.entity_id
                 })
             })
@@ -245,7 +250,7 @@ impl Type {
         where_bounds.iter()
             .map(|where_bound| {
                 WhereBound {
-                    target_type: where_bound.target_type.clone().map(|ty| { ty.replace_this_type(new_this_type, false) }),
+                    target_type: where_bound.target_type.clone().map(|ty| { ty.replace_this_type(new_this_type, false, false) }),
                     bounds: Type::replace_bounds_this_type(&where_bound.bounds, new_this_type)
                 }
             })
@@ -1030,7 +1035,7 @@ impl ImplementsInfo {
             self.interface.value.get_element_type_with_replaced_generic(element_name)
                 .map(|ty| {
                     WithDefineInfo {
-                        value: ty.value.replace_this_type(&self.concrete.value, true),
+                        value: ty.value.replace_this_type(&self.concrete.value, true, true),
                         module_name: ty.module_name.clone(),
                         span: ty.span.clone()
                     }

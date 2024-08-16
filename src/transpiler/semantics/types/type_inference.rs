@@ -4186,7 +4186,7 @@ fn type_inference_primary_right<'allocator, 'input>(
             for bound in generic_define.bounds.freeze_and_get().iter() {
                 if let Some(element_type) = bound.ty.get_element_type_with_replaced_generic(element_name) {
                     let element_type = element_type
-                        .map(|ty| { ty.replace_this_type(&user_type.value, true) });
+                        .map(|ty| { ty.replace_this_type(&user_type.value, true, true) });
                     pre_element_types.push((
                         element_type,
                         bound.ty.clone(),
@@ -4206,8 +4206,8 @@ fn type_inference_primary_right<'allocator, 'input>(
                             let implements_info = implementation.implements_info;
                             let implements_info = ImplementsInfo {
                                 generics: implements_info.generics,
-                                interface: implements_info.interface.map(|ty| { ty.replace_this_type(&this_type, true) }),
-                                concrete: implements_info.concrete.map(|ty| { ty.replace_this_type(&this_type, true) }),
+                                interface: implements_info.interface.map(|ty| { ty.replace_this_type(&this_type, true, true) }),
+                                concrete: implements_info.concrete.map(|ty| { ty.replace_this_type(&this_type, true, true) }),
                                 module_name: implements_info.module_name,
                                 where_bounds: Arc::new(Type::replace_where_bounds_this_type(&implements_info.where_bounds, &this_type)),
                                 element_types: Arc::new(Default::default()),

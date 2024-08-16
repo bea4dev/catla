@@ -110,8 +110,7 @@ let array3 = new { 0, 10, 20 }
 let array4 = new [for i => new TestClass { field: 0 }; 10]
 
 
-import std::operators::add::Add
+import std::operators::add
 
-function <Other, T: Add<Other, Other>> add(value: T, other: Other) {
-    let a = value.add(other)
-}
+let a: int = 100
+let b = a.add(100)

@@ -179,7 +179,7 @@ impl SourceCodeProvider for DefaultSourceCodeProvider {
         };
 
         let original_entry_name = self.entry_rename_map.get(entry_name).unwrap();
-        format!("{}/{}", original_entry_name, latter.replace("::", "/"))
+        format!("{}/{}.catla", original_entry_name, latter.replace("::", "/"))
     }
 
     fn exists_source_code_or_package(&self, module_name: &str) -> bool {

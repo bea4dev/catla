@@ -11,7 +11,7 @@ pub mod localize;
 
 fn main() {
 
-    //unsafe { backtrace_on_stack_overflow::enable() };
+    unsafe { backtrace_on_stack_overflow::enable() };
 
     let settings = TranspileSettings {
         lang: "ja_JP".to_string(),

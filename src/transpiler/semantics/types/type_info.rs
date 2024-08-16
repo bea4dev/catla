@@ -2,7 +2,7 @@ use std::{mem::swap, ops::Range, sync::{Arc, Mutex, MutexGuard, PoisonError}};
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
-use catla_parser::parser::{Spanned, UserTypeKindEnum};
+use catla_parser::parser::{Spanned, StatementAttribute, UserTypeKindEnum};
 use derivative::Derivative;
 use either::Either;
 use fxhash::FxHashMap;
@@ -31,7 +31,7 @@ pub enum Type {
     Bool,
     Unit,
     UserType {
-        user_type_info: Arc<DataStructInfo>,
+        user_type_info: Arc<UserTypeInfo>,
         generics: Arc<Vec<Type>>,
         #[derivative(PartialEq="ignore")]
         generics_span: Option<Arc<Vec<Range<usize>>>>
@@ -133,7 +133,7 @@ impl Type {
                         new_this_type
                     );
                     
-                    let user_type_info = DataStructInfo {
+                    let user_type_info = UserTypeInfo {
                         module_name: user_type_info.module_name.clone(),
                         name: user_type_info.name.clone(),
                         define_span: user_type_info.define_span.clone(),
@@ -141,6 +141,7 @@ impl Type {
                         generics_define: Type::replace_generics_define_this_type(&user_type_info.generics_define, new_this_type),
                         generics_define_span: user_type_info.generics_define_span.clone(),
                         element_types: Mutex::new(element_types),
+                        element_attributes: user_type_info.element_attributes.clone(),
                         where_bounds: FreezableMutex::new(where_bounds)
                     };
                     
@@ -598,7 +599,7 @@ pub static PRIMITIVE_TYPE_NAMES: &[&str] = &[
 
 
 #[derive(Debug)]
-pub struct DataStructInfo {
+pub struct UserTypeInfo {
     pub module_name: Arc<String>,
     pub name: Spanned<String>,
     pub define_span: Range<usize>,
@@ -606,15 +607,16 @@ pub struct DataStructInfo {
     pub generics_define: Vec<Arc<GenericType>>,
     pub generics_define_span: Option<Range<usize>>,
     pub element_types: Mutex<FxHashMap<String, WithDefineInfo<Type>>>,
+    pub element_attributes: Arc<Mutex<FxHashMap<String, Vec<StatementAttribute>>>>,
     pub where_bounds: FreezableMutex<Vec<WhereBound>>
 }
 
-impl PartialEq for DataStructInfo {
+impl PartialEq for UserTypeInfo {
     fn eq(&self, other: &Self) -> bool {
         self.module_name == other.module_name && self.name == other.name
     }
 }
-impl Eq for DataStructInfo {}
+impl Eq for UserTypeInfo {}
 
 #[derive(Debug)]
 pub struct FreezableMutex<T: Default> {

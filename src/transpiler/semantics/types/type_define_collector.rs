@@ -6,7 +6,7 @@ use fxhash::FxHashMap;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext};
 
-use super::type_info::{DataStructInfo, FreezableMutex, GenericType, Type, WithDefineInfo};
+use super::type_info::{UserTypeInfo, FreezableMutex, GenericType, Type, WithDefineInfo};
 
 
 pub(crate) fn collect_user_type_program(
@@ -40,14 +40,14 @@ pub(crate) fn collect_user_type_program(
                     }
                 }
             },
-            StatementAST::UserTypeDefine(data_struct_define) => {
-                if let Ok(name) = &data_struct_define.name {
+            StatementAST::UserTypeDefine(user_type_define) => {
+                if let Ok(name) = &user_type_define.name {
                     let name = Spanned::new(name.value.to_string(), name.span.clone());
                     let type_name = name.value.clone();
 
                     let mut generics_define = Vec::new();
                     let mut generics_define_span = None;
-                    if let Some(generics) = &data_struct_define.generics_define {
+                    if let Some(generics) = &user_type_define.generics_define {
                         for element in generics.elements.iter() {
                             let generic_type = Arc::new(GenericType {
                                 define_entity_id: EntityID::from(element),
@@ -60,18 +60,19 @@ pub(crate) fn collect_user_type_program(
                         generics_define_span = Some(generics.span.clone());
                     }
 
-                    let data_struct_info = DataStructInfo {
+                    let user_type_info = UserTypeInfo {
                         module_name: context.module_name.clone(),
                         name,
-                        define_span: data_struct_define.span.clone(),
-                        kind: data_struct_define.kind.value.clone(),
+                        define_span: user_type_define.span.clone(),
+                        kind: user_type_define.kind.value.clone(),
                         generics_define,
                         generics_define_span,
                         element_types: Mutex::new(FxHashMap::default()),
+                        element_attributes: Default::default(),
                         where_bounds: Default::default()
                     };
 
-                    if let Some(block) = &data_struct_define.block.value {
+                    if let Some(block) = &user_type_define.block.value {
                         collect_user_type_program(
                             block.program,
                             user_type_map,
@@ -80,7 +81,7 @@ pub(crate) fn collect_user_type_program(
                     }
 
                     let ty = Type::UserType {
-                        user_type_info: Arc::new(data_struct_info),
+                        user_type_info: Arc::new(user_type_info),
                         generics: Arc::new(Vec::new()),
                         generics_span: None
                     };
@@ -107,7 +108,7 @@ pub(crate) fn collect_user_type_program(
                         generics_define_span = Some(generics.span.clone());
                     }
 
-                    let data_struct_info = DataStructInfo {
+                    let data_struct_info = UserTypeInfo {
                         module_name: context.module_name.clone(),
                         name,
                         define_span: type_define.span.clone(),
@@ -115,6 +116,7 @@ pub(crate) fn collect_user_type_program(
                         generics_define,
                         generics_define_span,
                         element_types: Mutex::new(FxHashMap::default()),
+                        element_attributes: Default::default(),
                         where_bounds: Default::default()
                     };
 

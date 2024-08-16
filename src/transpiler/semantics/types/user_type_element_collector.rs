@@ -146,12 +146,14 @@ pub(crate) fn collect_module_element_types_program(
                     module_entity_type_map.insert(EntityID::from(field_define), type_info.clone());
 
                     match &field_define.name {
-                        Ok(name) => Some((name.clone(), type_info)),
+                        Ok(name) => {
+                            Some((name.clone(), type_info, field_define.attributes.statement_attributes.iter().cloned().collect()))
+                        },
                         _ => None
                     }
                 },
                 StatementAST::FunctionDefine(method_define) => {
-                    get_function_type_and_name(
+                    let name_and_type = get_function_type_and_name(
                         method_define,
                         user_type_map,
                         import_element_map,
@@ -166,22 +168,30 @@ pub(crate) fn collect_module_element_types_program(
                         warnings,
                         Some(user_type),
                         context
-                    )
+                    );
+
+                    name_and_type.map(|(name, ty)| { (name, ty, method_define.attributes.iter().cloned().collect()) })
                 },
                 _ => None
             };
 
-            if let Some(element) = element {
+            if let Some((element_name, element_type, attributes)) = element {
                 if let Some(implementation_element_map) = implementation_element_map {
                     implementation_element_map.insert(
-                        element.0.value.to_string(),
-                        WithDefineInfo { value: element.1, module_name: context.module_name.clone(), span: element.0.span }
+                        element_name.value.to_string(),
+                        WithDefineInfo { value: element_type, module_name: context.module_name.clone(), span: element_name.span }
                     );
-                } else if let Type::UserType{ user_type_info: data_struct_info, generics: _, generics_span: _ } = user_type {
-                    let mut element_map = data_struct_info.element_types.lock().unwrap();
+                } else if let Type::UserType{ user_type_info, generics: _, generics_span: _ } = user_type {
+                    let mut element_map = user_type_info.element_types.lock().unwrap();
                     element_map.insert(
-                        element.0.value.to_string(),
-                        WithDefineInfo { value: element.1, module_name: context.module_name.clone(), span: element.0.span }
+                        element_name.value.to_string(),
+                        WithDefineInfo { value: element_type, module_name: context.module_name.clone(), span: element_name.span }
+                    );
+
+                    let mut element_attributes = user_type_info.element_attributes.lock().unwrap();
+                    element_attributes.insert(
+                        element_name.value.to_string(),
+                        attributes
                     );
                 }
             }

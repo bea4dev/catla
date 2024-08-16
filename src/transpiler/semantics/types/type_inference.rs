@@ -4,7 +4,7 @@ use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, So
 use bumpalo::{collections::CollectIn, Bump};
 use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, Closure, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum};
 use either::Either;
-use fxhash::{FxHashMap, FxHashSet};
+use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use indexmap::IndexMap;
 
@@ -26,6 +26,7 @@ const UNRESOLVED_INTERFACE: usize = 0052;
 const INVALID_OVERRIDE_ERROR: usize = 0056;
 const INVALID_ARRAY_INIT_EXPR_TYPE: usize = 0067;
 const INVALID_ARRAY_LENGTH_EXPR_TYPE: usize = 0068;
+const INVALID_PRIMARY_SEPARATOR: usize = 0071;
 
 
 pub(crate) struct TypeEnvironment<'allocator, 'input> {
@@ -175,13 +176,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             return;
         }
         self.entity_type_map.insert(second_entity_id, Either::Left(first_entity_id));
-    }
-
-    pub fn set_generic_id_equals(&mut self, first_generic_id: LocalGenericID, second_generic_id: LocalGenericID) {
-        if first_generic_id == second_generic_id {
-            return;
-        }
-        self.generic_type_map.insert(second_generic_id, Either::Left(first_generic_id));
     }
 
     pub fn unify(
@@ -4169,216 +4163,78 @@ fn type_inference_primary_right<'allocator, 'input>(
     context: &TranspileModuleContext
 ) {
     let second_expr_id = if let Some(second_expr) = &ast.second_expr {
-        let user_type = type_environment.resolve_entity_type(previous_primary.value);
+        let parent_type = type_environment.resolve_entity_type(previous_primary.value);
         let literal_entity_id = EntityID::from(&second_expr.0);
         
-        let element_name = second_expr.0.value;
-        let element_type = user_type.value.get_element_type_with_replaced_generic(element_name);
-
-        let mut pre_element_types = Vec::new_in(allocator);
-        if let Some(element_type) = element_type {
-            pre_element_types.push((element_type, user_type.value.clone(), false, None));
-        }
-        
-        let mut implementations = Vec::new_in(allocator);
-        
-        if let Type::Generic(generic_define) = &user_type.value {
-            for bound in generic_define.bounds.freeze_and_get().iter() {
-                if let Some(element_type) = bound.ty.get_element_type_with_replaced_generic(element_name) {
-                    let element_type = element_type
-                        .map(|ty| { ty.replace_this_type(&user_type.value, true, true) });
-                    pre_element_types.push((
-                        element_type,
-                        bound.ty.clone(),
-                        true,
-                        None
-                    ));
-                } else {
-                    implementations.extend(
-                        global_implements_info_set.collect_satisfied_implementations(
-                            &bound.ty,
-                            type_environment,
-                            current_scope_implements_info_set,
-                            allocator
-                        ).into_iter().map(|implementation| {
-                            let this_type = Type::Generic(generic_define.clone());
-                            
-                            let implements_info = implementation.implements_info;
-                            let implements_info = ImplementsInfo {
-                                generics: implements_info.generics,
-                                interface: implements_info.interface.map(|ty| { ty.replace_this_type(&this_type, true, true) }),
-                                concrete: implements_info.concrete.map(|ty| { ty.replace_this_type(&this_type, true, true) }),
-                                module_name: implements_info.module_name,
-                                where_bounds: Arc::new(Type::replace_where_bounds_this_type(&implements_info.where_bounds, &this_type)),
-                                element_types: Arc::new(Default::default()),
-                                is_bounds_info: true
-                            };
-                            
-                            CollectedImplementation {
-                                implements_info,
-                                local_generics: implementation.local_generics
-                            }
-                        })
-                    );
-                }
-            }
-        }
-        
-        implementations.extend(global_implements_info_set.collect_satisfied_implementations(
-            &user_type.value,
-            type_environment,
+        let element_type = get_element_type(
+            parent_type,
+            second_expr.0.clone(),
+            |_| { true },
+            global_implements_info_set,
             current_scope_implements_info_set,
+            type_environment,
             allocator
-        ));
-        
-        for implementation in implementations {
-            let element_type = implementation.implements_info.get_element_type(element_name);
-            if let Some(element_type) = element_type {
-                let ty = Type::get_type_with_replaced_generics(
-                    &element_type.value,
-                    &implementation.implements_info.generics,
-                    &implementation.local_generics
-                );
+        );
 
-                let interface = implementation.implements_info.interface;
+        let element_type = match element_type {
+            Ok((ty, is_static)) => {
+                let span = ast.separator.span.start..second_expr.0.span.end;
 
-                pre_element_types.push(
-                    (
-                        WithDefineInfo {
-                            value: ty,
-                            module_name: element_type.module_name.clone(),
-                            span: element_type.span.clone()
-                        },
-                        interface.value.clone(),
-                        implementation.implements_info.is_bounds_info,
-                        Some((
-                            WithDefineInfo {
-                                value: interface.value,
-                                module_name: implementation.implements_info.module_name,
-                                span: interface.span
-                            },
-                            implementation.implements_info.concrete.value,
-                            implementation.implements_info.where_bounds
-                        ))
-                    )
-                );
-            }
-        }
-
-        let pre_element_types_from_bounds = pre_element_types.iter()
-            .filter(|(_, _, is_bound_info, _)| { *is_bound_info })
-            .collect_in::<bumpalo::collections::Vec<_>>(allocator);
-
-        let pre_element_types_from_global = pre_element_types.iter()
-            .filter(|(_, _, is_bound_info, _)| { !*is_bound_info })
-            .collect_in::<bumpalo::collections::Vec<_>>(allocator);
-
-        let mut element_types = Vec::new_in(allocator);
-        for i in 0..2 {
-            let pre_element_types = match i {
-                0 => &pre_element_types_from_bounds,
-                1 => &pre_element_types_from_global,
-                _ => unreachable!()
-            };
-
-            let mut origin_types = Vec::new_in(allocator);
-
-            'root: for (element_type, origin_type, _, interface_and_where_bounds) in pre_element_types {
-
-                let ty = type_environment.get_user_or_function_type_with_local_generic_id(
-                    Spanned::new(element_type.value.clone(), second_expr.0.span.clone()),
-                    current_scope_implements_info_set,
-                    false
-                ).value;
-
-                if let Some(where_bounds) = ty.get_where_bounds_with_replaced_generic() {
-                    for where_bound in where_bounds.iter() {
-                        for bound in where_bound.bounds.iter() {
-                            if !global_implements_info_set.is_implemented(
-                                &where_bound.target_type.value,
-                                &bound.ty,
-                                type_environment,
-                                current_scope_implements_info_set,
-                                true
-                            ) {
-                                continue 'root;
-                            }
-                        }
+                if is_static {
+                    if ast.separator.value != PrimarySeparatorKind::DoubleColon {
+                        let error = SimpleError::new(
+                            INVALID_PRIMARY_SEPARATOR,
+                            span.clone(),
+                            vec![
+                                (".".to_string(), Color::Red),
+                                ("::".to_string(), Color::Cyan),
+                                ("static".to_string(), Color::Yellow)
+                            ],
+                            vec![
+                                ((context.module_name.clone(), span), Color::Red),
+                                ((ty.module_name, ty.span), Color::Yellow)
+                            ]
+                        );
+                        errors.push(error);
+                    }
+                } else {
+                    if ast.separator.value != PrimarySeparatorKind::Dot {
+                        let error = SimpleError::new(
+                            INVALID_PRIMARY_SEPARATOR,
+                            span.clone(),
+                            vec![
+                                ("::".to_string(), Color::Red),
+                                (".".to_string(), Color::Cyan),
+                                ("non static".to_string(), Color::Yellow)
+                            ],
+                            vec![
+                                ((context.module_name.clone(), span), Color::Red),
+                                ((ty.module_name, ty.span), Color::Yellow)
+                            ]
+                        );
+                        errors.push(error);
+                    }
+                }
+                
+                ty.value
+            },
+            Err(error) => {
+                match error {
+                    Either::Left(error) => {
+                        type_environment.add_lazy_type_error_report(error);
+                    },
+                    Either::Right(error) => {
+                        errors.push(TranspileError::new(error));
                     }
                 }
 
-                if origin_types.contains(origin_type) {
-                    continue;
-                }
-                origin_types.push(origin_type.clone());
-
-                element_types.push(
-                    (
-                        WithDefineInfo {
-                            value: ty,
-                            module_name: element_type.module_name.clone(),
-                            span: element_type.span.clone()
-                        },
-                        interface_and_where_bounds
-                    )
-                );
+                Type::Unknown
             }
-
-            if !element_types.is_empty() {
-                break;
-            }
-        }
-
-        let element_type = if element_types.is_empty() {
-            let error = NotFoundTypeElementError {
-                user_type: user_type.value.clone(),
-                name: second_expr.0.clone().map(|name| { name.to_string() })
-            };
-            type_environment.add_lazy_type_error_report(error);
-
-            Type::Unknown
-        } else {
-            if element_types.len() > 1 {
-                let found_elements = element_types.iter()
-                    .map(|element| { element.0.clone().map(|_| {()}) })
-                    .collect();
-
-                let error = DuplicatedElement {
-                    type_name: type_environment.get_type_display_string(&user_type.value),
-                    element: second_expr.0.clone().map(|name| { name.to_string() }),
-                    count: element_types.len(),
-                    found_elements
-                };
-                errors.push(TranspileError::new(error));
-            } else {
-                let where_bounds = element_types.last().unwrap().0.value.get_where_bounds_with_replaced_generic();
-
-                if let Some(where_bounds) = where_bounds {
-                    for where_bound in where_bounds.iter() {
-                        type_environment.generic_bounds_checks.push(GenericsBoundCheck::Where {
-                            type_span: second_expr.0.span.clone(),
-                            target_type: where_bound.target_type.value.clone(),
-                            bounds: where_bound.bounds.clone(),
-                            scope_implements_info_set: current_scope_implements_info_set.clone()
-                        });
-                    }
-                }
-
-                if let Some((interface, _, where_bounds)) = &element_types.last().unwrap().1 {
-                    type_environment.impl_interface_generics_check.push((second_expr.0.span.clone(), interface.clone()));
-
-                    for where_bound in where_bounds.iter() {
-                        type_environment.generic_bounds_checks.push(GenericsBoundCheck::Where {
-                            type_span: second_expr.0.span.clone(),
-                            target_type: where_bound.target_type.value.clone(),
-                            bounds: where_bound.bounds.clone(),
-                            scope_implements_info_set: current_scope_implements_info_set.clone()
-                        });
-                    }
-                }
-            }
-            element_types.last().unwrap().0.value.clone()
         };
+
+        if &element_type != &Type::Unknown {
+
+        }
 
         let element_type = Spanned::new(element_type, second_expr.0.span.clone());
 
@@ -4491,6 +4347,238 @@ fn type_inference_primary_right<'allocator, 'input>(
             EntityID::from(ast)
         );
     }
+}
+
+fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
+    parent_type: Spanned<Type>,
+    element_name: Spanned<&str>,
+    origin_type_filter: F,
+    global_implements_info_set: &ImplementsInfoSet,
+    current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
+    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    allocator: &'allocator Bump,
+) -> Result<(WithDefineInfo<Type>, bool), Either<NotFoundTypeElementError, DuplicatedElement>> {
+    let element_type = parent_type.value.get_element_type_with_replaced_generic(element_name.value);
+
+    let mut pre_element_types = Vec::new_in(allocator);
+    if let Some(element_type) = element_type {
+        pre_element_types.push((element_type, parent_type.value.clone(), false, None));
+    }
+    
+    let mut implementations = Vec::new_in(allocator);
+    
+    if let Type::Generic(generic_define) = &parent_type.value {
+        for bound in generic_define.bounds.freeze_and_get().iter() {
+            if let Some(element_type) = bound.ty.get_element_type_with_replaced_generic(element_name.value) {
+                let element_type = element_type
+                    .map(|ty| { ty.replace_this_type(&parent_type.value, true, true) });
+                pre_element_types.push((
+                    element_type,
+                    bound.ty.clone(),
+                    true,
+                    None
+                ));
+            } else {
+                implementations.extend(
+                    global_implements_info_set.collect_satisfied_implementations(
+                        &bound.ty,
+                        type_environment,
+                        current_scope_implements_info_set,
+                        allocator
+                    ).into_iter().map(|implementation| {
+                        let this_type = Type::Generic(generic_define.clone());
+                        
+                        let implements_info = implementation.implements_info;
+                        let implements_info = ImplementsInfo {
+                            generics: implements_info.generics,
+                            interface: implements_info.interface.map(|ty| { ty.replace_this_type(&this_type, true, true) }),
+                            concrete: implements_info.concrete.map(|ty| { ty.replace_this_type(&this_type, true, true) }),
+                            module_name: implements_info.module_name,
+                            where_bounds: Arc::new(Type::replace_where_bounds_this_type(&implements_info.where_bounds, &this_type)),
+                            element_types: Arc::new(Default::default()),
+                            is_bounds_info: true
+                        };
+                        
+                        CollectedImplementation {
+                            implements_info,
+                            local_generics: implementation.local_generics
+                        }
+                    })
+                );
+            }
+        }
+    }
+    
+    implementations.extend(global_implements_info_set.collect_satisfied_implementations(
+        &parent_type.value,
+        type_environment,
+        current_scope_implements_info_set,
+        allocator
+    ));
+    
+    for implementation in implementations {
+        let element_type = implementation.implements_info.get_element_type(element_name.value);
+        if let Some(element_type) = element_type {
+            let ty = Type::get_type_with_replaced_generics(
+                &element_type.value,
+                &implementation.implements_info.generics,
+                &implementation.local_generics
+            );
+
+            let interface = implementation.implements_info.interface;
+
+            pre_element_types.push(
+                (
+                    WithDefineInfo {
+                        value: ty,
+                        module_name: element_type.module_name.clone(),
+                        span: element_type.span.clone()
+                    },
+                    interface.value.clone(),
+                    implementation.implements_info.is_bounds_info,
+                    Some((
+                        WithDefineInfo {
+                            value: interface.value,
+                            module_name: implementation.implements_info.module_name,
+                            span: interface.span
+                        },
+                        implementation.implements_info.concrete.value,
+                        implementation.implements_info.where_bounds
+                    ))
+                )
+            );
+        }
+    }
+
+    let pre_element_types_from_bounds = pre_element_types.iter()
+        .filter(|(_, _, is_bound_info, _)| { *is_bound_info })
+        .collect_in::<bumpalo::collections::Vec<_>>(allocator);
+
+    let pre_element_types_from_global = pre_element_types.iter()
+        .filter(|(_, _, is_bound_info, _)| { !*is_bound_info })
+        .collect_in::<bumpalo::collections::Vec<_>>(allocator);
+
+    let mut element_types = Vec::new_in(allocator);
+    for i in 0..2 {
+        let pre_element_types = match i {
+            0 => &pre_element_types_from_bounds,
+            1 => &pre_element_types_from_global,
+            _ => unreachable!()
+        };
+
+        let mut origin_types = Vec::new_in(allocator);
+
+        'root: for (element_type, origin_type, _, interface_and_where_bounds) in pre_element_types {
+
+            let ty = type_environment.get_user_or_function_type_with_local_generic_id(
+                Spanned::new(element_type.value.clone(), element_name.span.clone()),
+                current_scope_implements_info_set,
+                false
+            ).value;
+
+            if let Some(where_bounds) = ty.get_where_bounds_with_replaced_generic() {
+                for where_bound in where_bounds.iter() {
+                    for bound in where_bound.bounds.iter() {
+                        if !global_implements_info_set.is_implemented(
+                            &where_bound.target_type.value,
+                            &bound.ty,
+                            type_environment,
+                            current_scope_implements_info_set,
+                            true
+                        ) {
+                            continue 'root;
+                        }
+                    }
+                }
+            }
+
+            if origin_types.contains(origin_type) {
+                continue;
+            }
+            origin_types.push(origin_type.clone());
+
+            if !origin_type_filter(origin_type) {
+                continue;
+            }
+
+            element_types.push(
+                (
+                    WithDefineInfo {
+                        value: ty,
+                        module_name: element_type.module_name.clone(),
+                        span: element_type.span.clone()
+                    },
+                    origin_type,
+                    interface_and_where_bounds
+                )
+            );
+        }
+
+        if !element_types.is_empty() {
+            break;
+        }
+    }
+
+    let (element_type, is_static) = if element_types.is_empty() {
+        let error = NotFoundTypeElementError {
+            user_type: parent_type.value.clone(),
+            name: element_name.clone().map(|name| { name.to_string() })
+        };
+        return Err(Either::Left(error));
+    } else {
+        if element_types.len() > 1 {
+            let found_elements = element_types.iter()
+                .map(|element| { element.0.clone().map(|_| {()}) })
+                .collect();
+
+            let error = DuplicatedElement {
+                type_name: type_environment.get_type_display_string(&parent_type.value),
+                element: element_name.clone().map(|name| { name.to_string() }),
+                count: element_types.len(),
+                found_elements
+            };
+            return Err(Either::Right(error))
+        } else {
+            let where_bounds = element_types.last().unwrap().0.value.get_where_bounds_with_replaced_generic();
+
+            if let Some(where_bounds) = where_bounds {
+                for where_bound in where_bounds.iter() {
+                    type_environment.generic_bounds_checks.push(GenericsBoundCheck::Where {
+                        type_span: element_name.span.clone(),
+                        target_type: where_bound.target_type.value.clone(),
+                        bounds: where_bound.bounds.clone(),
+                        scope_implements_info_set: current_scope_implements_info_set.clone()
+                    });
+                }
+            }
+
+            if let Some((interface, _, where_bounds)) = &element_types.last().unwrap().2 {
+                type_environment.impl_interface_generics_check.push((element_name.span.clone(), interface.clone()));
+
+                for where_bound in where_bounds.iter() {
+                    type_environment.generic_bounds_checks.push(GenericsBoundCheck::Where {
+                        type_span: element_name.span.clone(),
+                        target_type: where_bound.target_type.value.clone(),
+                        bounds: where_bound.bounds.clone(),
+                        scope_implements_info_set: current_scope_implements_info_set.clone()
+                    });
+                }
+            }
+        }
+
+        let is_static = match element_types.last().unwrap().1 {
+            Type::UserType { user_type_info, generics: _, generics_span: _ } => {
+                let element_attributes = user_type_info.element_attributes.lock().unwrap();
+                let attributes = element_attributes.get(element_name.value).unwrap();
+                attributes.contains_kind(StatementAttributeKind::Static)
+            },
+            _ => unreachable!()
+        };
+
+        (element_types.last().unwrap().0.clone(), is_static)
+    };
+    
+    Ok((element_type, is_static))
 }
 
 fn type_inference_mapping_operator<'allocator, 'input>(

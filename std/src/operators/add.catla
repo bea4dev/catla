@@ -53,3 +53,15 @@ implements Add<int64, int64> for int64 {
         return this + other
     }
 }
+
+implements Add<float32, float32> for float32 {
+    override function add(let this, other: float32) -> float32 {
+        return this + other
+    }
+}
+
+implements Add<float64, float64> for float64 {
+    override function add(let this, other: float64) -> float64 {
+        return this + other
+    }
+}

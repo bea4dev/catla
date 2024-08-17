@@ -510,6 +510,26 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 if first_resolved_type.0 == second_resolved_type.0 {
                     return Ok(());
                 }
+                
+                if let Type::NumericLiteral(compatible_types_1) = &first_resolved_type.1.value {
+                    if let Type::NumericLiteral(compatible_types_2) = &second_resolved_type.1.value {
+
+                        let and = compatible_types_1.iter()
+                            .filter(|&ty| { compatible_types_2.contains(ty) })
+                            .cloned()
+                            .collect::<Vec<_>>();
+
+                        if !and.is_empty() {
+                            self.generic_type_map.insert(second_resolved_type.0, Either::Left(first_resolved_type.0));
+                            self.generic_type_map.insert(
+                                first_resolved_type.0,
+                                Either::Right(Spanned::new(Type::NumericLiteral(and), second_resolved_type.1.span.clone()))
+                            );
+
+                            return Ok(());
+                        }
+                    }
+                }
 
                 match (
                     first_resolved_type.1.value.is_replaceable_with(&second_resolved_type.1.value),
@@ -837,12 +857,11 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             Type::Uint16 => "uint16".to_string(),
             Type::Uint32 => "uint32".to_string(),
             Type::Uint64 => "uint64".to_string(),
-            Type::IntegerLiteral(_) => "int".to_string(),
             Type::Float32 => "float32".to_string(),
             Type::Float64 => "float64".to_string(),
-            Type::FloatLiteral(_) => "float".to_string(),
             Type::Bool => "bool".to_string(),
             Type::Unit => "unit".to_string(),
+            Type::NumericLiteral(_) => self.get_type_display_string(&ty.get_numeric_compatible_optimal_type()),
             Type::UserType { user_type_info, generics, generics_span: _ } => {
                 let mut name = user_type_info.name.value.clone();
                 self.add_generics_info(&mut name, generics);
@@ -3235,32 +3254,52 @@ fn type_inference_primary_left<'allocator, 'input>(
                         }
                     } else {
                         let text = identifier.value;
-                        let ty = if text.parse::<u8>().is_ok() {
-                            Type::IntegerLiteral(Arc::new(Type::Uint8))
-                        } else if text.parse::<u16>().is_ok() {
-                            Type::IntegerLiteral(Arc::new(Type::Uint16))
-                        } else if text.parse::<u32>().is_ok() {
-                            Type::IntegerLiteral(Arc::new(Type::Uint32))
-                        } else if text.parse::<u64>().is_ok() {
-                            Type::IntegerLiteral(Arc::new(Type::Uint64))
-                        } else if text.parse::<f32>().is_ok() {
-                            Type::IntegerLiteral(Arc::new(Type::Float32))
-                        } else if text.parse::<f64>().is_ok() {
-                            Type::IntegerLiteral(Arc::new(Type::Float64))
+
+                        let mut numeric_compatible_types = Vec::new();
+
+                        if text.contains(".") {
+                            if text.parse::<f32>().is_ok() {
+                                numeric_compatible_types.push(Type::Float32);
+                            }
+                            if text.parse::<f64>().is_ok() {
+                                numeric_compatible_types.push(Type::Float64);
+                            }
+                        } else {
+                            if text.parse::<i8>().is_ok() {
+                                numeric_compatible_types.push(Type::Int8);
+                            }
+                            if text.parse::<i16>().is_ok() {
+                                numeric_compatible_types.push(Type::Int16);
+                            }
+                            if text.parse::<i32>().is_ok() {
+                                numeric_compatible_types.push(Type::Int32);
+                            }
+                            if text.parse::<i64>().is_ok() {
+                                numeric_compatible_types.push(Type::Int64);
+                            }
+                            if text.parse::<u8>().is_ok() {
+                                numeric_compatible_types.push(Type::Uint8);
+                            }
+                            if text.parse::<u16>().is_ok() {
+                                numeric_compatible_types.push(Type::Uint16);
+                            }
+                            if text.parse::<u32>().is_ok() {
+                                numeric_compatible_types.push(Type::Uint32);
+                            }
+                            if text.parse::<u64>().is_ok() {
+                                numeric_compatible_types.push(Type::Uint64);
+                            }
+                        }
+
+                        let ty = if !numeric_compatible_types.is_empty() {
+                            let new_generic_id = type_environment.new_local_generic_id(identifier.span.clone());
+                            type_environment.set_generic_type(
+                                new_generic_id,
+                                Spanned::new(Type::NumericLiteral(numeric_compatible_types), identifier.span.clone())
+                            );
+                            Type::LocalGeneric(new_generic_id)
                         } else {
                             parse_primitive_type(text, current_scope_this_type)
-                        };
-                        
-                        let ty = match &ty {
-                            Type::IntegerLiteral(_) | Type::FloatLiteral(_) => {
-                                let new_generic_id = type_environment.new_local_generic_id(identifier.span.clone());
-                                type_environment.set_generic_type(
-                                    new_generic_id,
-                                    Spanned::new(ty, identifier.span.clone())
-                                );
-                                Type::LocalGeneric(new_generic_id)
-                            },
-                            _ => ty
                         };
 
                         type_environment.set_entity_type(
@@ -4358,6 +4397,28 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
     type_environment: &mut TypeEnvironment<'allocator, 'input>,
     allocator: &'allocator Bump,
 ) -> Result<(WithDefineInfo<Type>, bool), Either<NotFoundTypeElementError, DuplicatedElement>> {
+    let parent_type = if let Type::LocalGeneric(generic_id) = parent_type.value {
+        let parent_type_resolved = type_environment.resolve_generic_type(generic_id);
+        
+        match &parent_type_resolved.1.value {
+            Type::NumericLiteral(_) => {
+                let replace_type = Spanned::new(
+                    parent_type_resolved.1.value.get_numeric_compatible_optimal_type(),
+                    element_name.span.clone()
+                );
+                type_environment.set_generic_type(
+                    parent_type_resolved.0,
+                    replace_type.clone()
+                );
+
+                replace_type
+            },
+            _ => parent_type_resolved.1
+        }
+    } else {
+        parent_type
+    };
+
     let element_type = parent_type.value.get_element_type_with_replaced_generic(element_name.value);
 
     let mut pre_element_types = Vec::new_in(allocator);

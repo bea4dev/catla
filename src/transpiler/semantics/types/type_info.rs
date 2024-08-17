@@ -24,12 +24,11 @@ pub enum Type {
     Uint16,
     Uint32,
     Uint64,
-    IntegerLiteral(Arc<Type>),
     Float32,
     Float64,
-    FloatLiteral(Arc<Type>),
     Bool,
     Unit,
+    NumericLiteral(Vec<Type>),
     UserType {
         user_type_info: Arc<UserTypeInfo>,
         generics: Arc<Vec<Type>>,
@@ -537,39 +536,23 @@ impl Type {
     pub(crate) fn is_replaceable_with(&self, after: &Type) -> bool {
         match self {
             Type::Unknown | Type::Unreachable => true,
-            Type::IntegerLiteral(min_type) => min_type.is_compatible_numeric_type_with(after),
-            Type::FloatLiteral(min_type) => min_type.is_compatible_numeric_type_with(after),
+            Type::NumericLiteral(comaptible_types_1) => {
+                if let Type::NumericLiteral(compatible_types_2) = after {
+                    comaptible_types_1.iter().any(|ty| { compatible_types_2.contains(ty) })
+                } else {
+                    comaptible_types_1.contains(after)
+                }
+            }
             _ => false
         }
     }
-    
-    fn is_compatible_numeric_type_with(&self, other: &Type) -> bool {
-        let other = match other {
-            Type::IntegerLiteral(min_type) => min_type.as_ref(),
-            _ => other
-        };
-        
+
+    pub(crate) fn get_numeric_compatible_optimal_type(&self) -> Type {
         match self {
-            Type::Int8 => [Type::Int8, Type::Int16, Type::Int32, Type::Int64].contains(other),
-            Type::Int16 => [Type::Int16, Type::Int32, Type::Int64].contains(other),
-            Type::Int32 => [Type::Int32, Type::Int64].contains(other),
-            Type::Int64 => [Type::Int64].contains(other),
-            Type::Uint8 => {
-                [
-                    Type::Uint8, Type::Uint16, Type::Uint32, Type::Uint64,
-                    Type::Int8, Type::Int16, Type::Int32, Type::Int64
-                ].contains(other)
+            Type::NumericLiteral(compatible_types) => {
+                static OPTIMAL_TYPES: &[Type] = &[Type::Int32, Type::Int64, Type::Uint32, Type::Uint64, Type::Float32, Type::Float64];
+                compatible_types.iter().find(|&ty| { OPTIMAL_TYPES.contains(ty) }).unwrap().clone()
             },
-            Type::Uint16 => {
-                [
-                    Type::Uint16, Type::Uint32, Type::Uint64,
-                    Type::Int16, Type::Int32, Type::Int64
-                ].contains(other)
-            },
-            Type::Uint32 => [Type::Uint32, Type::Uint64, Type::Int32, Type::Int64].contains(other),
-            Type::Uint64 => [Type::Uint64, Type::Int64].contains(other),
-            Type::Float32 => [Type::Float32, Type::Float64].contains(other),
-            Type::Float64 => [Type::Float64].contains(other),
             _ => unreachable!()
         }
     }
@@ -847,12 +830,11 @@ impl ImplementsInfo {
             Type::Uint16 => ty == &Type::Uint16,
             Type::Uint32 => ty == &Type::Uint32,
             Type::Uint64 => ty == &Type::Uint64,
-            Type::IntegerLiteral(_) => ty == &Type::Int32,
             Type::Float32 => ty == &Type::Float32,
             Type::Float64 => ty == &Type::Float64,
-            Type::FloatLiteral(_) => ty == &Type::Float32,
             Type::Bool => ty == &Type::Bool,
             Type::Unit => ty == &Type::Unit,
+            Type::NumericLiteral(_) => ty == &self_type.get_numeric_compatible_optimal_type(),
             Type::UserType { user_type_info: self_user_type_info, generics: self_generics, generics_span: _ } => {
                 if let Type::UserType { user_type_info, generics, generics_span: _ } = ty {
                     if self_user_type_info != user_type_info {

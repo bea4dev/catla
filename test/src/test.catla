@@ -112,5 +112,4 @@ let array4 = new [for i => new TestClass { field: 0 }; 10]
 
 import std::operators::add
 
-let a: int = 100
-let b = a.add(100)
+let b = 100.0.add(100.0)

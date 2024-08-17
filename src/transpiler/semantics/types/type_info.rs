@@ -1,4 +1,4 @@
-use std::{mem::swap, ops::Range, sync::{Arc, Mutex, MutexGuard, PoisonError}};
+use std::{mem::swap, ops::Range, sync::{Arc, Mutex, MutexGuard, PoisonError}, time::Duration};
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
@@ -945,10 +945,19 @@ impl ImplementsInfo {
                     return true;
                 }
                 
+                let generics_before = vec![self_generic_type.clone()];
+                let generics_after = vec![ty.clone()];
+
                 for bound in self_generic_type.bounds.freeze_and_get().iter() {
+                    let replaced_bound_type = Type::get_type_with_replaced_generics(
+                        &bound.ty,
+                        &generics_before,
+                        &generics_after
+                    );
+
                     if !global_implements_info_set.is_implemented(
                         ty,
-                        &bound.ty,
+                        &replaced_bound_type,
                         type_environment,
                         current_scope_implements_info_set,
                         allow_unknown

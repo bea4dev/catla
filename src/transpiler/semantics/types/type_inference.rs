@@ -949,6 +949,44 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         }
     }
 
+    fn fix_numeric_literal_type(&mut self, ty: &Type, current_scope_this_type: &ScopeThisType, fix_span: &Range<usize>) {
+        match ty {
+            Type::NumericLiteral(_) => unreachable!(),
+            Type::UserType { user_type_info: _, generics, generics_span: _ } => {
+                for generic in generics.iter() {
+                    self.fix_numeric_literal_type(generic, current_scope_this_type, fix_span);
+                }
+            },
+            Type::Function { function_info: _, generics } => {
+                for generic in generics.iter() {
+                    self.fix_numeric_literal_type(generic, current_scope_this_type, fix_span);
+                }
+            },
+            Type::LocalGeneric(generic_id) => {
+                let resolved_type = self.resolve_generic_type(*generic_id);
+
+                if let Type::NumericLiteral(_) = &resolved_type.1.value {
+                    self.set_generic_type(
+                        resolved_type.0,
+                        Spanned::new(resolved_type.1.value.get_numeric_compatible_optimal_type(), fix_span.clone())
+                    );
+                }
+            },
+            Type::Array(base_type) => self.fix_numeric_literal_type(&base_type, current_scope_this_type, fix_span),
+            Type::Option(value_type) => self.fix_numeric_literal_type(&value_type, current_scope_this_type, fix_span),
+            Type::Result { value, error } => {
+                self.fix_numeric_literal_type(&value, current_scope_this_type, fix_span);
+                self.fix_numeric_literal_type(&error, current_scope_this_type, fix_span);
+            },
+            Type::This => {
+                if current_scope_this_type.ty != Type::This {
+                    self.fix_numeric_literal_type(&current_scope_this_type.ty, current_scope_this_type, fix_span);
+                }
+            },
+            _ => {}
+        }
+    }
+
     fn add_lazy_type_error_report<T: 'static + LazyTypeReport>(&mut self, report: T) {
         self.lazy_type_reports.push(Box::new(report));
     }
@@ -4514,25 +4552,11 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
     type_environment: &mut TypeEnvironment<'allocator, 'input>,
     allocator: &'allocator Bump,
 ) -> Result<(WithDefineInfo<Type>, bool), Either<NotFoundTypeElementError, DuplicatedElement>> {
+    type_environment.fix_numeric_literal_type(&parent_type.value, current_scope_this_type, &element_name.span);
+
     let parent_type = match parent_type.value {
         Type::LocalGeneric(generic_id) => {
-            let parent_type_resolved = type_environment.resolve_generic_type(generic_id);
-            
-            match &parent_type_resolved.1.value {
-                Type::NumericLiteral(_) => {
-                    let replace_type = Spanned::new(
-                        parent_type_resolved.1.value.get_numeric_compatible_optimal_type(),
-                        parent_type.span.clone()
-                    );
-                    type_environment.set_generic_type(
-                        parent_type_resolved.0,
-                        replace_type.clone()
-                    );
-
-                    replace_type
-                },
-                _ => parent_type_resolved.1
-            }
+            type_environment.resolve_generic_type(generic_id).1
         },
         Type::This => Spanned::new(current_scope_this_type.ty.clone(), parent_type.span.clone()),
         _ => parent_type

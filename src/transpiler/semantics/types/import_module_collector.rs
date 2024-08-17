@@ -151,8 +151,6 @@ fn collect_import_module_import(
             continue
         };
 
-        dbg!(&module_name);
-
         import_element_map.insert(EntityID::from(element), Spanned::new(module_name, ast.span.clone()));
     }
 }

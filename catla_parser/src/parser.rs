@@ -408,6 +408,15 @@ pub enum AddOrSubOpKind {
     Sub
 }
 
+impl AddOrSubOpKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AddOrSubOpKind::Add => "+",
+            AddOrSubOpKind::Sub => "-"
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MulOrDivExpression<'allocator, 'input> {
     pub left_expr: Factor<'allocator, 'input>,

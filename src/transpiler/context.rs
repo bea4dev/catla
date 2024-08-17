@@ -41,7 +41,7 @@ impl TranspileContext {
         })
     }
 
-    pub fn get_module_context(&self, module_name: &String) -> Option<Arc<TranspileModuleContext>> {
+    pub fn get_module_context(&self, module_name: &str) -> Option<Arc<TranspileModuleContext>> {
         self.module_context_map.lock().unwrap().get(module_name).cloned()
     }
 

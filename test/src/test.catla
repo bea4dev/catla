@@ -110,6 +110,24 @@ let array3 = new { 0, 10, 20 }
 let array4 = new [for i => new TestClass { field: 0 }; 10]
 
 
-import std::operators::add
+let b = 100.0 + 100.0
 
-let b = 100.0.add(100.0)
+
+import std::operators::add::Add
+
+struct Value<T> {
+    let value: T
+}
+
+implements<T> Add<T, T> for Value<T> where T: Add<T, T> {
+    override function add(let this, other: T) -> T {
+        let a = this
+        let a = this.value
+        let b = other
+        return b
+    }
+}
+
+let a = new Value { value: 100 }
+let b = new Value { value: 100 }
+let c = a + b.value

@@ -797,7 +797,7 @@ impl ImplementsInfo {
         }
 
         if let Type::LocalGeneric(generic_id) = ty {
-            let (_, ty) = type_environment.resolve_generic_type(*generic_id);
+            let (_z, ty) = type_environment.resolve_generic_type(*generic_id);
 
             return ImplementsInfo::contains_target_type(
                 self_type,

@@ -949,17 +949,17 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         }
     }
 
-    fn fix_numeric_literal_type(&mut self, ty: &Type, current_scope_this_type: &ScopeThisType, fix_span: &Range<usize>) {
+    pub(crate) fn fix_numeric_literal_type(&mut self, ty: &Type) {
         match ty {
             Type::NumericLiteral(_) => unreachable!(),
             Type::UserType { user_type_info: _, generics, generics_span: _ } => {
                 for generic in generics.iter() {
-                    self.fix_numeric_literal_type(generic, current_scope_this_type, fix_span);
+                    self.fix_numeric_literal_type(generic);
                 }
             },
             Type::Function { function_info: _, generics } => {
                 for generic in generics.iter() {
-                    self.fix_numeric_literal_type(generic, current_scope_this_type, fix_span);
+                    self.fix_numeric_literal_type(generic);
                 }
             },
             Type::LocalGeneric(generic_id) => {
@@ -968,20 +968,15 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 if let Type::NumericLiteral(_) = &resolved_type.1.value {
                     self.set_generic_type(
                         resolved_type.0,
-                        Spanned::new(resolved_type.1.value.get_numeric_compatible_optimal_type(), fix_span.clone())
+                        Spanned::new(resolved_type.1.value.get_numeric_compatible_optimal_type(), resolved_type.1.span.clone())
                     );
                 }
             },
-            Type::Array(base_type) => self.fix_numeric_literal_type(&base_type, current_scope_this_type, fix_span),
-            Type::Option(value_type) => self.fix_numeric_literal_type(&value_type, current_scope_this_type, fix_span),
+            Type::Array(base_type) => self.fix_numeric_literal_type(&base_type),
+            Type::Option(value_type) => self.fix_numeric_literal_type(&value_type),
             Type::Result { value, error } => {
-                self.fix_numeric_literal_type(&value, current_scope_this_type, fix_span);
-                self.fix_numeric_literal_type(&error, current_scope_this_type, fix_span);
-            },
-            Type::This => {
-                if current_scope_this_type.ty != Type::This {
-                    self.fix_numeric_literal_type(&current_scope_this_type.ty, current_scope_this_type, fix_span);
-                }
+                self.fix_numeric_literal_type(&value);
+                self.fix_numeric_literal_type(&error);
             },
             _ => {}
         }
@@ -1022,6 +1017,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     generic_define: generics_define,
                     scope_implements_info_set
                 } => {
+                    self.fix_numeric_literal_type(&ty.value);
+
                     let type_resolved = if let Type::LocalGeneric(generic_id) = &ty.value {
                         self.resolve_generic_type(*generic_id).1
                     } else {
@@ -1063,6 +1060,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     bounds,
                     scope_implements_info_set
                 } => {
+                    self.fix_numeric_literal_type(target_type);
+
                     let result = global_implements_info_set.is_satisfied(
                         target_type,
                         bounds,
@@ -3489,13 +3488,13 @@ fn type_inference_primary_left<'allocator, 'input>(
                 SimplePrimary::ThisKeyword(literal) => {
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
-                        Spanned::new(Type::This, literal.span.clone())
+                        Spanned::new(current_scope_this_type.ty.clone(), literal.span.clone())
                     );
                 },
                 SimplePrimary::LargeThisKeyword(literal) => {
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
-                        Spanned::new(Type::This, literal.span.clone())
+                        Spanned::new(current_scope_this_type.ty.clone(), literal.span.clone())
                     );
                 }
             }
@@ -4552,7 +4551,8 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
     type_environment: &mut TypeEnvironment<'allocator, 'input>,
     allocator: &'allocator Bump,
 ) -> Result<(WithDefineInfo<Type>, bool), Either<NotFoundTypeElementError, DuplicatedElement>> {
-    type_environment.fix_numeric_literal_type(&parent_type.value, current_scope_this_type, &element_name.span);
+
+    type_environment.fix_numeric_literal_type(&parent_type.value);
 
     let parent_type = match parent_type.value {
         Type::LocalGeneric(generic_id) => {

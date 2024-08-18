@@ -63,8 +63,8 @@ bnf_rules!{
     expression          ::= return_expression | closure | or_expr
     or_expr             ::= and_expr { "or" [ line_feed ] and_expr }
     and_expr            ::= equ_or_ine_expr { "and" [ line_feed ] equ_or_ine_expr }
-    equ_or_ine_expr     ::= les_or_gre_expr { ( "==" | "!=" ) [ line_feed ] les_or_gre_expr }
-    les_or_gre_expr     ::= add_or_sub_expr { ( "<" | ">" | "<=" | ">=" ) [ line_feed ] add_or_sub_expr }
+    equ_or_ine_expr     ::= les_or_gre_expr [ ( "==" | "!=" ) [ line_feed ] les_or_gre_expr ]
+    les_or_gre_expr     ::= add_or_sub_expr [ ( "<" | ">" | "<=" | ">=" ) [ line_feed ] add_or_sub_expr ]
     add_or_sub_expr     ::= mul_or_div_expr { ( "+" | "-" ) [ line_feed ] mul_or_div_expr }
     mul_or_div_expr     ::= factor { ( "*" | "/" ) [ line_feed ] factor }
     factor              ::= "-" [ line_feed ] primary | primary

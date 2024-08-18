@@ -1898,7 +1898,17 @@ pub(crate) fn get_base_type(
 
                 ty
             },
-            _ => parse_primitive_type(ast.path[0].value, current_scope_this_type)
+            _ => {
+                if let Some(auto_import_module_name) = context.context.auto_import.auto_import_elements.get(ast.path[0].value) {
+                    module_user_type_map.get(auto_import_module_name)
+                        .expect(format!("Not found auto import module : {}", auto_import_module_name).as_str())
+                        .get(ast.path[0].value)
+                        .expect(format!("Not found auto import element : {}", ast.path[0].value).as_str())
+                        .clone()
+                } else {
+                    parse_primitive_type(ast.path[0].value, current_scope_this_type)
+                }
+            }
         }
     };
 

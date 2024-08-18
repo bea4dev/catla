@@ -2755,11 +2755,17 @@ fn type_inference_add_or_sub_expression<'allocator, 'input>(
 
             let current = Spanned::new(EntityID::from(right_expr), right_expr.span.clone());
 
+            let operator_interface = match operator.value {
+                "+" => "Add",
+                "-" => "Sub",
+                _ => unreachable!()
+            };
+
             type_inference_operator(
                 previous.clone(),
                 Some(current.clone()),
                 EntityID::from(ast),
-                "Add",
+                operator_interface,
                 operator,
                 global_implements_info_set,
                 current_scope_this_type,
@@ -2825,10 +2831,11 @@ fn type_inference_mul_or_div_expression<'allocator, 'input>(
         context
     );
 
-    let mut results = Vec::new_in(allocator);
     let mut previous = Spanned::new(EntityID::from(&ast.left_expr), ast.left_expr.span.clone());
 
     for right_expr in ast.right_exprs.iter() {
+        let operator = right_expr.0.clone().map(|op| { op.as_str() });
+
         if let Ok(right_expr) = &right_expr.1 {
             type_inference_factor(
                 right_expr,
@@ -2854,25 +2861,35 @@ fn type_inference_mul_or_div_expression<'allocator, 'input>(
 
             let current = Spanned::new(EntityID::from(right_expr), right_expr.span.clone());
 
-            let result = type_environment.unify(
-                previous.clone(),
-                current.clone(),
-                current_scope_this_type
-            );
-            results.push(result);
+            let operator_interface = match operator.value {
+                "*" => "Mul",
+                "/" => "Div",
+                _ => unreachable!()
+            };
 
-            previous = current;
+            type_inference_operator(
+                previous.clone(),
+                Some(current.clone()),
+                EntityID::from(ast),
+                operator_interface,
+                operator,
+                global_implements_info_set,
+                current_scope_this_type,
+                current_scope_implements_info_set,
+                type_environment,
+                allocator,
+                errors,
+                context
+            );
+
+            previous = Spanned::new(EntityID::from(ast), ast.span.start..right_expr.span.end);
         }
     }
 
-    add_errors(results, type_environment);
-
-    if previous.value != EntityID::from(ast) {
-        type_environment.set_entity_id_equals(
-            previous.value,
-            EntityID::from(ast)
-        );
-    }
+    type_environment.set_entity_id_equals(
+        previous.value,
+        EntityID::from(ast)
+    );
 }
 
 fn type_inference_factor<'allocator, 'input>(
@@ -3411,52 +3428,61 @@ fn type_inference_primary_left<'allocator, 'input>(
                     } else {
                         let text = identifier.value;
 
-                        let mut numeric_compatible_types = Vec::new();
-
-                        if text.contains(".") {
-                            if text.parse::<f32>().is_ok() {
-                                numeric_compatible_types.push(Type::Float32);
-                            }
-                            if text.parse::<f64>().is_ok() {
-                                numeric_compatible_types.push(Type::Float64);
-                            }
+                        let ty = if let Some(auto_import_module_name) = context.context.auto_import.auto_import_elements.get(text) {
+                            module_user_type_map.get(auto_import_module_name)
+                                .expect(format!("Not found auto import module : {}", auto_import_module_name).as_str())
+                                .get(text)
+                                .expect(format!("Not found auto import element : {}", text).as_str())
+                                .clone()
                         } else {
-                            if text.parse::<i8>().is_ok() {
-                                numeric_compatible_types.push(Type::Int8);
-                            }
-                            if text.parse::<i16>().is_ok() {
-                                numeric_compatible_types.push(Type::Int16);
-                            }
-                            if text.parse::<i32>().is_ok() {
-                                numeric_compatible_types.push(Type::Int32);
-                            }
-                            if text.parse::<i64>().is_ok() {
-                                numeric_compatible_types.push(Type::Int64);
-                            }
-                            if text.parse::<u8>().is_ok() {
-                                numeric_compatible_types.push(Type::Uint8);
-                            }
-                            if text.parse::<u16>().is_ok() {
-                                numeric_compatible_types.push(Type::Uint16);
-                            }
-                            if text.parse::<u32>().is_ok() {
-                                numeric_compatible_types.push(Type::Uint32);
-                            }
-                            if text.parse::<u64>().is_ok() {
-                                numeric_compatible_types.push(Type::Uint64);
-                            }
-                        }
+                            let mut numeric_compatible_types = Vec::new();
 
-                        let ty = if !numeric_compatible_types.is_empty() {
-                            let new_generic_id = type_environment.new_local_generic_id(identifier.span.clone());
-                            type_environment.set_generic_type(
-                                new_generic_id,
-                                Spanned::new(Type::NumericLiteral(numeric_compatible_types), identifier.span.clone())
-                            );
-                            Type::LocalGeneric(new_generic_id)
-                        } else {
-                            parse_primitive_type(text, current_scope_this_type)
+                            if text.contains(".") {
+                                if text.parse::<f32>().is_ok() {
+                                    numeric_compatible_types.push(Type::Float32);
+                                }
+                                if text.parse::<f64>().is_ok() {
+                                    numeric_compatible_types.push(Type::Float64);
+                                }
+                            } else {
+                                if text.parse::<i8>().is_ok() {
+                                    numeric_compatible_types.push(Type::Int8);
+                                }
+                                if text.parse::<i16>().is_ok() {
+                                    numeric_compatible_types.push(Type::Int16);
+                                }
+                                if text.parse::<i32>().is_ok() {
+                                    numeric_compatible_types.push(Type::Int32);
+                                }
+                                if text.parse::<i64>().is_ok() {
+                                    numeric_compatible_types.push(Type::Int64);
+                                }
+                                if text.parse::<u8>().is_ok() {
+                                    numeric_compatible_types.push(Type::Uint8);
+                                }
+                                if text.parse::<u16>().is_ok() {
+                                    numeric_compatible_types.push(Type::Uint16);
+                                }
+                                if text.parse::<u32>().is_ok() {
+                                    numeric_compatible_types.push(Type::Uint32);
+                                }
+                                if text.parse::<u64>().is_ok() {
+                                    numeric_compatible_types.push(Type::Uint64);
+                                }
+                            }
+
+                            if !numeric_compatible_types.is_empty() {
+                                let new_generic_id = type_environment.new_local_generic_id(identifier.span.clone());
+                                type_environment.set_generic_type(
+                                    new_generic_id,
+                                    Spanned::new(Type::NumericLiteral(numeric_compatible_types), identifier.span.clone())
+                                );
+                                Type::LocalGeneric(new_generic_id)
+                            }  else {
+                                parse_primitive_type(text, current_scope_this_type)
+                            }
                         };
+                        
 
                         type_environment.set_entity_type(
                             EntityID::from(&simple.0),

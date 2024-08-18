@@ -433,6 +433,15 @@ pub enum MulOrDivOpKind {
     Div
 }
 
+impl MulOrDivOpKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MulOrDivOpKind::Mul => "*",
+            MulOrDivOpKind::Div => "/"
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub struct Factor<'allocator, 'input> {

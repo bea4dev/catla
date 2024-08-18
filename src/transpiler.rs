@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ariadne::Color;
 use async_recursion::async_recursion;
 use bumpalo::Bump;
-use catla_parser::parser::parse_source;
+use catla_parser::parser::{parse_source, Spanned};
 use error::SimpleError;
 use fxhash::FxHashMap;
 use semantics::types::type_info::{collect_duplicated_implementation_error, ScopeThisType, Type};
@@ -125,9 +125,19 @@ async fn transpile_module(
     let mut import_element_map = FxHashMap::default();
     collect_import_module_program(ast, &mut import_element_map, &name_resolved_map, &mut errors, &mut warnings, &module_context);
 
-    // start transpile imported modules
     let context = &module_context.context;
-    for module_name in import_element_map.values() {
+
+    let import_modules = import_element_map.values()
+        .cloned()
+        .chain(
+            context.auto_import.auto_import_modules.iter()
+                .filter(|&name| { name != &module_name })
+                .map(|name| { Spanned::new(name.clone(), 0..0) })
+        )
+        .collect::<Vec<_>>();
+
+    // start transpile imported modules
+    for module_name in import_modules.iter() {
         let new_module_context = TranspileContext::try_create_module_context(&module_context.context, &module_name.value);
 
         if let Some(new_module_context) = new_module_context {
@@ -164,7 +174,7 @@ async fn transpile_module(
     module_context.user_type_future.complete(user_type_map.clone()).await;
 
     let mut module_user_type_map = FxHashMap::default();
-    for module_name in import_element_map.values() {
+    for module_name in import_modules.iter() {
         let module_context = context.get_module_context(&module_name.value).unwrap();
         let user_type_map = module_context.user_type_future.get().await;
 
@@ -201,7 +211,7 @@ async fn transpile_module(
     let mut module_element_type_maps = FxHashMap::default();
     let mut merged_implements_infos = ImplementsInfoSet::new();
 
-    for module_name in import_element_map.values() {
+    for module_name in import_modules.iter() {
         let module_context = context.get_module_context(&module_name.value).unwrap();
         let module_element_type_map = module_context.module_element_type_future.get().await;
         let module_type_implements_infos = module_context.module_type_implements_infos.get().await;

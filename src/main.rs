@@ -2,7 +2,7 @@
 
 use std::{path::Path, thread, time::Duration};
 
-use transpiler::resource::DefaultSourceCodeProvider;
+use transpiler::{context::AutoImport, resource::DefaultSourceCodeProvider};
 
 use crate::transpiler::{transpile, context::{TranspileSettings, TranspileContext}};
 
@@ -22,7 +22,13 @@ fn main() {
     resource_provider.add_entry("std".to_string(), &Path::new("./std/src")).unwrap();
     resource_provider.add_entry("test".to_string(), &Path::new("./test/src")).unwrap();
 
-    let context = TranspileContext::new(settings, resource_provider);
+    let mut auto_import = AutoImport::new();
+    auto_import.add_module("std::operators::add");
+    auto_import.add_module("std::operators::sub");
+    auto_import.add_module("std::operators::mul");
+    auto_import.add_module("std::operators::div");
+
+    let context = TranspileContext::new(settings, auto_import, resource_provider);
     
     transpile("test::test".to_string(), context.clone()).unwrap();
 

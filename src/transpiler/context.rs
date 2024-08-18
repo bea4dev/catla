@@ -11,6 +11,7 @@ use super::{future::SharedManualFuture, resource::SourceCodeProvider, semantics:
 pub struct TranspileContext {
     pub settings: TranspileSettings,
     pub(crate) localized_text: LocalizedText,
+    pub(crate) auto_import: AutoImport,
     pub source_code_provider: Box<dyn SourceCodeProvider + Send + Sync>,
     pub module_context_map: Mutex<HashMap<String, Arc<TranspileModuleContext>>>,
     error_and_warnings: Mutex<HashMap<String, (Vec<TranspileError>, Vec<TranspileWarning>)>>,
@@ -21,6 +22,7 @@ impl TranspileContext {
     
     pub fn new(
         settings: TranspileSettings,
+        auto_import: AutoImport,
         source_code_provider: impl SourceCodeProvider + Send + Sync + 'static
     ) -> Arc<TranspileContext> {
 
@@ -34,6 +36,7 @@ impl TranspileContext {
         Arc::new(Self {
             settings,
             localized_text,
+            auto_import,
             source_code_provider: Box::new(source_code_provider),
             module_context_map: Mutex::new(HashMap::new()),
             error_and_warnings: Mutex::new(HashMap::new()),
@@ -103,6 +106,37 @@ impl TranspileContext {
 pub struct TranspileSettings {
     pub lang: String,
     pub num_threads: usize
+}
+
+
+pub struct AutoImport {
+    pub(crate) auto_import_modules: Vec<String>,
+    pub(crate) auto_import_elements: FxHashMap<String, String>
+}
+
+impl AutoImport {
+    
+    pub fn new() -> Self {
+        Self {
+            auto_import_modules: Default::default(),
+            auto_import_elements: Default::default()
+        }
+    }
+
+    pub fn add_module(&mut self, module_name: impl ToString) {
+        self.auto_import_modules.push(module_name.to_string());
+    }
+
+    pub fn add_element(&mut self, element_name: impl ToString, module_name: impl ToString) {
+        let element_name = element_name.to_string();
+
+        if self.auto_import_elements.contains_key(&element_name) {
+            panic!("duplicated element : {}", element_name);
+        }
+        
+        self.auto_import_elements.insert(element_name, module_name.to_string());
+    }
+
 }
 
 

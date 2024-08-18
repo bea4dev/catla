@@ -131,3 +131,7 @@ implements<T> Add<T, T> for Value<T> where T: Add<T, T> {
 let a = new Value { value: 100 }
 let b = new Value { value: 100 }
 let c = a + b.value
+
+let d = 100 - 100
+let d = 100 * 100
+let d = 100 / 100

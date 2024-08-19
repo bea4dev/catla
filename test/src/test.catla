@@ -136,3 +136,30 @@ let d = 100 - 100
 let d = 100 * 100
 let d = 100 / 100
 let d = 100 == 100
+
+
+interface TestInterface5: TestInterface6 {
+    function test5(let this) -> int {
+        return this.test6()
+    }
+}
+
+interface TestInterface6: TestInterface7 {
+    function test6(let this) -> int;
+}
+
+interface TestInterface7 {
+    function test7(let this) -> int;
+}
+
+function bbbb(t: TestInterface5) {
+    let a = t.test5()
+    let b = t.test6()
+    let c = t.test7()
+}
+
+function <T: TestInterface5> cccc(t: T) {
+    let d = t.test5()
+    let e = t.test6()
+    let f = t.test7()
+}

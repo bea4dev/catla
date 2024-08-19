@@ -23,10 +23,12 @@ fn main() {
     resource_provider.add_entry("test".to_string(), &Path::new("./test/src")).unwrap();
 
     let mut auto_import = AutoImport::new();
-    auto_import.add_module("std::operators::add");
-    auto_import.add_module("std::operators::sub");
-    auto_import.add_module("std::operators::mul");
-    auto_import.add_module("std::operators::div");
+    auto_import.add_module("std::operator::add");
+    auto_import.add_module("std::operator::sub");
+    auto_import.add_module("std::operator::mul");
+    auto_import.add_module("std::operator::div");
+    auto_import.add_module("std::compare::equal");
+    auto_import.add_module("std::compare::order");
 
     let context = TranspileContext::new(settings, auto_import, resource_provider);
     

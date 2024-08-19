@@ -1,0 +1,207 @@
+import std::compare::equal::PartialEqual
+
+
+interface PartialOrder<Other>: PartialEqual<Other> {
+
+    function greater_than(let this, other: Other) -> bool;
+
+    function greater_or_equals(let this, other: Other) -> bool;
+
+    function less_than(let this, other: Other) -> bool;
+
+    function less_or_equals(let this, other: Other) -> bool;
+
+}
+
+
+implements PartialOrder<uint8> for uint8 {
+
+    override function greater_than(let this, other: uint8) -> bool {
+        return this > other
+    }
+
+    override function greater_or_equals(let this, other: uint8) -> bool {
+        return this >= other
+    }
+
+    override function less_than(let this, other: uint8) -> bool {
+        return this < other
+    }
+
+    override function less_or_equals(let this, other: uint8) -> bool {
+        return this <= other
+    }
+}
+
+implements PartialOrder<uint16> for uint16 {
+
+    override function greater_than(let this, other: uint16) -> bool {
+        return this > other
+    }
+
+    override function greater_or_equals(let this, other: uint16) -> bool {
+        return this >= other
+    }
+
+    override function less_than(let this, other: uint16) -> bool {
+        return this < other
+    }
+
+    override function less_or_equals(let this, other: uint16) -> bool {
+        return this <= other
+    }
+}
+
+implements PartialOrder<uint32> for uint32 {
+
+    override function greater_than(let this, other: uint32) -> bool {
+        return this > other
+    }
+
+    override function greater_or_equals(let this, other: uint32) -> bool {
+        return this >= other
+    }
+
+    override function less_than(let this, other: uint32) -> bool {
+        return this < other
+    }
+
+    override function less_or_equals(let this, other: uint32) -> bool {
+        return this <= other
+    }
+}
+
+implements PartialOrder<uint64> for uint64 {
+
+    override function greater_than(let this, other: uint64) -> bool {
+        return this > other
+    }
+
+    override function greater_or_equals(let this, other: uint64) -> bool {
+        return this >= other
+    }
+
+    override function less_than(let this, other: uint64) -> bool {
+        return this < other
+    }
+
+    override function less_or_equals(let this, other: uint64) -> bool {
+        return this <= other
+    }
+}
+
+
+implements PartialOrder<int8> for int8 {
+
+    override function greater_than(let this, other: int8) -> bool {
+        return this > other
+    }
+
+    override function greater_or_equals(let this, other: int8) -> bool {
+        return this >= other
+    }
+
+    override function less_than(let this, other: int8) -> bool {
+        return this < other
+    }
+
+    override function less_or_equals(let this, other: int8) -> bool {
+        return this <= other
+    }
+}
+
+implements PartialOrder<int16> for int16 {
+
+    override function greater_than(let this, other: int16) -> bool {
+        return this > other
+    }
+
+    override function greater_or_equals(let this, other: int16) -> bool {
+        return this >= other
+    }
+
+    override function less_than(let this, other: int16) -> bool {
+        return this < other
+    }
+
+    override function less_or_equals(let this, other: int16) -> bool {
+        return this <= other
+    }
+}
+
+implements PartialOrder<int32> for int32 {
+
+    override function greater_than(let this, other: int32) -> bool {
+        return this > other
+    }
+
+    override function greater_or_equals(let this, other: int32) -> bool {
+        return this >= other
+    }
+
+    override function less_than(let this, other: int32) -> bool {
+        return this < other
+    }
+
+    override function less_or_equals(let this, other: int32) -> bool {
+        return this <= other
+    }
+}
+
+implements PartialOrder<int64> for int64 {
+
+    override function greater_than(let this, other: int64) -> bool {
+        return this > other
+    }
+
+    override function greater_or_equals(let this, other: int64) -> bool {
+        return this >= other
+    }
+
+    override function less_than(let this, other: int64) -> bool {
+        return this < other
+    }
+
+    override function less_or_equals(let this, other: int64) -> bool {
+        return this <= other
+    }
+}
+
+
+implements PartialOrder<float32> for float32 {
+
+    override function greater_than(let this, other: float32) -> bool {
+        return this > other
+    }
+
+    override function greater_or_equals(let this, other: float32) -> bool {
+        return this >= other
+    }
+
+    override function less_than(let this, other: float32) -> bool {
+        return this < other
+    }
+
+    override function less_or_equals(let this, other: float32) -> bool {
+        return this <= other
+    }
+}
+
+implements PartialOrder<float64> for float64 {
+
+    override function greater_than(let this, other: float64) -> bool {
+        return this > other
+    }
+
+    override function greater_or_equals(let this, other: float64) -> bool {
+        return this >= other
+    }
+
+    override function less_than(let this, other: float64) -> bool {
+        return this < other
+    }
+
+    override function less_or_equals(let this, other: float64) -> bool {
+        return this <= other
+    }
+}

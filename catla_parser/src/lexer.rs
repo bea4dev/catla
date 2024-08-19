@@ -146,7 +146,7 @@ static TOKENIZERS: &[Tokenizer] = &[
     Tokenizer::Keyword(TokenKind::Or, "or"),
     Tokenizer::Keyword(TokenKind::And, "and"),
     Tokenizer::Keyword(TokenKind::EqEqual, "=="),
-    Tokenizer::Keyword(TokenKind::NotEqual, "=/"),
+    Tokenizer::Keyword(TokenKind::NotEqual, "!="),
     Tokenizer::Keyword(TokenKind::GreaterThan, ">"),
     Tokenizer::Keyword(TokenKind::GreaterOrEq, ">="),
     Tokenizer::Keyword(TokenKind::LessThan, "<"),

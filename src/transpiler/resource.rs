@@ -2,7 +2,7 @@ use std::{collections::HashMap, fs::{read_dir, read_to_string}, path::Path, sync
 
 use fxhash::{FxHashMap, FxHashSet};
 
-use super::{future::SharedManualFuture, SourceCode};
+use super::SourceCode;
 
 
 pub trait SourceCodeProvider {

@@ -113,7 +113,7 @@ let array4 = new [for i => new TestClass { field: 0 }; 10]
 let b = 100.0 + 100.0
 
 
-import std::operators::add::Add
+import std::operator::add::Add
 
 struct Value<T> {
     let value: T
@@ -135,3 +135,4 @@ let c = a + b.value
 let d = 100 - 100
 let d = 100 * 100
 let d = 100 / 100
+let d = 100 == 100

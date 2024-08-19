@@ -6,62 +6,62 @@ interface Mul<Other, Out> {
 
 implements Mul<uint8, uint8> for uint8 {
     override function mul(let this, other: uint8) -> uint8 {
-        return this * other;
+        return this * other
     }
 }
 
 implements Mul<uint16, uint16> for uint16 {
     override function mul(let this, other: uint16) -> uint16 {
-        return this * other;
+        return this * other
     }
 }
 
 implements Mul<uint32, uint32> for uint32 {
     override function mul(let this, other: uint32) -> uint32 {
-        return this * other;
+        return this * other
     }
 }
 
 implements Mul<uint64, uint64> for uint64 {
     override function mul(let this, other: uint64) -> uint64 {
-        return this * other;
+        return this * other
     }
 }
 
 
 implements Mul<int8, int8> for int8 {
     override function mul(let this, other: int8) -> int8 {
-        return this * other;
+        return this * other
     }
 }
 
 implements Mul<int16, int16> for int16 {
     override function mul(let this, other: int16) -> int16 {
-        return this * other;
+        return this * other
     }
 }
 
 implements Mul<int32, int32> for int32 {
     override function mul(let this, other: int32) -> int32 {
-        return this * other;
+        return this * other
     }
 }
 
 implements Mul<int64, int64> for int64 {
     override function mul(let this, other: int64) -> int64 {
-        return this * other;
+        return this * other
     }
 }
 
 
 implements Mul<float32, float32> for float32 {
     override function mul(let this, other: float32) -> float32 {
-        return this * other;
+        return this * other
     }
 }
 
 implements Mul<float64, float64> for float64 {
     override function mul(let this, other: float64) -> float64 {
-        return this * other;
+        return this * other
     }
 }

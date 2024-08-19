@@ -33,7 +33,8 @@ fn parse_or_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
 
         skip(cursor, &[TokenKind::LineFeed]);
 
-        let right_expr = parse_and_expression(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+        let right_expr = parse_and_expression(cursor)
+            .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
         right_exprs.push((op_span, right_expr));
     }
 
@@ -43,7 +44,7 @@ fn parse_or_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
 fn parse_and_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<AndExpression<'allocator, 'input>> {
     let span = Span::start(cursor);
 
-    let left_expr = parse_eq_ne_expression(cursor)?;
+    let left_expr = parse_compare_expression(cursor)?;
 
     let mut right_exprs = Vec::new_in(cursor.allocator);
     loop {
@@ -57,39 +58,12 @@ fn parse_and_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
         skip(cursor, &[TokenKind::LineFeed]);
 
-        let right_expr = parse_eq_ne_expression(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+        let right_expr = parse_compare_expression(cursor)
+            .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
         right_exprs.push((op_span, right_expr));
     }
 
     return Some(AndExpression { left_expr, right_exprs, span: span.elapsed(cursor) });
-}
-
-fn parse_eq_ne_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<EQNEExpression<'allocator, 'input>> {
-    let span = Span::start(cursor);
-
-    let left_expr = parse_compare_expression(cursor)?;
-
-    let mut right_exprs = Vec::new_in(cursor.allocator);
-    loop {
-        let op_token = cursor.next();
-        let op_token_kind = op_token.get_kind();
-        let op_kind = match op_token_kind {
-            TokenKind::EqEqual  => EQNECompareOpKind::Equal,
-            TokenKind::NotEqual => EQNECompareOpKind::NotEqual,
-            _ => {
-                cursor.prev();
-                break;
-            }
-        };
-        let op = EQNECompareOp::new(op_kind, op_token.unwrap().span.clone());
-
-        skip(cursor, &[TokenKind::LineFeed]);
-
-        let right_expr = parse_compare_expression(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
-        right_exprs.push((op, right_expr));
-    }
-
-    return Some(EQNEExpression { left_expr, right_exprs, span: span.elapsed(cursor) });
 }
 
 fn parse_compare_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<CompareExpression<'allocator, 'input>> {
@@ -106,6 +80,8 @@ fn parse_compare_expression<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
             TokenKind::GreaterOrEq => CompareOpKind::GreaterOrEqual,
             TokenKind::LessThan    => CompareOpKind::LessThan,
             TokenKind::LessOrEq    => CompareOpKind::LessOrEqual,
+            TokenKind::EqEqual     => CompareOpKind::Equal,
+            TokenKind::NotEqual    => CompareOpKind::NotEqual,
             _ => {
                 cursor.prev();
                 break;
@@ -115,7 +91,8 @@ fn parse_compare_expression<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
 
         skip(cursor, &[TokenKind::LineFeed]);
 
-        let right_expr = parse_add_or_sub_expression(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+        let right_expr = parse_add_or_sub_expression(cursor)
+            .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
         right_exprs.push((op, right_expr));
     }
 
@@ -143,7 +120,8 @@ fn parse_add_or_sub_expression<'allocator, 'input>(cursor: &mut TokenCursor<'all
 
         skip(cursor, &[TokenKind::LineFeed]);
 
-        let right_expr = parse_mul_or_div_expression(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+        let right_expr = parse_mul_or_div_expression(cursor)
+            .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
         right_exprs.push((op, right_expr));
     }
     
@@ -171,7 +149,8 @@ fn parse_mul_or_div_expression<'allocator, 'input>(cursor: &mut TokenCursor<'all
 
         skip(cursor, &[TokenKind::LineFeed]);
 
-        let right_expr = parse_factor(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+        let right_expr = parse_factor(cursor)
+            .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
         right_exprs.push((op, right_expr));
     }
     
@@ -277,7 +256,8 @@ fn parse_if_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, '
 
     skip(cursor, &[TokenKind::LineFeed]);
 
-    let condition = parse_expression(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+    let condition = parse_expression(cursor)
+        .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
 
     skip(cursor, &[TokenKind::LineFeed]);
 
@@ -321,7 +301,8 @@ fn parse_loop_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
         return None;
     }
 
-    let block = parse_block(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+    let block = parse_block(cursor)
+        .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
 
     return Some(LoopExpression { block, span: span.elapsed(cursor) });
 }
@@ -368,7 +349,8 @@ fn parse_simple_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
             cursor.next();
 
-            let expression = parse_expression(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+            let expression = parse_expression(cursor).
+                ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
 
             let error_tokens = if cursor.next().get_kind() != TokenKind::ParenthesisRight {
                 cursor.prev();
@@ -644,7 +626,8 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
             skip(cursor, &[TokenKind::LineFeed]);
 
-            let expression = parse_expression(cursor).ok_or_else(|| { unexpected_token_error(&cursor.allocator, cursor.current()) });
+            let expression = parse_expression(cursor)
+                .ok_or_else(|| { unexpected_token_error(&cursor.allocator, cursor.current()) });
 
             skip(cursor, &[TokenKind::LineFeed]);
 

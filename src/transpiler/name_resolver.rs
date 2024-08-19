@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::Range};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
-use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause}};
+use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause}};
 use either::Either::{self, Left, Right};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -856,39 +856,6 @@ fn name_resolve_block<'allocator>(
 
 fn name_resolve_and_expression<'allocator>(
     ast: &'allocator AndExpression<'allocator, '_>,
-    environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
-    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
-    errors: &mut Vec<TranspileError>,
-    warnings: &mut Vec<TranspileWarning>,
-    allocator: &'allocator Bump
-) {
-    name_resolve_eqne_expression(
-        &ast.left_expr,
-        environment_id,
-        name_environments,
-        resolved_map,
-        errors,
-        warnings,
-        allocator
-    );
-    for right_expr in ast.right_exprs.iter() {
-        if let Ok(eqne_expression) = &right_expr.1 {
-            name_resolve_eqne_expression(
-                eqne_expression,
-                environment_id,
-                name_environments,
-                resolved_map,
-                errors,
-                warnings,
-                allocator
-            );
-        }
-    }
-}
-
-fn name_resolve_eqne_expression<'allocator>(
-    ast: &'allocator EQNEExpression<'allocator, '_>,
     environment_id: EntityID,
     name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,

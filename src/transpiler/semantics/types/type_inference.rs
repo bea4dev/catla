@@ -2,7 +2,7 @@ use std::{alloc::Allocator, ops::{Deref, Range}, sync::Arc};
 
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::{collections::CollectIn, Bump};
-use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, Closure, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, Closure, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum};
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -2292,7 +2292,9 @@ fn type_inference_operator<'allocator, 'input>(
     left_entity_id: Spanned<EntityID>,
     right_entity_id: Option<Spanned<EntityID>>,
     parent_temp_entity_id: EntityID,
-    std_operator_interface: &str,
+    operator_module: &str,
+    operator_interface: &str,
+    operator_method: &str,
     operator: Spanned<&str>,
     global_implements_info_set: &ImplementsInfoSet,
     current_scope_this_type: &ScopeThisType,
@@ -2302,16 +2304,14 @@ fn type_inference_operator<'allocator, 'input>(
     errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext
 ) {
-    let module_name = format!("std::operators::{}", std_operator_interface.to_ascii_lowercase());
-
     let previous_type = type_environment.resolve_entity_type(left_entity_id.value);
 
     let operator_function = get_element_type(
         previous_type.clone(),
-        Spanned::new(std_operator_interface.to_ascii_lowercase().as_str(), operator.span.clone()),
+        Spanned::new(operator_method, operator.span.clone()),
         |ty| {
             if let Type::UserType { user_type_info, generics: _, generics_span: _ } = ty {
-                user_type_info.module_name.as_str() == &module_name && user_type_info.name.value.as_str() == std_operator_interface
+                user_type_info.module_name.as_str() == operator_module && user_type_info.name.value.as_str() == operator_interface
             } else {
                 false
             }
@@ -2334,7 +2334,7 @@ fn type_inference_operator<'allocator, 'input>(
                         vec![
                             (operator.value.to_string(), Color::Yellow),
                             (type_environment.get_type_display_string(&previous_type.value), Color::Red),
-                            (format!("{}::{}", module_name, std_operator_interface), Color::Yellow)
+                            (format!("{}::{}", operator_module, operator_interface), Color::Yellow)
                         ],
                         vec![((context.module_name.clone(), left_entity_id.span.clone()), Color::Red)]
                     );
@@ -2418,101 +2418,6 @@ fn type_inference_and_expression<'allocator, 'input>(
 ) {
     force_be_expression |= !ast.right_exprs.is_empty();
 
-    type_inference_eqne_expression(
-        &ast.left_expr,
-        user_type_map,
-        import_element_map,
-        name_resolved_map,
-        module_user_type_map,
-        module_element_type_map,
-        module_element_type_maps,
-        generics_map,
-        module_entity_type_map,
-        global_implements_info_set,
-        current_scope_this_type,
-        current_scope_implements_info_set,
-        force_be_expression,
-        type_environment,
-        implicit_convert_map,
-        allocator,
-        errors,
-        warnings,
-        context
-    );
-
-    let mut results = Vec::new_in(allocator);
-    let mut previous = Spanned::new(EntityID::from(&ast.left_expr), ast.left_expr.span.clone());
-
-    for right_expr in ast.right_exprs.iter() {
-        if let Ok(right_expr) = &right_expr.1 {
-            type_inference_eqne_expression(
-                right_expr,
-                user_type_map,
-                import_element_map,
-                name_resolved_map,
-                module_user_type_map,
-                module_element_type_map,
-                module_element_type_maps,
-                generics_map,
-                module_entity_type_map,
-                global_implements_info_set,
-                current_scope_this_type,
-                current_scope_implements_info_set,
-                force_be_expression,
-                type_environment,
-                implicit_convert_map,
-                allocator,
-                errors,
-                warnings,
-                context
-            );
-            
-            let current = Spanned::new(EntityID::from(right_expr), right_expr.span.clone());
-
-            let result = type_environment.unify(
-                previous.clone(),
-                current.clone(),
-                current_scope_this_type
-            );
-            results.push(result);
-
-            previous = current;
-        }
-    }
-
-    add_errors(results, type_environment);
-
-    if previous.value != EntityID::from(ast) {
-        type_environment.set_entity_id_equals(
-            previous.value,
-            EntityID::from(ast)
-        );
-    }
-}
-
-fn type_inference_eqne_expression<'allocator, 'input>(
-    ast: &'allocator EQNEExpression<'allocator, 'input>,
-    user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
-    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
-    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
-    module_element_type_map: &FxHashMap<String, Type>,
-    module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
-    generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
-    module_entity_type_map: &FxHashMap<EntityID, Type>,
-    global_implements_info_set: &ImplementsInfoSet,
-    current_scope_this_type: &ScopeThisType,
-    current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-    mut force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
-    implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
-    allocator: &'allocator Bump,
-    errors: &mut Vec<TranspileError>,
-    warnings: &mut Vec<TranspileWarning>,
-    context: &TranspileModuleContext
-) {
-    force_be_expression |= !ast.right_exprs.is_empty();
-
     type_inference_compare_expression(
         &ast.left_expr,
         user_type_map,
@@ -2561,7 +2466,7 @@ fn type_inference_eqne_expression<'allocator, 'input>(
                 warnings,
                 context
             );
-
+            
             let current = Spanned::new(EntityID::from(right_expr), right_expr.span.clone());
 
             let result = type_environment.unify(
@@ -2630,10 +2535,11 @@ fn type_inference_compare_expression<'allocator, 'input>(
         context
     );
 
-    let mut results = Vec::new_in(allocator);
     let mut previous = Spanned::new(EntityID::from(&ast.left_expr), ast.left_expr.span.clone());
 
     for right_expr in ast.right_exprs.iter() {
+        let operator = right_expr.0.clone().map(|op| { op.as_str() });
+
         if let Ok(right_expr) = &right_expr.1 {
             type_inference_add_or_sub_expression(
                 right_expr,
@@ -2659,25 +2565,41 @@ fn type_inference_compare_expression<'allocator, 'input>(
 
             let current = Spanned::new(EntityID::from(right_expr), right_expr.span.clone());
 
-            let result = type_environment.unify(
-                previous.clone(),
-                current.clone(),
-                current_scope_this_type
-            );
-            results.push(result);
+            let (operator_module, operator_interface, operator_method) = match operator.value {
+                ">"  => ("std::compare::order", "PartialOrder", "greater_than"),
+                ">=" => ("std::compare::order", "PartialOrder", "greater_or_equals"),
+                "<"  => ("std::compare::order", "PartialOrder", "less_than"),
+                "<=" => ("std::compare::order", "PartialOrder", "less_or_equals"),
+                "==" => ("std::compare::equal", "PartialEqual", "equals"),
+                "!=" => ("std::compare::equal", "PartialEqual", "equals"),
+                _ => unreachable!()
+            };
 
-            previous = current;
+            type_inference_operator(
+                previous.clone(),
+                Some(current.clone()),
+                EntityID::from(ast),
+                operator_module,
+                operator_interface,
+                operator_method,
+                operator,
+                global_implements_info_set,
+                current_scope_this_type,
+                current_scope_implements_info_set,
+                type_environment,
+                allocator,
+                errors,
+                context
+            );
+
+            previous = Spanned::new(EntityID::from(ast), ast.span.start..right_expr.span.end);
         }
     }
 
-    add_errors(results, type_environment);
-
-    if previous.value != EntityID::from(ast) {
-        type_environment.set_entity_id_equals(
-            previous.value,
-            EntityID::from(ast)
-        );
-    }
+    type_environment.set_entity_id_equals(
+        previous.value,
+        EntityID::from(ast)
+    );
 }
 
 fn type_inference_add_or_sub_expression<'allocator, 'input>(
@@ -2755,9 +2677,9 @@ fn type_inference_add_or_sub_expression<'allocator, 'input>(
 
             let current = Spanned::new(EntityID::from(right_expr), right_expr.span.clone());
 
-            let operator_interface = match operator.value {
-                "+" => "Add",
-                "-" => "Sub",
+            let (operator_module, operator_interface, operator_method) = match operator.value {
+                "+" => ("std::operator::add", "Add", "add"),
+                "-" => ("std::operator::sub", "Sub", "sub"),
                 _ => unreachable!()
             };
 
@@ -2765,7 +2687,9 @@ fn type_inference_add_or_sub_expression<'allocator, 'input>(
                 previous.clone(),
                 Some(current.clone()),
                 EntityID::from(ast),
+                operator_module,
                 operator_interface,
+                operator_method,
                 operator,
                 global_implements_info_set,
                 current_scope_this_type,
@@ -2861,9 +2785,9 @@ fn type_inference_mul_or_div_expression<'allocator, 'input>(
 
             let current = Spanned::new(EntityID::from(right_expr), right_expr.span.clone());
 
-            let operator_interface = match operator.value {
-                "*" => "Mul",
-                "/" => "Div",
+            let (operator_module, operator_interface, operator_method) = match operator.value {
+                "*" => ("std::operator::mul", "Mul", "mul"),
+                "/" => ("std::operator::div", "Div", "div"),
                 _ => unreachable!()
             };
 
@@ -2871,7 +2795,9 @@ fn type_inference_mul_or_div_expression<'allocator, 'input>(
                 previous.clone(),
                 Some(current.clone()),
                 EntityID::from(ast),
+                operator_module,
                 operator_interface,
+                operator_method,
                 operator,
                 global_implements_info_set,
                 current_scope_this_type,

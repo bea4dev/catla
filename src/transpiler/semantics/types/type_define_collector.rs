@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, UserTypeKindEnum};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, UserTypeKindEnum};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -184,19 +184,6 @@ fn collect_user_type_expression(
 
 fn collect_user_type_and_expression(
     ast: &AndExpression,
-    user_type_map: &mut FxHashMap<String, Type>,
-    context: &TranspileModuleContext
-) {
-    collect_user_type_eqne_expression(&ast.left_expr, user_type_map, context);
-    for right_expr in ast.right_exprs.iter() {
-        if let Ok(right_expr) = &right_expr.1 {
-            collect_user_type_eqne_expression(right_expr, user_type_map, context);
-        }
-    }
-}
-
-fn collect_user_type_eqne_expression(
-    ast: &EQNEExpression,
     user_type_map: &mut FxHashMap<String, Type>,
     context: &TranspileModuleContext
 ) {

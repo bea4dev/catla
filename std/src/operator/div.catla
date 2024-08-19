@@ -6,62 +6,62 @@ interface Div<Other, Out> {
 
 implements Div<uint8, uint8> for uint8 {
     override function div(let this, other: uint8) -> uint8 {
-        return this / other;
+        return this / other
     }
 }
 
 implements Div<uint16, uint16> for uint16 {
     override function div(let this, other: uint16) -> uint16 {
-        return this / other;
+        return this / other
     }
 }
 
 implements Div<uint32, uint32> for uint32 {
     override function div(let this, other: uint32) -> uint32 {
-        return this / other;
+        return this / other
     }
 }
 
 implements Div<uint64, uint64> for uint64 {
     override function div(let this, other: uint64) -> uint64 {
-        return this / other;
+        return this / other
     }
 }
 
 
 implements Div<int8, int8> for int8 {
     override function div(let this, other: int8) -> int8 {
-        return this / other;
+        return this / other
     }
 }
 
 implements Div<int16, int16> for int16 {
     override function div(let this, other: int16) -> int16 {
-        return this / other;
+        return this / other
     }
 }
 
 implements Div<int32, int32> for int32 {
     override function div(let this, other: int32) -> int32 {
-        return this / other;
+        return this / other
     }
 }
 
 implements Div<int64, int64> for int64 {
     override function div(let this, other: int64) -> int64 {
-        return this / other;
+        return this / other
     }
 }
 
 
 implements Div<float32, float32> for float32 {
     override function div(let this, other: float32) -> float32 {
-        return this / other;
+        return this / other
     }
 }
 
 implements Div<float64, float64> for float64 {
     override function div(let this, other: float64) -> float64 {
-        return this / other;
+        return this / other
     }
 }

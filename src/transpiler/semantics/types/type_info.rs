@@ -1,4 +1,4 @@
-use std::{mem::swap, ops::Range, sync::{Arc, Mutex, MutexGuard, PoisonError}, time::Duration};
+use std::{mem::swap, ops::Range, sync::{Arc, Mutex, MutexGuard, PoisonError}};
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;

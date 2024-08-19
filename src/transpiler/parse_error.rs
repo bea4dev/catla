@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use bumpalo::Bump;
-use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FieldAssign, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause, WhereElement}};
+use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, Expression, ExpressionEnum, Factor, FieldAssign, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause, WhereElement}};
 use either::Either::{Right, Left, self};
 
 use self::{statement::{not_separated_statement_error_1, statement_attributes_without_define}, misc::{unexpected_token_error, Expected, UnexpectedTokens}};
@@ -460,26 +460,6 @@ fn collect_parse_error_expression_or_block(
 
 fn collect_parse_error_and_expression(
     ast: &AndExpression,
-    errors: &mut Vec<TranspileError>,
-    warnings: &mut Vec<TranspileWarning>,
-    context: &TranspileModuleContext
-) {
-    collect_parse_error_eqne_expression(&ast.left_expr, errors, warnings, context);
-    for expression in ast.right_exprs.iter() {
-        collect_parse_error_with_parse_result(
-            &expression.1,
-            collect_parse_error_eqne_expression,
-            Expected::Expression,
-            0013,
-            errors,
-            warnings,
-            context
-        );
-    }
-}
-
-fn collect_parse_error_eqne_expression(
-    ast: &EQNEExpression,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext

@@ -1,0 +1,86 @@
+
+interface PartialEqual<Other> {
+    function equals(let this, other: Other) -> bool;
+}
+
+interface Equal: PartialEqual<This> {}
+
+
+implements PartialEqual<uint8> for uint8 {
+    override function equals(let this, other: uint8) -> bool {
+        return this == other
+    }
+}
+
+implements PartialEqual<uint16> for uint16 {
+    override function equals(let this, other: uint16) -> bool {
+        return this == other
+    }
+}
+
+implements PartialEqual<uint32> for uint32 {
+    override function equals(let this, other: uint32) -> bool {
+        return this == other
+    }
+}
+
+implements PartialEqual<uint64> for uint64 {
+    override function equals(let this, other: uint64) -> bool {
+        return this == other
+    }
+}
+
+
+implements PartialEqual<int8> for int8 {
+    override function equals(let this, other: int8) -> bool {
+        return this == other
+    }
+}
+
+implements PartialEqual<int16> for int16 {
+    override function equals(let this, other: int16) -> bool {
+        return this == other
+    }
+}
+
+implements PartialEqual<int32> for int32 {
+    override function equals(let this, other: int32) -> bool {
+        return this == other
+    }
+}
+
+implements PartialEqual<int64> for int64 {
+    override function equals(let this, other: int64) -> bool {
+        return this == other
+    }
+}
+
+
+implements PartialEqual<float32> for float32 {
+    override function equals(let this, other: float32) -> bool {
+        return this == other
+    }
+}
+
+implements PartialEqual<float64> for float64 {
+    override function equals(let this, other: float64) -> bool {
+        return this == other
+    }
+}
+
+
+implements Equal for uint8 {}
+
+implements Equal for uint16 {}
+
+implements Equal for uint32 {}
+
+implements Equal for uint64 {}
+
+implements Equal for int8 {}
+
+implements Equal for int16 {}
+
+implements Equal for int32 {}
+
+implements Equal for int64 {}

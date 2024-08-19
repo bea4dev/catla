@@ -1,7 +1,7 @@
 use std::{mem, ops::DerefMut, sync::Arc};
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, TypeAttributeEnum, TypeInfo, UserTypeKindEnum, WhereClause};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, TypeAttributeEnum, TypeInfo, UserTypeKindEnum, WhereClause};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -162,7 +162,6 @@ pub(crate) fn collect_module_element_types_program(
                         module_element_type_map,
                         generics_map,
                         module_entity_type_map,
-                        implements_infos,
                         current_scope_this_type,
                         errors,
                         warnings,
@@ -277,7 +276,6 @@ pub(crate) fn collect_module_element_types_program(
                         module_element_type_map,
                         generics_map,
                         module_entity_type_map,
-                        implements_infos,
                         current_scope_this_type,
                         errors,
                         warnings,
@@ -695,7 +693,6 @@ fn get_function_type_and_name<'allocator>(
     module_element_type_map: &mut FxHashMap<String, Type>,
     generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
     module_entity_type_map: &mut FxHashMap<EntityID, Type>,
-    implements_infos: &mut ImplementsInfoSet,
     current_scope_this_type: &ScopeThisType,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1000,57 +997,6 @@ fn collect_module_element_types_expression(
 
 fn collect_module_element_types_and_expression(
     ast: &AndExpression,
-    user_type_map: &FxHashMap<String, Type>,
-    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
-    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
-    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
-    module_element_type_map: &mut FxHashMap<String, Type>,
-    generics_map: &mut FxHashMap<EntityID, Arc<GenericType>>,
-    module_entity_type_map: &mut FxHashMap<EntityID, Type>,
-    implements_infos: &mut ImplementsInfoSet,
-    current_scope_this_type: &ScopeThisType,
-    errors: &mut Vec<TranspileError>,
-    warnings: &mut Vec<TranspileWarning>,
-    context: &TranspileModuleContext
-) {
-    collect_module_element_types_eqne_expression(
-        &ast.left_expr,
-        user_type_map,
-        import_element_map,
-        name_resolved_map,
-        module_user_type_map,
-        module_element_type_map,
-        generics_map,
-        module_entity_type_map,
-        implements_infos,
-        current_scope_this_type,
-        errors,
-        warnings,
-        context
-    );
-    for right_expr in ast.right_exprs.iter() {
-        if let Ok(right_expr) = &right_expr.1 {
-            collect_module_element_types_eqne_expression(
-                right_expr,
-                user_type_map,
-                import_element_map,
-                name_resolved_map,
-                module_user_type_map,
-                module_element_type_map,
-                generics_map,
-                module_entity_type_map,
-                implements_infos,
-                current_scope_this_type,
-                errors,
-                warnings,
-                context
-            );
-        }
-    }
-}
-
-fn collect_module_element_types_eqne_expression(
-    ast: &EQNEExpression,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -1870,10 +1816,14 @@ pub(crate) fn get_base_type(
                         Type::Generic(generics_map.get(&resolved.define_info.entity_id).unwrap().clone())
                     },
                     DefineKind::Import => {
-                        let module_name = import_element_map.get(&resolved.define_info.entity_id).unwrap();
-                        let user_type_map = module_user_type_map.get(&module_name.value).unwrap();
-                        match user_type_map.get(ast.path[0].value) {
-                            Some(user_type) => user_type.clone(),
+                        match import_element_map.get(&resolved.define_info.entity_id) {
+                            Some(module_name) => {
+                                let user_type_map = module_user_type_map.get(&module_name.value).unwrap();
+                                match user_type_map.get(ast.path[0].value) {
+                                    Some(user_type) => user_type.clone(),
+                                    None => Type::Unknown
+                                }
+                            },
                             None => Type::Unknown
                         }
                     },

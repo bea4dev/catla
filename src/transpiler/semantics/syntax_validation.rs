@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum};
 use either::Either::{self, Left, Right};
 
 use crate::transpiler::{advice::{create_space_indent, get_column, Advice}, context::TranspileModuleContext, error::SimpleError, TranspileError, TranspileWarning};
@@ -265,20 +265,6 @@ fn validate_syntax_and_expression(
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>
 ) {
-    validate_syntax_eqne_expression(&ast.left_expr, context,errors, warnings);
-    for right_expr in ast.right_exprs.iter() {
-        if let Ok(eqne_expression) = &right_expr.1 {
-            validate_syntax_eqne_expression(eqne_expression, context,errors, warnings);
-        }
-    }
-}
-
-fn validate_syntax_eqne_expression(
-    ast: &EQNEExpression,
-    context: &TranspileModuleContext,
-    errors: &mut Vec<TranspileError>,
-    warnings: &mut Vec<TranspileWarning>
-) {
     validate_syntax_compare_expression(&ast.left_expr, context,errors, warnings);
     for right_expr in ast.right_exprs.iter() {
         if let Ok(compare_expression) = &right_expr.1 {
@@ -472,12 +458,7 @@ fn is_valid_format_for_array_init_expr(
         return false;
     }
 
-    let eq_expression = &and_expression.left_expr;
-    if !eq_expression.right_exprs.is_empty() {
-        return false;
-    }
-
-    let compare_expression = &eq_expression.left_expr;
+    let compare_expression = &and_expression.left_expr;
     if !compare_expression.right_exprs.is_empty() {
         return false;
     }
@@ -587,14 +568,12 @@ fn get_expression_span(expression: Expression) -> Range<usize> {
 fn is_valid_format_for_assignment(expression: Expression) -> bool {
     if let ExpressionEnum::OrExpression(or_expression) = expression {
         let and_expression = &or_expression.left_expr;
-        let eqne_expression = &and_expression.left_expr;
-        let compare_expression = &eqne_expression.left_expr;
+        let compare_expression = &and_expression.left_expr;
         let add_or_sub_expression = &compare_expression.left_expr;
         let mul_or_div_expression = &add_or_sub_expression.left_expr;
         let factor = &mul_or_div_expression.left_expr;
         or_expression.right_exprs.is_empty()
             && and_expression.right_exprs.is_empty()
-            && eqne_expression.right_exprs.is_empty()
             && compare_expression.right_exprs.is_empty()
             && add_or_sub_expression.right_exprs.is_empty()
             && mul_or_div_expression.right_exprs.is_empty()

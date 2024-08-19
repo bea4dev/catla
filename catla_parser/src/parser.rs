@@ -70,7 +70,6 @@ impl_ast!{
     ExpressionEnum<'_, '_>,
     OrExpression<'_, '_>,
     AndExpression<'_, '_>,
-    EQNEExpression<'_, '_>,
     CompareExpression<'_, '_>,
     AddOrSubExpression<'_, '_>,
     MulOrDivExpression<'_, '_>,
@@ -350,29 +349,13 @@ pub type OrOperatorSpan = Range<usize>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AndExpression<'allocator, 'input> {
-    pub left_expr: EQNEExpression<'allocator, 'input>,
-    pub right_exprs: Vec<(AndOperatorSpan, EQNEExpressionResult<'allocator, 'input>), &'allocator Bump>,
+    pub left_expr: CompareExpression<'allocator, 'input>,
+    pub right_exprs: Vec<(AndOperatorSpan, CompareExpressionResult<'allocator, 'input>), &'allocator Bump>,
     pub span: Range<usize>
 }
 
 pub type AndOperatorSpan = Range<usize>;
 pub type AndExpressionResult<'allocator, 'input> = ParseResult<'allocator, 'input, AndExpression<'allocator, 'input>>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EQNEExpression<'allocator, 'input> {
-    pub left_expr: CompareExpression<'allocator, 'input>,
-    pub right_exprs: Vec<(EQNECompareOp, CompareExpressionResult<'allocator, 'input>), &'allocator Bump>,
-    pub span: Range<usize>
-}
-
-pub type EQNECompareOp = Spanned<EQNECompareOpKind>;
-pub type EQNEExpressionResult<'allocator, 'input> = ParseResult<'allocator, 'input, EQNEExpression<'allocator, 'input>>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EQNECompareOpKind {
-    Equal,
-    NotEqual
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompareExpression<'allocator, 'input> {
@@ -389,7 +372,22 @@ pub enum CompareOpKind {
     GreaterThan,
     GreaterOrEqual,
     LessThan,
-    LessOrEqual
+    LessOrEqual,
+    Equal,
+    NotEqual
+}
+
+impl CompareOpKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CompareOpKind::GreaterThan    => ">",
+            CompareOpKind::GreaterOrEqual => ">=",
+            CompareOpKind::LessThan       => "<",
+            CompareOpKind::LessOrEqual    => "<=",
+            CompareOpKind::Equal          => "==",
+            CompareOpKind::NotEqual       => "!="
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

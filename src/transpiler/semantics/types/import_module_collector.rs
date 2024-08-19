@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
-use catla_parser::parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, EQNEExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, NewExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Import, MappingOperator, MappingOperatorKind, MulOrDivExpression, NewExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag};
 use either::Either;
 use fxhash::FxHashMap;
 
@@ -209,22 +209,6 @@ fn collect_import_module_expression(
 
 fn collect_import_module_and_expression(
     ast: &AndExpression,
-    import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
-    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
-    errors: &mut Vec<TranspileError>,
-    warnings: &mut Vec<TranspileWarning>,
-    context: &TranspileModuleContext
-) {
-    collect_import_module_eqne_expression(&ast.left_expr, import_element_map, name_resolved_map, errors,warnings, context);
-    for right_expr in ast.right_exprs.iter() {
-        if let Ok(right_expr) = &right_expr.1 {
-            collect_import_module_eqne_expression(right_expr, import_element_map, name_resolved_map, errors,warnings, context);
-        }
-    }
-}
-
-fn collect_import_module_eqne_expression(
-    ast: &EQNEExpression,
     import_element_map: &mut FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,

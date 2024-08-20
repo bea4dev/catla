@@ -1295,7 +1295,7 @@ impl ImplementsInfoSet {
 
             let resolved_ty = type_environment.resolve_type(ty);
 
-            // give answer to resolving generic variables
+            // give answer to resolve generic variables
             let result = type_environment.unify_type(
                 &impl_concrete,
                 &(0..0),

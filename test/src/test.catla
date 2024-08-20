@@ -138,28 +138,16 @@ let d = 100 / 100
 let d = 100 == 100
 
 
-interface TestInterface5: TestInterface6 {
-    function test5(let this) -> int {
-        return this.test6()
-    }
+interface TestInterface5<T5> {
+    function test5(let this) -> T5 ;
 }
 
-interface TestInterface6: TestInterface7 {
-    function test6(let this) -> int;
+struct I1<T> {}
+
+implements<T, I: I1<T>> TestInterface5<T> for I {
+    override function test5(let this) -> T {}
 }
 
-interface TestInterface7 {
-    function test7(let this) -> int;
-}
-
-function bbbb(t: TestInterface5) {
-    let a = t.test5()
-    let b = t.test6()
-    let c = t.test7()
-}
-
-function <T: TestInterface5> cccc(t: T) {
+function cccc(t: I1<int>) {
     let d = t.test5()
-    let e = t.test6()
-    let f = t.test7()
 }

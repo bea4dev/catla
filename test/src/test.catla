@@ -142,12 +142,19 @@ interface TestInterface5<T5> {
     function test5(let this) -> T5 ;
 }
 
-struct I1<T> {}
+interface I1<T> {}
 
 implements<T, I: I1<T>> TestInterface5<T> for I {
     override function test5(let this) -> T {}
 }
 
+implements I1<int> for int {
+    override function test5(let this) -> int {}
+}
+
 function cccc(t: I1<int>) {
     let d = t.test5()
+    let e = dddd(100)
 }
+
+function <T, I: I1<T>> dddd(i: I) -> T {}

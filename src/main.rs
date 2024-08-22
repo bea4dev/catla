@@ -11,6 +11,7 @@ pub mod localize;
 
 fn main() {
 
+    #[cfg(not(target_os = "windows"))]
     unsafe { backtrace_on_stack_overflow::enable() };
 
     let settings = TranspileSettings {

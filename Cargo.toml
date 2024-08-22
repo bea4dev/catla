@@ -26,4 +26,6 @@ allocator-api2 = "0.2.16"
 derivative = "2.2.0"
 typeid = "1.0.2"
 walkdir = "2.3"
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
 backtrace-on-stack-overflow = "0.3.0"

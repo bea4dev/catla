@@ -148,9 +148,7 @@ implements<T, I: I1<T>> TestInterface5<T> for I {
     override function test5(let this) -> T {}
 }
 
-implements I1<int> for int {
-    override function test5(let this) -> int {}
-}
+implements I1<int> for int {}
 
 function cccc(t: I1<int>) {
     let d = t.test5()

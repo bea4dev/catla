@@ -803,6 +803,7 @@ impl ImplementsInfo {
             return ImplementsInfo::contains_target_type(
                 self_type,
                 &ty.value,
+                unify_local_generic,
                 global_implements_info_set,
                 current_scope_implements_info_set,
                 type_environment,
@@ -815,6 +816,7 @@ impl ImplementsInfo {
             return ImplementsInfo::contains_target_type(
                 &self_type.value,
                 ty,
+                unify_local_generic,
                 global_implements_info_set,
                 current_scope_implements_info_set,
                 type_environment,
@@ -854,6 +856,7 @@ impl ImplementsInfo {
                             if !ImplementsInfo::contains_target_type(
                                 self_generic,
                                 generic,
+                                unify_local_generic,
                                 global_implements_info_set,
                                 current_scope_implements_info_set,
                                 type_environment,
@@ -867,6 +870,7 @@ impl ImplementsInfo {
                             if !ImplementsInfo::contains_target_type(
                                 &self_generic,
                                 generic,
+                                unify_local_generic,
                                 global_implements_info_set,
                                 current_scope_implements_info_set,
                                 type_environment,
@@ -887,6 +891,7 @@ impl ImplementsInfo {
                     if !ImplementsInfo::contains_target_type(
                         &self_function_info.return_type.value,
                         &function_info.return_type.value,
+                        unify_local_generic,
                         global_implements_info_set,
                         current_scope_implements_info_set,
                         type_environment,
@@ -906,6 +911,7 @@ impl ImplementsInfo {
                         if !ImplementsInfo::contains_target_type(
                             self_argument_type,
                             argument_type,
+                            unify_local_generic,
                             global_implements_info_set,
                             current_scope_implements_info_set,
                             type_environment,
@@ -928,6 +934,7 @@ impl ImplementsInfo {
                             if ImplementsInfo::contains_target_type(
                                 &self_bound.ty,
                                 &bound.ty,
+                                unify_local_generic,
                                 global_implements_info_set,
                                 current_scope_implements_info_set,
                                 type_environment,
@@ -959,6 +966,7 @@ impl ImplementsInfo {
                     if !global_implements_info_set.is_implemented(
                         ty,
                         &replaced_bound_type,
+                        unify_local_generic,
                         type_environment,
                         current_scope_implements_info_set,
                         allow_unknown
@@ -974,6 +982,7 @@ impl ImplementsInfo {
                     ImplementsInfo::contains_target_type(
                         &self_base_type,
                         &base_type,
+                        unify_local_generic,
                         global_implements_info_set,
                         current_scope_implements_info_set,
                         type_environment,
@@ -988,6 +997,7 @@ impl ImplementsInfo {
                     ImplementsInfo::contains_target_type(
                         &self_value_type,
                         &value_type,
+                        unify_local_generic,
                         global_implements_info_set,
                         current_scope_implements_info_set,
                         type_environment,
@@ -1002,6 +1012,7 @@ impl ImplementsInfo {
                     ImplementsInfo::contains_target_type(
                         &self_value,
                         &value,
+                        unify_local_generic,
                         global_implements_info_set,
                         current_scope_implements_info_set,
                         type_environment,
@@ -1009,6 +1020,7 @@ impl ImplementsInfo {
                     ) && ImplementsInfo::contains_target_type(
                         &self_error,
                         &error,
+                        unify_local_generic,
                         global_implements_info_set,
                         current_scope_implements_info_set,
                         type_environment,
@@ -1339,10 +1351,13 @@ impl ImplementsInfoSet {
             _ => self.implements_infos.values().chain(empty_map.values())
         };
 
+        let resolved_ty = type_environment.resolve_type(ty);
+
         for implements_info in iter {
             if !ImplementsInfo::contains_target_type(
                 &implements_info.concrete.value,
-                ty,
+                &resolved_ty,
+                false,
                 self,
                 current_scope_implements_info_set,
                 type_environment,
@@ -1359,26 +1374,24 @@ impl ImplementsInfoSet {
                 local_generics.push(Type::LocalGeneric(generic_id));
             }
 
-            let impl_concrete = Type::get_type_with_replaced_generics(
+            let temp_concrete = Type::get_type_with_replaced_generics(
                 &implements_info.concrete.value,
                 generics_define,
                 &local_generics
             );
-            let impl_interface = Type::get_type_with_replaced_generics(
+            let temp_interface = Type::get_type_with_replaced_generics(
                 &implements_info.interface.value,
                 generics_define,
                 &local_generics
             );
 
-            let resolved_ty = type_environment.resolve_type(ty);
-
             // give answer to resolve generic variables
             let result = type_environment.unify_type(
-                &impl_concrete,
+                &temp_concrete,
                 &(0..0),
                 &resolved_ty,
                 &(0..0),
-                &ScopeThisType::new(impl_concrete.clone()),
+                &ScopeThisType::new(temp_concrete.clone()),
                 true,
                 false
             );
@@ -1387,6 +1400,17 @@ impl ImplementsInfoSet {
                 continue;
             }
 
+
+            ImplementsInfo::contains_target_type(
+                &implements_info.concrete.value,
+                &temp_concrete,
+                true,
+                self,
+                current_scope_implements_info_set,
+                type_environment,
+                true
+            );
+            
             let where_bounds = Type::get_where_bounds_with_generics(
                 &implements_info.where_bounds,
                 generics_define,
@@ -1399,6 +1423,7 @@ impl ImplementsInfoSet {
                     if !self.is_implemented(
                         &where_bound.target_type.value,
                         &bound.ty,
+                        true,
                         type_environment,
                         current_scope_implements_info_set,
                         true
@@ -1412,8 +1437,8 @@ impl ImplementsInfoSet {
             if is_satisfied {
                 let implements_info = ImplementsInfo {
                     generics: implements_info.generics.clone(),
-                    interface: Spanned::new(impl_interface, implements_info.interface.span.clone()),
-                    concrete: Spanned::new(impl_concrete, implements_info.concrete.span.clone()),
+                    interface: Spanned::new(temp_interface, implements_info.interface.span.clone()),
+                    concrete: Spanned::new(temp_concrete, implements_info.concrete.span.clone()),
                     module_name: implements_info.module_name.clone(),
                     where_bounds: Arc::new(where_bounds),
                     element_types: implements_info.element_types.clone(),
@@ -1700,6 +1725,7 @@ impl OverrideElementsEnvironment {
                             if let Err(bounds) = global_implements_info_set.is_satisfied(
                                 &Type::Generic(replaced.clone()),
                                 &bounds_generics.bounds.freeze_and_get(),
+                                false,
                                 type_environment,
                                 &interface_element_implements_info_set,
                                 false
@@ -1717,6 +1743,7 @@ impl OverrideElementsEnvironment {
                             if let Err(bounds) = global_implements_info_set.is_satisfied(
                                 &where_bound.target_type.value,
                                 &where_bound.bounds,
+                                false,
                                 type_environment,
                                 &interface_element_implements_info_set,
                                 false

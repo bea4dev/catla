@@ -1017,23 +1017,24 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     generic_define: generics_define,
                     scope_implements_info_set
                 } => {
-                    self.fix_numeric_literal_type(&ty.value);
-
-                    let type_resolved = if let Type::LocalGeneric(generic_id) = &ty.value {
-                        self.resolve_generic_type(*generic_id).1
-                    } else {
-                        Spanned::new(self.resolve_type(&ty.value), ty.span.clone())
-                    };
+                    self.fix_numeric_literal_type(&ty.value); 
 
                     let result = global_implements_info_set.is_satisfied(
-                        &type_resolved.value,
+                        &ty.value,
                         &generics_define.bounds.freeze_and_get(),
+                        true,
                         self,
                         scope_implements_info_set,
                         false
                     );
         
                     if let Err(bounds) = result {
+                        let type_resolved = if let Type::LocalGeneric(generic_id) = &ty.value {
+                            self.resolve_generic_type(*generic_id).1
+                        } else {
+                            Spanned::new(self.resolve_type(&ty.value), ty.span.clone())
+                        };
+
                         let contains_unknown = bounds.iter().any(|bound| { bound.ty.contains_unknown() });
                         if type_resolved.value.contains_unknown() || contains_unknown {
                             continue;
@@ -1065,6 +1066,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     let result = global_implements_info_set.is_satisfied(
                         target_type,
                         bounds,
+                        true,
                         self,
                         scope_implements_info_set,
                         false
@@ -4634,16 +4636,34 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
 
             if let Some(where_bounds) = ty.get_where_bounds_with_replaced_generic() {
                 for where_bound in where_bounds.iter() {
+                    let resolved_target_type = type_environment.resolve_type(&where_bound.target_type.value);
+
                     for bound in where_bound.bounds.iter() {
+                        let resolved_bound_type = type_environment.resolve_type(&bound.ty);
+
                         if !global_implements_info_set.is_implemented(
-                            &where_bound.target_type.value,
-                            &bound.ty,
+                            &resolved_target_type,
+                            &resolved_bound_type,
+                            false,
                             type_environment,
                             current_scope_implements_info_set,
                             true
                         ) {
                             continue 'root;
                         }
+                    }
+                }
+
+                for where_bound in where_bounds.iter() {
+                    for bound in where_bound.bounds.iter() {
+                        global_implements_info_set.is_implemented(
+                            &where_bound.target_type.value,
+                            &bound.ty,
+                            true,
+                            type_environment,
+                            current_scope_implements_info_set,
+                            true
+                        );
                     }
                 }
             }

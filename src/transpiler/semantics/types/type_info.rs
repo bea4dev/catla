@@ -781,7 +781,6 @@ impl ImplementsInfo {
     fn contains_target_type(
         self_type: &Type,
         ty: &Type,
-        unify_local_generic: bool,
         global_implements_info_set: &ImplementsInfoSet,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         type_environment: &mut TypeEnvironment,
@@ -803,7 +802,6 @@ impl ImplementsInfo {
             return ImplementsInfo::contains_target_type(
                 self_type,
                 &ty.value,
-                unify_local_generic,
                 global_implements_info_set,
                 current_scope_implements_info_set,
                 type_environment,
@@ -816,7 +814,6 @@ impl ImplementsInfo {
             return ImplementsInfo::contains_target_type(
                 &self_type.value,
                 ty,
-                unify_local_generic,
                 global_implements_info_set,
                 current_scope_implements_info_set,
                 type_environment,
@@ -856,7 +853,6 @@ impl ImplementsInfo {
                             if !ImplementsInfo::contains_target_type(
                                 self_generic,
                                 generic,
-                                unify_local_generic,
                                 global_implements_info_set,
                                 current_scope_implements_info_set,
                                 type_environment,
@@ -870,7 +866,6 @@ impl ImplementsInfo {
                             if !ImplementsInfo::contains_target_type(
                                 &self_generic,
                                 generic,
-                                unify_local_generic,
                                 global_implements_info_set,
                                 current_scope_implements_info_set,
                                 type_environment,
@@ -891,7 +886,6 @@ impl ImplementsInfo {
                     if !ImplementsInfo::contains_target_type(
                         &self_function_info.return_type.value,
                         &function_info.return_type.value,
-                        unify_local_generic,
                         global_implements_info_set,
                         current_scope_implements_info_set,
                         type_environment,
@@ -911,7 +905,6 @@ impl ImplementsInfo {
                         if !ImplementsInfo::contains_target_type(
                             self_argument_type,
                             argument_type,
-                            unify_local_generic,
                             global_implements_info_set,
                             current_scope_implements_info_set,
                             type_environment,
@@ -934,7 +927,6 @@ impl ImplementsInfo {
                             if ImplementsInfo::contains_target_type(
                                 &self_bound.ty,
                                 &bound.ty,
-                                unify_local_generic,
                                 global_implements_info_set,
                                 current_scope_implements_info_set,
                                 type_environment,
@@ -966,7 +958,6 @@ impl ImplementsInfo {
                     if !global_implements_info_set.is_implemented(
                         ty,
                         &replaced_bound_type,
-                        unify_local_generic,
                         type_environment,
                         current_scope_implements_info_set,
                         allow_unknown
@@ -982,7 +973,6 @@ impl ImplementsInfo {
                     ImplementsInfo::contains_target_type(
                         &self_base_type,
                         &base_type,
-                        unify_local_generic,
                         global_implements_info_set,
                         current_scope_implements_info_set,
                         type_environment,
@@ -997,7 +987,6 @@ impl ImplementsInfo {
                     ImplementsInfo::contains_target_type(
                         &self_value_type,
                         &value_type,
-                        unify_local_generic,
                         global_implements_info_set,
                         current_scope_implements_info_set,
                         type_environment,
@@ -1012,7 +1001,6 @@ impl ImplementsInfo {
                     ImplementsInfo::contains_target_type(
                         &self_value,
                         &value,
-                        unify_local_generic,
                         global_implements_info_set,
                         current_scope_implements_info_set,
                         type_environment,
@@ -1020,7 +1008,6 @@ impl ImplementsInfo {
                     ) && ImplementsInfo::contains_target_type(
                         &self_error,
                         &error,
-                        unify_local_generic,
                         global_implements_info_set,
                         current_scope_implements_info_set,
                         type_environment,
@@ -1084,30 +1071,22 @@ impl ImplementsInfoSet {
         &self,
         ty: &Type,
         interface: &Type,
-        unify_local_generic: bool,
         type_environment: &mut TypeEnvironment,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allow_unknown: bool
     ) -> bool {
 
-        let resolved_ty = if let Type::LocalGeneric(generic_id) = ty {
-            type_environment.resolve_generic_type(*generic_id).1.value
-        } else {
-            ty.clone()
-        };
+        let resolved_ty = type_environment.resolve_type(ty);
 
-        if resolved_ty.is_interface() {
-            if ImplementsInfo::contains_target_type(
-                interface,
-                ty,
-                    unify_local_generic,
-                self,
-                current_scope_implements_info_set,
-                type_environment,
-                allow_unknown
-            ) {
-                return true;
-            }
+        if ImplementsInfo::contains_target_type(
+            interface,
+            &resolved_ty,
+            self,
+            current_scope_implements_info_set,
+            type_environment,
+            allow_unknown
+        ) {
+            return true;
         }
         
         if let Type::Generic(generic) = resolved_ty {
@@ -1115,7 +1094,6 @@ impl ImplementsInfoSet {
                 if ImplementsInfo::contains_target_type(
                     interface,
                     &bound.ty,
-                    unify_local_generic,
                     self,
                     current_scope_implements_info_set,
                     type_environment,
@@ -1134,116 +1112,74 @@ impl ImplementsInfoSet {
             _ => self.implements_infos.values().chain(empty_map.values())
         };
 
-        let resolved_ty = type_environment.resolve_type(ty);
-        let resolved_interface = type_environment.resolve_type(interface);
-
         for implements_info in iter {
-            // init generic variables
-            let generics_define = &implements_info.generics;
-            let mut local_generics = Vec::new();
-            for _ in 0..generics_define.len() {
-                let generic_id = type_environment.new_local_generic_id(0..0);
-                local_generics.push(Type::LocalGeneric(generic_id));
-            }
-
-            let temp_concrete = Type::get_type_with_replaced_generics(
+            if (ImplementsInfo::contains_target_type(
+                &implements_info.interface.value,
+                interface,
+                self,
+                current_scope_implements_info_set,
+                type_environment,
+                allow_unknown
+            ) || ImplementsInfo::contains_target_type(
+                interface,
+                &implements_info.interface.value,
+                self,
+                current_scope_implements_info_set,
+                type_environment,
+                allow_unknown
+            )) && ImplementsInfo::contains_target_type(
                 &implements_info.concrete.value,
-                generics_define,
-                &local_generics
-            );
-            let temp_interface = Type::get_type_with_replaced_generics(
-                &implements_info.interface.value,
-                generics_define,
-                &local_generics
-            );
-
-            // give answer to resolving generic variables
-            let result1 = type_environment.unify_type(
-                &temp_concrete,
-                &(0..0),
-                &resolved_ty,
-                &(0..0),
-                &ScopeThisType::new(Type::This),
-                allow_unknown,
-                false
-            );
-            let result2 = type_environment.unify_type(
-                &temp_interface,
-                &(0..0),
-                &resolved_interface,
-                &(0..0),
-                &ScopeThisType::new(Type::This),
-                allow_unknown,
-                false
-            );
-
-            if result1.is_err() || result2.is_err() {
-                continue;
-            }
-
-            if ImplementsInfo::contains_target_type(
-                &implements_info.interface.value,
-                &resolved_interface,
-                false,
+                ty,
                 self,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
             ) {
-                if unify_local_generic {
-                    ImplementsInfo::contains_target_type(
-                        &implements_info.interface.value,
-                        &temp_interface,
-                        true,
-                        self,
-                        current_scope_implements_info_set,
-                        type_environment,
-                        allow_unknown
-                    );
+                // init generic variables
+                let generics_define = &implements_info.generics;
+                let mut local_generics = Vec::new();
+                for _ in 0..generics_define.len() {
+                    let generic_id = type_environment.new_local_generic_id(0..0);
+                    local_generics.push(Type::LocalGeneric(generic_id));
                 }
-            } else if ImplementsInfo::contains_target_type(
-                &resolved_interface,
-                &implements_info.interface.value,
-                false,
-                self,
-                current_scope_implements_info_set,
-                type_environment,
-                allow_unknown
-            ) {
-                if unify_local_generic {
-                    ImplementsInfo::contains_target_type(
-                        &temp_interface,
-                        &implements_info.interface.value,
-                        true,
-                        self,
-                        current_scope_implements_info_set,
-                        type_environment,
-                        allow_unknown
-                    );
-                }
-            } else {
-                continue;
-            }
 
-            if ImplementsInfo::contains_target_type(
-                &implements_info.concrete.value,
-                &resolved_ty,
-                false,
-                self,
-                current_scope_implements_info_set,
-                type_environment,
-                allow_unknown
-            ) {
-                if unify_local_generic {
-                    ImplementsInfo::contains_target_type(
-                        &implements_info.concrete.value,
-                        &temp_concrete,
-                        true,
-                        self,
-                        current_scope_implements_info_set,
-                        type_environment,
-                        allow_unknown
-                    );
+                let impl_concrete = Type::get_type_with_replaced_generics(
+                    &implements_info.concrete.value,
+                    generics_define,
+                    &local_generics
+                );
+                let impl_interface = Type::get_type_with_replaced_generics(
+                    &implements_info.interface.value,
+                    generics_define,
+                    &local_generics
+                );
+
+                let resolved_ty = type_environment.resolve_type(ty);
+                let resolved_interface = type_environment.resolve_type(interface);
+
+                // give answer to resolving generic variables
+                let result1 = type_environment.unify_type(
+                    &impl_concrete,
+                    &(0..0),
+                    &resolved_ty,
+                    &(0..0),
+                    &ScopeThisType::new(Type::This),
+                    allow_unknown,
+                    false
+                );
+                let result2 = type_environment.unify_type(
+                    &impl_interface,
+                    &(0..0),
+                    &resolved_interface,
+                    &(0..0),
+                    &ScopeThisType::new(Type::This),
+                    allow_unknown,
+                    false
+                );
+
+                if result1.is_err() || result2.is_err() {
+                    // ignore
+                    continue;
                 }
 
                 let mut is_satisfied = true;
@@ -1263,7 +1199,6 @@ impl ImplementsInfoSet {
                         if !self.is_implemented(
                             &target_type,
                             &bound_type,
-                            unify_local_generic,
                             type_environment,
                             current_scope_implements_info_set,
                             allow_unknown
@@ -1275,28 +1210,6 @@ impl ImplementsInfoSet {
                 }
 
                 if is_satisfied {
-                    if unify_local_generic {
-                        type_environment.unify_type(
-                            ty,
-                            &(0..0),
-                            &temp_concrete,
-                            &(0..0),
-                            &ScopeThisType::new(Type::This),
-                            allow_unknown,
-                            false
-                        ).unwrap();
-
-                        type_environment.unify_type(
-                            interface,
-                            &(0..0),
-                            &temp_interface,
-                            &(0..0),
-                            &ScopeThisType::new(Type::This),
-                            allow_unknown,
-                            false
-                        ).unwrap();
-                    }
-
                     return true;
                 }
             }
@@ -1308,7 +1221,6 @@ impl ImplementsInfoSet {
         &self,
         ty: &Type,
         bounds: &Vec<Arc<Bound>>,
-        unify_local_generic: bool,
         type_environment: &mut TypeEnvironment,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allow_unknown: bool
@@ -1318,7 +1230,6 @@ impl ImplementsInfoSet {
             if !self.is_implemented(
                 ty,
                 &bound.ty,
-                unify_local_generic,
                 type_environment,
                 current_scope_implements_info_set,
                 allow_unknown
@@ -1351,13 +1262,10 @@ impl ImplementsInfoSet {
             _ => self.implements_infos.values().chain(empty_map.values())
         };
 
-        let resolved_ty = type_environment.resolve_type(ty);
-
         for implements_info in iter {
             if !ImplementsInfo::contains_target_type(
                 &implements_info.concrete.value,
-                &resolved_ty,
-                false,
+                ty,
                 self,
                 current_scope_implements_info_set,
                 type_environment,
@@ -1374,24 +1282,26 @@ impl ImplementsInfoSet {
                 local_generics.push(Type::LocalGeneric(generic_id));
             }
 
-            let temp_concrete = Type::get_type_with_replaced_generics(
+            let impl_concrete = Type::get_type_with_replaced_generics(
                 &implements_info.concrete.value,
                 generics_define,
                 &local_generics
             );
-            let temp_interface = Type::get_type_with_replaced_generics(
+            let impl_interface = Type::get_type_with_replaced_generics(
                 &implements_info.interface.value,
                 generics_define,
                 &local_generics
             );
 
+            let resolved_ty = type_environment.resolve_type(ty);
+
             // give answer to resolve generic variables
             let result = type_environment.unify_type(
-                &temp_concrete,
+                &impl_concrete,
                 &(0..0),
                 &resolved_ty,
                 &(0..0),
-                &ScopeThisType::new(temp_concrete.clone()),
+                &ScopeThisType::new(impl_concrete.clone()),
                 true,
                 false
             );
@@ -1400,17 +1310,6 @@ impl ImplementsInfoSet {
                 continue;
             }
 
-
-            ImplementsInfo::contains_target_type(
-                &implements_info.concrete.value,
-                &temp_concrete,
-                true,
-                self,
-                current_scope_implements_info_set,
-                type_environment,
-                true
-            );
-            
             let where_bounds = Type::get_where_bounds_with_generics(
                 &implements_info.where_bounds,
                 generics_define,
@@ -1423,7 +1322,6 @@ impl ImplementsInfoSet {
                     if !self.is_implemented(
                         &where_bound.target_type.value,
                         &bound.ty,
-                        true,
                         type_environment,
                         current_scope_implements_info_set,
                         true
@@ -1437,8 +1335,8 @@ impl ImplementsInfoSet {
             if is_satisfied {
                 let implements_info = ImplementsInfo {
                     generics: implements_info.generics.clone(),
-                    interface: Spanned::new(temp_interface, implements_info.interface.span.clone()),
-                    concrete: Spanned::new(temp_concrete, implements_info.concrete.span.clone()),
+                    interface: Spanned::new(impl_interface, implements_info.interface.span.clone()),
+                    concrete: Spanned::new(impl_concrete, implements_info.concrete.span.clone()),
                     module_name: implements_info.module_name.clone(),
                     where_bounds: Arc::new(where_bounds),
                     element_types: implements_info.element_types.clone(),
@@ -1725,7 +1623,6 @@ impl OverrideElementsEnvironment {
                             if let Err(bounds) = global_implements_info_set.is_satisfied(
                                 &Type::Generic(replaced.clone()),
                                 &bounds_generics.bounds.freeze_and_get(),
-                                false,
                                 type_environment,
                                 &interface_element_implements_info_set,
                                 false
@@ -1743,7 +1640,6 @@ impl OverrideElementsEnvironment {
                             if let Err(bounds) = global_implements_info_set.is_satisfied(
                                 &where_bound.target_type.value,
                                 &where_bound.bounds,
-                                false,
                                 type_environment,
                                 &interface_element_implements_info_set,
                                 false

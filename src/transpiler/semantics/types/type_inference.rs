@@ -31,12 +31,12 @@ const NOT_IMPLEMENTS_OPERATOR_INTERFACE: usize = 0072;
 
 
 pub(crate) struct TypeEnvironment<'allocator, 'input> {
-    entity_type_map: HashMap<EntityID, Either<EntityID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
-    generic_type_map: HashMap<LocalGenericID, Either<LocalGenericID, Spanned<Type>>, DefaultHashBuilder, &'allocator Bump>,
+    entity_type_map: HashMap<EntityID, Either<EntityID, WithDefineInfo<Type>>, DefaultHashBuilder, &'allocator Bump>,
+    generic_type_map: HashMap<LocalGenericID, Either<LocalGenericID, WithDefineInfo<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_bounds_checks: Vec<GenericsBoundCheck, &'allocator Bump>,
     impl_interface_generics_check: Vec<(Range<usize>, WithDefineInfo<Type>), &'allocator Bump>,
     implicit_convert_map: HashMap<EntityID, ImplicitConvertKind, DefaultHashBuilder, &'allocator Bump>,
-    return_type: Either<EntityID, Spanned<Type>>,
+    return_type: Either<EntityID, WithDefineInfo<Type>>,
     closures: Vec<&'allocator Closure<'allocator, 'input>, &'allocator Bump>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
     current_generics_id: usize
@@ -44,14 +44,7 @@ pub(crate) struct TypeEnvironment<'allocator, 'input> {
 
 impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
     
-    pub fn new(allocator: &'allocator Bump) -> TypeEnvironment<'allocator, 'input> {
-        Self::new_with_return_type(
-            Either::Right(Spanned::new(Type::Unit, 0..0)),
-            allocator
-        )
-    }
-
-    pub fn new_with_return_type(return_type: Either<EntityID, Spanned<Type>>, allocator: &'allocator Bump) -> TypeEnvironment<'allocator, 'input> {
+    pub fn new_with_return_type(return_type: Either<EntityID, WithDefineInfo<Type>>, allocator: &'allocator Bump) -> TypeEnvironment<'allocator, 'input> {
         Self {
             entity_type_map: HashMap::new_in(allocator),
             generic_type_map: HashMap::new_in(allocator),
@@ -67,14 +60,15 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
     pub fn new_local_generic_id(
         &mut self,
-        type_span: Range<usize>
+        type_span: Range<usize>,
+        module_name: Arc<String>,
     ) -> LocalGenericID {
         self.current_generics_id += 1;
         let generic_id = LocalGenericID(self.current_generics_id);
         
         self.generic_type_map.insert(
             generic_id,
-            Either::Right(Spanned::new(Type::Unknown, type_span.clone()))
+            Either::Right(WithDefineInfo { value: Type::Unknown, module_name, span: type_span })
         );
         
         generic_id
@@ -82,10 +76,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
     pub fn get_user_or_function_type_with_local_generic_id(
         &mut self,
-        ty: Spanned<Type>,
+        ty: WithDefineInfo<Type>,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         register_bounds_check: bool
-    ) -> Spanned<Type> {
+    ) -> WithDefineInfo<Type> {
         let generics_define = match &ty.value {
             Type::UserType { user_type_info, generics: _, generics_span: _ } => {
                 &user_type_info.generics_define
@@ -99,17 +93,28 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         let number_of_generics = generics_define.len();
         let mut generics = Vec::with_capacity(number_of_generics);
         for _ in 0..number_of_generics {
-            let generic_id = self.new_local_generic_id( ty.span.clone());
+            let generic_id = self.new_local_generic_id(
+                ty.span.clone(),
+                ty.module_name.clone()
+            );
             generics.push(Type::LocalGeneric(generic_id));
         }
         let generics = Arc::new(generics);
 
         let ty = match &ty.value {
             Type::UserType { user_type_info, generics: _, generics_span: _ } => {
-                Spanned::new(Type::UserType { user_type_info: user_type_info.clone(), generics: generics.clone(), generics_span: None }, ty.span)
+                WithDefineInfo {
+                    value: Type::UserType { user_type_info: user_type_info.clone(), generics: generics.clone(), generics_span: None },
+                    module_name: ty.module_name.clone(),
+                    span: ty.span.clone()
+                }
             },
             Type::Function { function_info, generics: _ } => {
-                Spanned::new(Type::Function { function_info: function_info.clone(), generics: generics.clone() }, ty.span)
+                WithDefineInfo {
+                    value: Type::Function { function_info: function_info.clone(), generics: generics.clone() },
+                    module_name: ty.module_name.clone(),
+                    span: ty.span.clone()
+                }
             },
             _ => unreachable!()
         };
@@ -138,7 +143,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         ty
     }
 
-    pub fn set_entity_type(&mut self, entity_id: EntityID, ty: Spanned<Type>) {
+    pub fn set_entity_type(&mut self, entity_id: EntityID, ty: WithDefineInfo<Type>) {
         let next_entity_id_or_type = match self.entity_type_map.get(&entity_id){
             Some(value) => value.clone(),
             None => {
@@ -155,7 +160,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         }
     }
 
-    pub fn set_generic_type(&mut self, generic_id: LocalGenericID, ty: Spanned<Type>) {
+    pub fn set_generic_type(&mut self, generic_id: LocalGenericID, ty: WithDefineInfo<Type>) {
         let next_generic_id_or_type = match self.generic_type_map.get(&generic_id) {
             Some(value) => value.clone(),
             None => {
@@ -181,8 +186,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
     pub fn unify(
         &mut self,
-        first_entity_id: Spanned<EntityID>,
-        second_entity_id: Spanned<EntityID>,
+        first_entity_id: WithDefineInfo<EntityID>,
+        second_entity_id: WithDefineInfo<EntityID>,
         current_scope_this_type: &ScopeThisType
     ) -> Result<(), TypeMismatchError> {
         
@@ -213,8 +218,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 return self.unify_type(
                     &first_resolved.1.value,
                     &first_resolved.1.span,
+                    &first_resolved.1.module_name,
                     &second_resolved.1.value,
                     &second_resolved.1.span,
+                    &second_resolved.1.module_name,
                     current_scope_this_type,
                     false,
                     true
@@ -227,8 +234,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
     pub fn unify_with_implicit_convert(
         &mut self,
-        first_entity_id: Spanned<EntityID>,
-        second_entity_id: Spanned<EntityID>,
+        first_entity_id: WithDefineInfo<EntityID>,
+        second_entity_id: WithDefineInfo<EntityID>,
         current_scope_this_type: &ScopeThisType,
         first_is_expr: bool
     ) -> Result<(), TypeMismatchError> {
@@ -260,8 +267,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 let result = self.unify_type_with_implicit_convert(
                     &first_resolved.1.value,
                     &first_resolved.1.span,
+                    &first_resolved.1.module_name,
                     &second_resolved.1.value,
                     &second_resolved.1.span,
+                    &second_resolved.1.module_name,
                     current_scope_this_type,
                     first_is_expr
                 )?;
@@ -284,8 +293,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         &mut self,
         first_type: &Type,
         first_span: &Range<usize>,
+        first_module_name: &Arc<String>,
         second_type: &Type,
         second_span: &Range<usize>,
+        second_module_name: &Arc<String>,
         current_scope_this_type: &ScopeThisType,
         first_is_expr: bool
     ) -> Result<Option<ImplicitConvertKind>, TypeMismatchError> {
@@ -330,8 +341,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 self.unify_type(
                     &new_first_type,
                     first_span,
+                    first_module_name,
                     second_type,
                     second_span,
+                    second_module_name,
                     current_scope_this_type,
                     false,
                     true
@@ -341,8 +354,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 self.unify_type(
                     first_type,
                     first_span,
+                    first_module_name,
                     second_type,
                     second_span,
+                    second_module_name,
                     current_scope_this_type,
                     false,
                     true
@@ -390,8 +405,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 self.unify_type(
                     first_type,
                     first_span,
+                    first_module_name,
                     &new_second_type,
                     second_span,
+                    second_module_name,
                     current_scope_this_type,
                     false,
                     true
@@ -401,8 +418,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 self.unify_type(
                     first_type,
                     first_span,
+                    first_module_name,
                     second_type,
                     second_span,
+                    second_module_name,
                     current_scope_this_type,
                     false,
                     true
@@ -414,7 +433,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
     pub fn unify_with_return_type(
         &mut self,
-        return_expr_entity_id: Spanned<EntityID>,
+        return_expr_entity_id: WithDefineInfo<EntityID>,
         current_scope_this_type: &ScopeThisType
     ) -> Result<(), TypeMismatchError> {
 
@@ -428,8 +447,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         let result = self.unify_type_with_implicit_convert(
             &return_type.value,
             &return_type.span,
+            &return_type.module_name,
             &return_expr_resolved.value,
             &return_expr_resolved.span,
+            &return_expr_resolved.module_name,
             current_scope_this_type,
             false
         );
@@ -448,8 +469,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         &mut self,
         first_type: &Type,
         first_span: &Range<usize>,
+        first_module_name: &Arc<String>,
         second_type: &Type,
         second_span: &Range<usize>,
+        second_module_name: &Arc<String>,
         current_scope_this_type: &ScopeThisType,
         allow_unknown: bool,
         is_first_layer: bool
@@ -458,16 +481,26 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         let result = self.unify_type_recursive(
             first_type,
             first_span,
+            first_module_name,
             second_type,
             second_span,
+            second_module_name,
             current_scope_this_type,
             allow_unknown,
             is_first_layer
         );
 
         result.map_err(|err| {
-            let first = Spanned::new(first_type.clone(), first_span.clone());
-            let second = Spanned::new(second_type.clone(), second_span.clone());
+            let first = WithDefineInfo {
+                value: first_type.clone(),
+                module_name: first_module_name.clone(),
+                span: first_span.clone()
+            };
+            let second = WithDefineInfo {
+                value: second_type.clone(),
+                module_name: second_module_name.clone(),
+                span: second_span.clone()
+            };
 
             //let remove = (first.clone(), second.clone());
             //err.retain(|element| { element != &remove });
@@ -485,12 +518,13 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         &mut self,
         first_type: &Type,
         first_span: &Range<usize>,
+        first_module_name: &Arc<String>,
         second_type: &Type,
         second_span: &Range<usize>,
-        current_scope_this_type: &ScopeThisType,
+        second_module_name: &Arc<String>,
         allow_unknown: bool,
         is_first_layer: bool
-    ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
+    ) -> Result<(), Vec<(WithDefineInfo<Type>, WithDefineInfo<Type>)>> {
 
         if allow_unknown {
             if first_type == &Type::Unknown || second_type == &Type::Unknown {
@@ -524,7 +558,11 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                             self.generic_type_map.insert(second_resolved_type.0, Either::Left(first_resolved_type.0));
                             self.generic_type_map.insert(
                                 first_resolved_type.0,
-                                Either::Right(Spanned::new(Type::NumericLiteral(and), second_resolved_type.1.span.clone()))
+                                Either::Right(WithDefineInfo {
+                                    value: Type::NumericLiteral(and),
+                                    module_name: second_resolved_type.1.module_name.clone(),
+                                    span: second_resolved_type.1.span.clone()
+                                })
                             );
 
                             return Ok(());
@@ -550,9 +588,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         return self.unify_type_recursive(
                             &first_resolved_type.1.value,
                             &first_resolved_type.1.span,
+                            &first_resolved_type.1.module_name,
                             &second_resolved_type.1.value,
                             &second_resolved_type.1.span,
-                            current_scope_this_type,
+                            &second_resolved_type.1.module_name,
                             allow_unknown,
                             is_first_layer
                         );
@@ -564,16 +603,21 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 if first_resolved_type.1.value.is_replaceable_with(second_type) {
                     self.set_generic_type(
                         *first_generic_id,
-                        Spanned::new(second_type.clone(), second_span.clone())
+                        WithDefineInfo {
+                            value: second_type.clone(),
+                            module_name: second_module_name.clone(),
+                            span: second_span.clone()
+                        }
                     );
                     return Ok(());
                 } else {
                     return self.unify_type_recursive(
                         &first_resolved_type.1.value,
                         &first_resolved_type.1.span,
+                        &first_resolved_type.1.module_name,
                         second_type,
                         second_span,
-                        current_scope_this_type,
+                        second_module_name, 
                         allow_unknown,
                         is_first_layer
                     );
@@ -586,16 +630,21 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 if second_resolved_type.1.value.is_replaceable_with(first_type) {
                     self.set_generic_type(
                         *second_generic_id,
-                        Spanned::new(first_type.clone(), first_span.clone())
+                        WithDefineInfo {
+                            value: first_type.clone(),
+                            module_name: first_module_name.clone(),
+                            span: first_span.clone()
+                        }
                     );
                     return Ok(());
                 } else {
                     return self.unify_type_recursive(
                         &first_type,
                         &first_span,
+                        &first_module_name,
                         &second_resolved_type.1.value,
                         &second_resolved_type.1.span,
-                        current_scope_this_type,
+                        &second_resolved_type.1.module_name,
                         allow_unknown,
                         is_first_layer
                     );
@@ -603,31 +652,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             }
         }
 
-
-        if &Type::This != &current_scope_this_type.ty {
-            if let Type::This = first_type {
-                return self.unify_type_recursive(
-                    &current_scope_this_type.ty,
-                    first_span,
-                    second_type,
-                    second_span,
-                    current_scope_this_type,
-                    allow_unknown,
-                    is_first_layer
-                );
-            }
-            if let Type::This = second_type {
-                return self.unify_type_recursive(
-                    first_type,
-                    first_span,
-                    &current_scope_this_type.ty,
-                    second_span,
-                    current_scope_this_type,
-                    allow_unknown,
-                    is_first_layer
-                );
-            }
-        }
 
         let eq = match first_type {
             Type::UserType { user_type_info: first_info, generics: first_generics, generics_span: _ } => {
@@ -638,7 +662,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                             first_span,
                             second_generics,
                             second_span,
-                            current_scope_this_type,
                             allow_unknown
                         )?;
                         true
@@ -813,7 +836,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         }
     }
 
-    pub fn resolve_entity_type(&self, entity_id: EntityID) -> Spanned<Type> {
+    pub fn resolve_entity_type(&self, entity_id: EntityID) -> WithDefineInfo<Type> {
         let mut current_id = entity_id;
         loop {
             let entity_id_or_type = self.entity_type_map.get(&current_id).unwrap();
@@ -824,7 +847,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         }
     }
 
-    pub fn resolve_entity_type_with_id(&self, entity_id: EntityID) -> (EntityID, Spanned<Type>) {
+    pub fn resolve_entity_type_with_id(&self, entity_id: EntityID) -> (EntityID, WithDefineInfo<Type>) {
         let mut current_id = entity_id;
         loop {
             let entity_id_or_type = self.entity_type_map.get(&current_id).unwrap();
@@ -835,7 +858,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         }
     }
 
-    pub fn resolve_generic_type(&self, generic_id: LocalGenericID) -> (LocalGenericID, Spanned<Type>) {
+    pub fn resolve_generic_type(&self, generic_id: LocalGenericID) -> (LocalGenericID, WithDefineInfo<Type>) {
         let mut current_id = generic_id;
         loop {
             let generic_id_or_type = self.generic_type_map.get(&current_id).unwrap();
@@ -5088,9 +5111,9 @@ pub(crate) trait LazyTypeReport {
 
 #[derive(Debug)]
 pub(crate) struct TypeMismatchError {
-    type_0: Spanned<Type>,
-    type_1: Spanned<Type>,
-    generics: Vec<(Spanned<Type>, Spanned<Type>)>
+    type_0: WithDefineInfo<Type>,
+    type_1: WithDefineInfo<Type>,
+    generics: Vec<(WithDefineInfo<Type>, WithDefineInfo<Type>)>
 }
 
 impl LazyTypeReport for TypeMismatchError {
@@ -5113,9 +5136,9 @@ impl LazyTypeReport for TypeMismatchError {
 }
 
 struct TypeMismatchErrorReport {
-    type_0: Spanned<String>,
-    type_1: Spanned<String>,
-    generics: Vec<(Spanned<String>, Spanned<String>)>
+    type_0: WithDefineInfo<String>,
+    type_1: WithDefineInfo<String>,
+    generics: Vec<(WithDefineInfo<String>, WithDefineInfo<String>)>
 }
 
 impl TranspileReport for TypeMismatchErrorReport {

@@ -186,9 +186,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
     pub fn unify(
         &mut self,
-        first_entity_id: WithDefineInfo<EntityID>,
-        second_entity_id: WithDefineInfo<EntityID>,
-        current_scope_this_type: &ScopeThisType
+        first_entity_id: Spanned<EntityID>,
+        second_entity_id: Spanned<EntityID>,
     ) -> Result<(), TypeMismatchError> {
         
         let mut first_resolved = self.resolve_entity_type_with_id(first_entity_id.value);
@@ -222,7 +221,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     &second_resolved.1.value,
                     &second_resolved.1.span,
                     &second_resolved.1.module_name,
-                    current_scope_this_type,
                     false,
                     true
                 );
@@ -234,9 +232,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
     pub fn unify_with_implicit_convert(
         &mut self,
-        first_entity_id: WithDefineInfo<EntityID>,
-        second_entity_id: WithDefineInfo<EntityID>,
-        current_scope_this_type: &ScopeThisType,
+        first_entity_id: Spanned<EntityID>,
+        second_entity_id: Spanned<EntityID>,
         first_is_expr: bool
     ) -> Result<(), TypeMismatchError> {
 
@@ -271,7 +268,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     &second_resolved.1.value,
                     &second_resolved.1.span,
                     &second_resolved.1.module_name,
-                    current_scope_this_type,
                     first_is_expr
                 )?;
         
@@ -297,7 +293,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         second_type: &Type,
         second_span: &Range<usize>,
         second_module_name: &Arc<String>,
-        current_scope_this_type: &ScopeThisType,
         first_is_expr: bool
     ) -> Result<Option<ImplicitConvertKind>, TypeMismatchError> {
         if first_is_expr {
@@ -345,7 +340,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     second_type,
                     second_span,
                     second_module_name,
-                    current_scope_this_type,
                     false,
                     true
                 )?;
@@ -358,7 +352,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     second_type,
                     second_span,
                     second_module_name,
-                    current_scope_this_type,
                     false,
                     true
                 )?;
@@ -409,7 +402,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     &new_second_type,
                     second_span,
                     second_module_name,
-                    current_scope_this_type,
                     false,
                     true
                 )?;
@@ -422,7 +414,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     second_type,
                     second_span,
                     second_module_name,
-                    current_scope_this_type,
                     false,
                     true
                 )?;
@@ -434,7 +425,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
     pub fn unify_with_return_type(
         &mut self,
         return_expr_entity_id: WithDefineInfo<EntityID>,
-        current_scope_this_type: &ScopeThisType
     ) -> Result<(), TypeMismatchError> {
 
         let return_type = match &self.return_type {
@@ -451,7 +441,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             &return_expr_resolved.value,
             &return_expr_resolved.span,
             &return_expr_resolved.module_name,
-            current_scope_this_type,
             false
         );
 
@@ -473,7 +462,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         second_type: &Type,
         second_span: &Range<usize>,
         second_module_name: &Arc<String>,
-        current_scope_this_type: &ScopeThisType,
         allow_unknown: bool,
         is_first_layer: bool
     ) -> Result<(), TypeMismatchError> {
@@ -485,7 +473,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             second_type,
             second_span,
             second_module_name,
-            current_scope_this_type,
             allow_unknown,
             is_first_layer
         );
@@ -660,8 +647,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         self.unify_generics(
                             first_generics,
                             first_span,
+                            first_module_name,
                             second_generics,
                             second_span,
+                            second_module_name,
                             allow_unknown
                         )?;
                         true
@@ -681,9 +670,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                             self.unify_type_recursive(
                                 first,
                                 first_span,
+                                first_module_name,
                                 second,
                                 second_span,
-                                current_scope_this_type,
+                                second_module_name,
                                 allow_unknown,
                                 false
                             )?;
@@ -692,9 +682,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         self.unify_type_recursive(
                             &first_function_info.return_type.value,
                             first_span,
+                            first_module_name,
                             &second_function_info.return_type.value,
                             second_span,
-                            current_scope_this_type,
+                            second_module_name,
                             allow_unknown,
                             false
                         )?;
@@ -702,9 +693,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         self.unify_generics(
                             first_generics,
                             first_span,
+                            first_module_name,
                             second_generics,
                             second_span,
-                            current_scope_this_type,
+                            second_module_name,
                             allow_unknown
                         )?;
                         true
@@ -719,9 +711,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     self.unify_type_recursive(
                         &first_type,
                         first_span,
+                        first_module_name,
                         &second_type,
                         second_span,
-                        current_scope_this_type,
+                        second_module_name,
                         allow_unknown,
                         false
                     )?;
@@ -735,9 +728,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     self.unify_type_recursive(
                         &first_type,
                         first_span,
+                        first_module_name,
                         &second_type,
                         second_span,
-                        current_scope_this_type,
+                        second_module_name,
                         allow_unknown,
                         false
                     )?;
@@ -751,18 +745,20 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     let value_type_result = self.unify_type_recursive(
                         &first_value_type,
                         first_span,
+                        first_module_name,
                         &second_value_type,
                         second_span,
-                        current_scope_this_type,
+                        second_module_name,
                         allow_unknown,
                         false
                     );
                     let error_type_result = self.unify_type_recursive(
                         &first_error_type,
                         first_span,
+                        first_module_name,
                         &second_error_type,
                         second_span,
-                        current_scope_this_type,
+                        second_module_name,
                         allow_unknown,
                         false
                     );
@@ -794,8 +790,16 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 Err(Vec::new())
             } else {
                 Err(vec![(
-                    Spanned::new(first_type.clone(), first_span.clone()),
-                    Spanned::new(second_type.clone(), second_span.clone())
+                    WithDefineInfo {
+                        value: first_type.clone(),
+                        module_name: first_module_name.clone(),
+                        span: first_span.clone()
+                    },
+                    WithDefineInfo {
+                        value: second_type.clone(),
+                        module_name: second_module_name.clone(),
+                        span: second_span.clone()
+                    }
                 )])
             }
         }
@@ -805,11 +809,12 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         &mut self,
         first_generics: &Vec<Type>,
         first_span: &Range<usize>,
+        first_module_name: &Arc<String>,
         second_generics: &Vec<Type>,
         second_span: &Range<usize>,
-        current_scope_this_type: &ScopeThisType,
+        second_module_name: &Arc<String>,
         allow_unknown: bool
-    ) -> Result<(), Vec<(Spanned<Type>, Spanned<Type>)>> {
+    ) -> Result<(), Vec<(WithDefineInfo<Type>, WithDefineInfo<Type>)>> {
 
         let mut errors = Vec::new();
 
@@ -817,9 +822,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             let result = self.unify_type_recursive(
                 &first_generics[i],
                 first_span,
+                first_module_name,
                 &second_generics[i],
                 second_span,
-                current_scope_this_type,
+                second_module_name,
                 allow_unknown,
                 false
             );
@@ -991,7 +997,11 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 if let Type::NumericLiteral(_) = &resolved_type.1.value {
                     self.set_generic_type(
                         resolved_type.0,
-                        Spanned::new(resolved_type.1.value.get_numeric_compatible_optimal_type(), resolved_type.1.span.clone())
+                        WithDefineInfo {
+                            value: resolved_type.1.value.get_numeric_compatible_optimal_type(),
+                            module_name: resolved_type.1.module_name.clone(),
+                            span: resolved_type.1.span.clone()
+                        }
                     );
                 }
             },
@@ -1045,7 +1055,11 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     let type_resolved = if let Type::LocalGeneric(generic_id) = &ty.value {
                         self.resolve_generic_type(*generic_id).1
                     } else {
-                        Spanned::new(self.resolve_type(&ty.value), ty.span.clone())
+                        WithDefineInfo {
+                            value: self.resolve_type(&ty.value),
+                            module_name: ty.module_name.clone(),
+                            span: ty.span.clone()
+                        }
                     };
 
                     let result = global_implements_info_set.is_satisfied(
@@ -1150,7 +1164,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         ty: Spanned<Type>,
         this_type: &Type,
         check_this_type_bounds: bool,
-        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>
+        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
+        context: &TranspileModuleContext
     ) {
         if let Type::UserType { user_type_info, generics, generics_span } = &ty.value {
             if user_type_info.generics_define.len() != generics.len() {
@@ -1180,7 +1195,11 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
                 self.generic_bounds_checks.push(GenericsBoundCheck::Generics {
                     type_span: ty.span.clone(),
-                    ty: Spanned::new(generic.clone(), generic_span.clone()),
+                    ty: WithDefineInfo {
+                        value:generic.clone(),
+                        module_name: context.module_name.clone(),
+                        span: generic_span.clone()
+                    },
                     generic_define: generic_define.clone(),
                     scope_implements_info_set: current_scope_implements_info_set.clone()
                 });
@@ -1189,7 +1208,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     Spanned::new(generic.clone(), generic_span),
                     this_type,
                     check_this_type_bounds,
-                    current_scope_implements_info_set
+                    current_scope_implements_info_set,
+                    context
                 );
             }
             
@@ -1227,7 +1247,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
     fn add_check_type_info_generics_define(
         &mut self,
         generics_define: &Vec<Arc<GenericType>>,
-        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>
+        current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
+        context: &TranspileModuleContext
     ) {
         for generic_define in generics_define.iter() {
             let target_type = Type::Generic(generic_define.clone());
@@ -1238,7 +1259,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     bound_type,
                     &target_type,
                     false,
-                    current_scope_implements_info_set
+                    current_scope_implements_info_set,
+                    context
                 );
             }
         }
@@ -1258,7 +1280,7 @@ pub(crate) enum ImplicitConvertKind {
 pub(crate) enum GenericsBoundCheck {
     Generics {
         type_span: Range<usize>,
-        ty: Spanned<Type>,
+        ty: WithDefineInfo<Type>,
         generic_define: Arc<GenericType>,
         scope_implements_info_set: Option<Arc<ImplementsInfoSet>>
     },
@@ -1356,7 +1378,6 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                     let result = type_environment.unify_with_implicit_convert(
                         Spanned::new(EntityID::from(assignment.left_expr), assignment.left_expr.get_span()),
                         Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
-                        current_scope_this_type,
                         false
                     );
                     add_error(result, type_environment);
@@ -1410,7 +1431,6 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                     let result = type_environment.unify(
                         Spanned::new(EntityID::from(exchange.left_expr), exchange.left_expr.get_span()),
                         Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
-                        current_scope_this_type
                     );
                     add_error(result, type_environment);
                 }
@@ -1457,7 +1477,11 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
 
                 if let Type::Function { function_info, generics: _ } = function_type {
                     let mut type_environment = TypeEnvironment::new_with_return_type(
-                        Either::Right(function_info.return_type.clone()),
+                        Either::Right(WithDefineInfo {
+                            value: function_info.return_type.value.clone(),
+                            module_name: context.module_name.clone(),
+                            span: function_info.return_type.span.clone()
+                        }),
                         allocator
                     );
 
@@ -1473,7 +1497,11 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
 
                         type_environment.set_entity_type(
                             EntityID::from(argument),
-                            Spanned::new(argument_type.clone(), argument.span.clone())
+                            WithDefineInfo {
+                                value: argument_type.clone(),
+                                module_name: context.module_name.clone(),
+                                span: argument.span.clone()
+                            }
                         );
                     }
 
@@ -1486,7 +1514,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                     
                     type_environment.add_check_type_info_generics_define(
                         &function_info.generics_define,
-                        &current_scope_implements_info_set
+                        &current_scope_implements_info_set,
+                        context
                     );
 
                     if let Some(semicolon_or_block) = &function_define.block_or_semicolon.value {
@@ -1549,7 +1578,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                 if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &user_type {
                     type_environment.add_check_type_info_generics_define(
                         &user_type_info.generics_define,
-                        &current_scope_implements_info_set
+                        &current_scope_implements_info_set,
+                        context
                     );
                 }
 
@@ -1594,7 +1624,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                             Spanned::new(super_type.clone(), type_info.get_span()),
                             &user_type,
                             true,
-                            &current_scope_implements_info_set
+                            &current_scope_implements_info_set,
+                            context
                         );
 
                         if let Ok(name) = &user_type_define.name {
@@ -1621,7 +1652,14 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                 }
 
                 if let Some(block) = &user_type_define.block.value {
-                    let mut type_environment = TypeEnvironment::new(allocator);
+                    let mut type_environment = TypeEnvironment::new_with_return_type(
+                        Either::Right(WithDefineInfo {
+                            value: Type::Unit,
+                            module_name: context.module_name.clone(),
+                            span: block.span.clone()
+                        }),
+                        allocator
+                    );
 
                     type_inference_program(
                         block.program,
@@ -1699,7 +1737,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                 if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &concrete {
                     type_environment.add_check_type_info_generics_define(
                         &user_type_info.generics_define,
-                        &current_scope_implements_info_set
+                        &current_scope_implements_info_set,
+                        context
                     );
                 }
                 
@@ -1708,7 +1747,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                         Spanned::new(concrete.clone(), target_type.get_span()),
                         &concrete,
                         true,
-                        &current_scope_implements_info_set
+                        &current_scope_implements_info_set,
+                        context
                     );
                 }
 
@@ -1723,7 +1763,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                         Spanned::new(interface.clone(), interface_info.get_span()),
                         &concrete,
                         true,
-                        &current_scope_implements_info_set
+                        &current_scope_implements_info_set,
+                        context
                     );
                 }
 
@@ -1849,7 +1890,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                         Spanned::new(tag_type.clone(), type_tag.span.clone()),
                         &Type::This,
                         false,
-                        current_scope_implements_info_set
+                        current_scope_implements_info_set,
+                        context
                     );
                 }
 
@@ -1860,7 +1902,11 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
 
                     type_environment.set_entity_type(
                         EntityID::from(variable_define),
-                        Spanned::new(tag_type.clone(), span)
+                        WithDefineInfo {
+                            value: tag_type.clone(),
+                            module_name: context.module_name.clone(),
+                            span
+                        }
                     );
                 }
 
@@ -1900,9 +1946,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                             }).flatten().unwrap_or(variable_define.span.clone());
 
                             let result = type_environment.unify_with_implicit_convert(
-                                Spanned::new(EntityID::from(*expression), expression.get_span()),
+                                Spanned::new(EntityID::from(*expression),expression.get_span()),
                                 Spanned::new(EntityID::from(variable_define), tag_type_span),
-                                current_scope_this_type,
                                 true
                             );
                             add_error(result, type_environment);
@@ -1926,7 +1971,11 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
             
             if let Type::Function { function_info, generics: _ } = closure_type.value {
                 let return_type_temp = type_environment.return_type.clone();
-                type_environment.return_type = Either::Right(function_info.return_type.clone());
+                type_environment.return_type = Either::Right(WithDefineInfo {
+                    value: function_info.return_type.value.clone(),
+                    module_name: context.module_name.clone(),
+                    span: function_info.return_type.span.clone()
+                });
                 
                 if let Some(block_or_expr) = &closure.expression_or_block.value {
                     match block_or_expr {
@@ -1957,8 +2006,11 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                             
                             if &expression_type.value != &Type::Unreachable {
                                 let result = type_environment.unify_with_return_type(
-                                    Spanned::new(EntityID::from(*expression), expression.get_span()),
-                                    current_scope_this_type
+                                    WithDefineInfo {
+                                        value: EntityID::from(*expression),
+                                        module_name: context.module_name.clone(),
+                                        span: expression.get_span()
+                                    }
                                 );
                                 add_error(result, type_environment);
                             }
@@ -1993,8 +2045,11 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                             
                             if &program_type.value != &Type::Unreachable {
                                 let result = type_environment.unify_with_return_type(
-                                    Spanned::new(EntityID::from(block.program), block.span.clone()),
-                                    current_scope_this_type
+                                    WithDefineInfo {
+                                        value: EntityID::from(block.program),
+                                        module_name: context.module_name.clone(),
+                                        span: block.span.clone()
+                                    },
                                 );
                                 add_error(result, type_environment);
                             }
@@ -2012,7 +2067,11 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
     if !has_type {
         type_environment.set_entity_type(
             EntityID::from(ast),
-            Spanned::new(Type::Unit, ast.span.clone())
+            WithDefineInfo {
+                value: Type::Unit,
+                module_name: context.module_name.clone(),
+                span: ast.span.clone()
+            }
         );
     }
     
@@ -5514,7 +5573,7 @@ impl TranspileReport for UnexpectedTypeErrorReport {
 
 struct BoundsNotSatisfiedError {
     span: Range<usize>,
-    type_name: Spanned<String>,
+    type_name: WithDefineInfo<String>,
     bounds_module_name: Arc<String>,
     not_satisfied_bounds: Vec<Spanned<String>>
 }

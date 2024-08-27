@@ -671,6 +671,10 @@ impl<T> WithDefineInfo<T> {
             span: self.span
         }
     }
+
+    pub fn to_spanned(self) -> Spanned<T> {
+        Spanned::new(self.value, self.span)
+    }
 }
 
 
@@ -1139,7 +1143,10 @@ impl ImplementsInfoSet {
                 let generics_define = &implements_info.generics;
                 let mut local_generics = Vec::new();
                 for _ in 0..generics_define.len() {
-                    let generic_id = type_environment.new_local_generic_id(0..0);
+                    let generic_id = type_environment.new_local_generic_id(
+                        0..0,
+                        implements_info.module_name.clone()
+                    );
                     local_generics.push(Type::LocalGeneric(generic_id));
                 }
 
@@ -1157,12 +1164,14 @@ impl ImplementsInfoSet {
                 let resolved_ty = type_environment.resolve_type(ty);
                 let resolved_interface = type_environment.resolve_type(interface);
 
-                // give answer to resolving generic variables
+                // give answer to resolve generic variables
                 let result1 = type_environment.unify_type(
                     &impl_concrete,
                     &(0..0),
+                    &implements_info.module_name,
                     &resolved_ty,
                     &(0..0),
+                    &implements_info.module_name,
                     &ScopeThisType::new(Type::This),
                     allow_unknown,
                     false
@@ -1170,8 +1179,10 @@ impl ImplementsInfoSet {
                 let result2 = type_environment.unify_type(
                     &impl_interface,
                     &(0..0),
+                    &implements_info.module_name,
                     &resolved_interface,
                     &(0..0),
+                    &implements_info.module_name,
                     &ScopeThisType::new(Type::This),
                     allow_unknown,
                     false
@@ -1278,7 +1289,10 @@ impl ImplementsInfoSet {
             let generics_define = &implements_info.generics;
             let mut local_generics = Vec::new();
             for _ in 0..generics_define.len() {
-                let generic_id = type_environment.new_local_generic_id( 0..0);
+                let generic_id = type_environment.new_local_generic_id(
+                    0..0,
+                    implements_info.module_name.clone()
+                );
                 local_generics.push(Type::LocalGeneric(generic_id));
             }
 
@@ -1299,8 +1313,10 @@ impl ImplementsInfoSet {
             let result = type_environment.unify_type(
                 &impl_concrete,
                 &(0..0),
+                &implements_info.module_name,
                 &resolved_ty,
                 &(0..0),
+                &implements_info.module_name,
                 &ScopeThisType::new(impl_concrete.clone()),
                 true,
                 false
@@ -1352,7 +1368,7 @@ impl ImplementsInfoSet {
 
         satisfied_implementations
     }
-
+/*
     pub(crate) fn type_inference_for_generic_bounds<'allocator>(
         &self,
         original_bound: &Type,
@@ -1518,7 +1534,7 @@ impl ImplementsInfoSet {
             }
         }
         false 
-    }
+    }*/
 
 }
 
@@ -1555,7 +1571,10 @@ pub(crate) fn collect_duplicated_implementation_error(
     }
     
     let temp_alloc = Bump::new();
-    let temp_env = TypeEnvironment::new(&temp_alloc);
+    let temp_env = TypeEnvironment::new_with_return_type(
+        Either::Left(EntityID::dummy()),
+        &temp_alloc
+    );
 
     for (duplicated, first_implementation) in duplicated {
         let duplicated_interface_name = temp_env.get_type_display_string(&duplicated.interface.value);
@@ -1753,8 +1772,10 @@ impl OverrideElementsEnvironment {
                 if type_environment.unify_type(
                     &interface_element_type.value,
                     &(0..0),
+                    &interface_element_type.module_name,
                     &element_type_replaced,
                     &(0..0),
+                    &interface_element_type.module_name,
                     &ScopeThisType::new(concrete_type.clone()),
                     true,
                     false

@@ -4,9 +4,10 @@ use ariadne::Color;
 use async_recursion::async_recursion;
 use bumpalo::Bump;
 use catla_parser::parser::{parse_source, Spanned};
+use either::Either;
 use error::SimpleError;
 use fxhash::FxHashMap;
-use semantics::types::type_info::{collect_duplicated_implementation_error, ScopeThisType, Type};
+use semantics::types::type_info::{collect_duplicated_implementation_error, ScopeThisType, Type, WithDefineInfo};
 
 use crate::transpiler::semantics::types::{import_module_collector::collect_import_module_program, type_inference::{type_inference_program, TypeEnvironment}, user_type_element_collector::collect_module_element_types_program};
 
@@ -225,7 +226,14 @@ async fn transpile_module(
     merged_implements_infos.merge(&implements_infos);
 
     let mut implicit_convert_map = FxHashMap::default();
-    let mut type_environment = TypeEnvironment::new(&allocator);
+    let mut type_environment = TypeEnvironment::new_with_return_type(
+        Either::Right(WithDefineInfo {
+            value: Type::Unit,
+            module_name: module_context.module_name.clone(),
+            span: ast.span.clone()
+        }),
+        &allocator
+    );
     type_inference_program(
         ast,
         &user_type_map,

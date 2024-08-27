@@ -11,6 +11,15 @@ pub struct EntityID {
     type_id: TypeId
 }
 
+impl EntityID {
+    pub fn dummy() -> Self {
+        Self {
+            ptr: 0,
+            type_id: TypeId::of::<EntityID>()
+        }
+    }
+}
+
 impl<T: Sized + AST> From<&T> for EntityID {
     fn from(value: &T) -> Self {
         Self {

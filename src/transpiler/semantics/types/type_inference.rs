@@ -39,12 +39,15 @@ pub(crate) struct TypeEnvironment<'allocator, 'input> {
     return_type: Either<EntityID, WithDefineInfo<Type>>,
     closures: Vec<&'allocator Closure<'allocator, 'input>, &'allocator Bump>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
-    current_generics_id: usize
+    current_generics_id: usize,
 }
 
 impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
     
-    pub fn new_with_return_type(return_type: Either<EntityID, WithDefineInfo<Type>>, allocator: &'allocator Bump) -> TypeEnvironment<'allocator, 'input> {
+    pub fn new_with_return_type(
+        return_type: Either<EntityID, WithDefineInfo<Type>>,
+        allocator: &'allocator Bump
+    ) -> TypeEnvironment<'allocator, 'input> {
         Self {
             entity_type_map: HashMap::new_in(allocator),
             generic_type_map: HashMap::new_in(allocator),
@@ -122,7 +125,11 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         for (generic_define, local_generic) in ty.value.get_generics_define_with_replaced_generic().unwrap().iter().zip(generics.iter()) {
             self.generic_bounds_checks.push(GenericsBoundCheck::Generics {
                 type_span: ty.span.clone(),
-                ty: Spanned::new(local_generic.clone(), ty.span.clone()),
+                ty: WithDefineInfo {
+                    value: local_generic.clone(),
+                    module_name: ty.module_name.clone(),
+                    span: ty.span.clone()
+                },
                 generic_define: generic_define.clone(),
                 scope_implements_info_set: current_scope_implements_info_set.clone()
             });
@@ -188,6 +195,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         &mut self,
         first_entity_id: Spanned<EntityID>,
         second_entity_id: Spanned<EntityID>,
+        current_scope_this_type: &ScopeThisType
     ) -> Result<(), TypeMismatchError> {
         
         let mut first_resolved = self.resolve_entity_type_with_id(first_entity_id.value);
@@ -221,6 +229,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     &second_resolved.1.value,
                     &second_resolved.1.span,
                     &second_resolved.1.module_name,
+                    current_scope_this_type,
                     false,
                     true
                 );
@@ -234,7 +243,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         &mut self,
         first_entity_id: Spanned<EntityID>,
         second_entity_id: Spanned<EntityID>,
-        first_is_expr: bool
+        first_is_expr: bool,
+        current_scope_this_type: &ScopeThisType
     ) -> Result<(), TypeMismatchError> {
 
         let mut first_resolved = self.resolve_entity_type_with_id(first_entity_id.value);
@@ -268,6 +278,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     &second_resolved.1.value,
                     &second_resolved.1.span,
                     &second_resolved.1.module_name,
+                    current_scope_this_type,
                     first_is_expr
                 )?;
         
@@ -293,6 +304,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         second_type: &Type,
         second_span: &Range<usize>,
         second_module_name: &Arc<String>,
+        current_scope_this_type: &ScopeThisType,
         first_is_expr: bool
     ) -> Result<Option<ImplicitConvertKind>, TypeMismatchError> {
         if first_is_expr {
@@ -340,6 +352,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     second_type,
                     second_span,
                     second_module_name,
+                    current_scope_this_type,
                     false,
                     true
                 )?;
@@ -352,6 +365,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     second_type,
                     second_span,
                     second_module_name,
+                    current_scope_this_type,
                     false,
                     true
                 )?;
@@ -402,6 +416,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     &new_second_type,
                     second_span,
                     second_module_name,
+                    current_scope_this_type,
                     false,
                     true
                 )?;
@@ -414,6 +429,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     second_type,
                     second_span,
                     second_module_name,
+                    current_scope_this_type,
                     false,
                     true
                 )?;
@@ -425,6 +441,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
     pub fn unify_with_return_type(
         &mut self,
         return_expr_entity_id: WithDefineInfo<EntityID>,
+        current_scope_this_type: &ScopeThisType
     ) -> Result<(), TypeMismatchError> {
 
         let return_type = match &self.return_type {
@@ -441,6 +458,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             &return_expr_resolved.value,
             &return_expr_resolved.span,
             &return_expr_resolved.module_name,
+            current_scope_this_type,
             false
         );
 
@@ -462,6 +480,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         second_type: &Type,
         second_span: &Range<usize>,
         second_module_name: &Arc<String>,
+        current_scope_this_type: &ScopeThisType,
         allow_unknown: bool,
         is_first_layer: bool
     ) -> Result<(), TypeMismatchError> {
@@ -473,6 +492,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             second_type,
             second_span,
             second_module_name,
+            current_scope_this_type,
             allow_unknown,
             is_first_layer
         );
@@ -509,6 +529,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         second_type: &Type,
         second_span: &Range<usize>,
         second_module_name: &Arc<String>,
+        current_scope_this_type: &ScopeThisType,
         allow_unknown: bool,
         is_first_layer: bool
     ) -> Result<(), Vec<(WithDefineInfo<Type>, WithDefineInfo<Type>)>> {
@@ -579,6 +600,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                             &second_resolved_type.1.value,
                             &second_resolved_type.1.span,
                             &second_resolved_type.1.module_name,
+                            current_scope_this_type,
                             allow_unknown,
                             is_first_layer
                         );
@@ -604,7 +626,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &first_resolved_type.1.module_name,
                         second_type,
                         second_span,
-                        second_module_name, 
+                        second_module_name,
+                        current_scope_this_type,
                         allow_unknown,
                         is_first_layer
                     );
@@ -632,10 +655,41 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &second_resolved_type.1.value,
                         &second_resolved_type.1.span,
                         &second_resolved_type.1.module_name,
+                        current_scope_this_type,
                         allow_unknown,
                         is_first_layer
                     );
                 }
+            }
+        }
+
+
+        if &Type::This != &current_scope_this_type.ty {
+            if let Type::This = first_type {
+                return self.unify_type_recursive(
+                    &current_scope_this_type.ty,
+                    first_span,
+                    first_module_name,
+                    second_type,
+                    second_span,
+                    second_module_name,
+                    current_scope_this_type,
+                    allow_unknown,
+                    is_first_layer
+                );
+            }
+            if let Type::This = second_type {
+                return self.unify_type_recursive(
+                    first_type,
+                    first_span,
+                    first_module_name,
+                    &current_scope_this_type.ty,
+                    second_span,
+                    second_module_name,
+                    current_scope_this_type,
+                    allow_unknown,
+                    is_first_layer
+                );
             }
         }
 
@@ -651,6 +705,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                             second_generics,
                             second_span,
                             second_module_name,
+                            current_scope_this_type,
                             allow_unknown
                         )?;
                         true
@@ -674,6 +729,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                                 second,
                                 second_span,
                                 second_module_name,
+                                current_scope_this_type,
                                 allow_unknown,
                                 false
                             )?;
@@ -686,6 +742,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                             &second_function_info.return_type.value,
                             second_span,
                             second_module_name,
+                            current_scope_this_type,
                             allow_unknown,
                             false
                         )?;
@@ -697,6 +754,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                             second_generics,
                             second_span,
                             second_module_name,
+                            current_scope_this_type,
                             allow_unknown
                         )?;
                         true
@@ -715,6 +773,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &second_type,
                         second_span,
                         second_module_name,
+                        current_scope_this_type,
                         allow_unknown,
                         false
                     )?;
@@ -732,6 +791,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &second_type,
                         second_span,
                         second_module_name,
+                        current_scope_this_type,
                         allow_unknown,
                         false
                     )?;
@@ -749,6 +809,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &second_value_type,
                         second_span,
                         second_module_name,
+                        current_scope_this_type,
                         allow_unknown,
                         false
                     );
@@ -759,6 +820,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &second_error_type,
                         second_span,
                         second_module_name,
+                        current_scope_this_type,
                         allow_unknown,
                         false
                     );
@@ -813,6 +875,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         second_generics: &Vec<Type>,
         second_span: &Range<usize>,
         second_module_name: &Arc<String>,
+        current_scope_this_type: &ScopeThisType,
         allow_unknown: bool
     ) -> Result<(), Vec<(WithDefineInfo<Type>, WithDefineInfo<Type>)>> {
 
@@ -826,6 +889,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 &second_generics[i],
                 second_span,
                 second_module_name,
+                current_scope_this_type,
                 allow_unknown,
                 false
             );
@@ -1378,7 +1442,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                     let result = type_environment.unify_with_implicit_convert(
                         Spanned::new(EntityID::from(assignment.left_expr), assignment.left_expr.get_span()),
                         Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
-                        false
+                        false,
+                        current_scope_this_type
                     );
                     add_error(result, type_environment);
                 }
@@ -1431,6 +1496,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                     let result = type_environment.unify(
                         Spanned::new(EntityID::from(exchange.left_expr), exchange.left_expr.get_span()),
                         Spanned::new(EntityID::from(*right_expr), right_expr.get_span()),
+                        current_scope_this_type
                     );
                     add_error(result, type_environment);
                 }
@@ -1948,7 +2014,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                             let result = type_environment.unify_with_implicit_convert(
                                 Spanned::new(EntityID::from(*expression),expression.get_span()),
                                 Spanned::new(EntityID::from(variable_define), tag_type_span),
-                                true
+                                true,
+                                current_scope_this_type
                             );
                             add_error(result, type_environment);
                         }
@@ -2010,7 +2077,8 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                                         value: EntityID::from(*expression),
                                         module_name: context.module_name.clone(),
                                         span: expression.get_span()
-                                    }
+                                    },
+                                    current_scope_this_type
                                 );
                                 add_error(result, type_environment);
                             }
@@ -2050,6 +2118,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                                         module_name: context.module_name.clone(),
                                         span: block.span.clone()
                                     },
+                                    current_scope_this_type
                                 );
                                 add_error(result, type_environment);
                             }
@@ -2117,7 +2186,8 @@ fn get_and_check_where_bounds_implements_info(
             where_bound.target_type.clone(),
             &where_bound.target_type.value,
             true,
-            &current_implements_info_set
+            &current_implements_info_set,
+            context
         );
 
         for bound in where_bound.bounds.iter() {
@@ -2125,7 +2195,8 @@ fn get_and_check_where_bounds_implements_info(
                 Spanned::new(bound.ty.clone(), bound.span.clone()),
                 &where_bound.target_type.value,
                 false,
-                &current_implements_info_set
+                &current_implements_info_set,
+                context
             );
 
             implements_infos.insert(bound.entity_id, ImplementsInfo {
@@ -2262,7 +2333,11 @@ fn type_inference_expression<'allocator, 'input>(
                 );
 
                 let result = type_environment.unify_with_return_type(
-                    Spanned::new(EntityID::from(expression), expression.get_span()),
+                    WithDefineInfo {
+                        value: EntityID::from(expression),
+                        module_name: context.module_name.clone(),
+                        span: expression.get_span()
+                    },
                     current_scope_this_type
                 );
                 add_error(result, type_environment);
@@ -2270,7 +2345,11 @@ fn type_inference_expression<'allocator, 'input>(
             
             type_environment.set_entity_type(
                 EntityID::from(ast),
-                Spanned::new(Type::Unreachable, return_expression.span.clone())
+                WithDefineInfo {
+                    value:  Type::Unreachable,
+                    module_name: context.module_name.clone(),
+                    span: return_expression.span.clone()
+                }
             );
         },
         ExpressionEnum::Closure(closure) => {
@@ -2278,11 +2357,20 @@ fn type_inference_expression<'allocator, 'input>(
             
             match &closure.arguments.arguments {
                 Either::Left(literal) => {
-                    let ty = Type::LocalGeneric(type_environment.new_local_generic_id(literal.span.clone()));
+                    let ty = Type::LocalGeneric(
+                        type_environment.new_local_generic_id(
+                            literal.span.clone(),
+                            context.module_name.clone()
+                        )
+                    );
                     
                     type_environment.set_entity_type(
                         EntityID::from(literal),
-                        Spanned::new(ty.clone(), literal.span.clone())
+                        WithDefineInfo {
+                            value: ty.clone(),
+                            module_name: context.module_name.clone(),
+                            span: literal.span.clone()
+                        }
                     );
                     
                     argument_types.push(ty);
@@ -2306,22 +2394,40 @@ fn type_inference_expression<'allocator, 'input>(
                                         context
                                     )
                                 } else {
-                                    Type::LocalGeneric(type_environment.new_local_generic_id(argument.span.clone()))
+                                    Type::LocalGeneric(
+                                        type_environment.new_local_generic_id(
+                                            argument.span.clone(),
+                                            context.module_name.clone()
+                                        )
+                                    )
                                 };
                                 
                                 type_environment.set_entity_type(
                                     EntityID::from(argument),
-                                    Spanned::new(ty.clone(), argument.span.clone())
+                                    WithDefineInfo {
+                                        value: ty.clone(),
+                                        module_name: context.module_name.clone(),
+                                        span: argument.span.clone()
+                                    }
                                 );
                                 
                                 argument_types.push(ty);
                             },
                             Either::Right(literal) => {
-                                let ty = Type::LocalGeneric(type_environment.new_local_generic_id(literal.span.clone()));
+                                let ty = Type::LocalGeneric(
+                                    type_environment.new_local_generic_id(
+                                        literal.span.clone(),
+                                        context.module_name.clone()
+                                    )
+                                );
                                 
                                 type_environment.set_entity_type(
                                     EntityID::from(literal),
-                                    Spanned::new(ty.clone(), literal.span.clone())
+                                    WithDefineInfo {
+                                        value: ty.clone(),
+                                        module_name: context.module_name.clone(),
+                                        span: literal.span.clone()
+                                    }
                                 );
                                 
                                 argument_types.push(ty);
@@ -2332,7 +2438,12 @@ fn type_inference_expression<'allocator, 'input>(
             }
             
             let return_type = Spanned::new(
-                Type::LocalGeneric(type_environment.new_local_generic_id(closure.span.clone())),
+                Type::LocalGeneric(
+                    type_environment.new_local_generic_id(
+                        closure.span.clone(),
+                        context.module_name.clone()
+                    )
+                ),
                 closure.span.clone()
             );
             
@@ -2353,10 +2464,11 @@ fn type_inference_expression<'allocator, 'input>(
                 where_bounds: FreezableMutex::new(Vec::new())
             };
             
-            let closure_type = Spanned::new(
-                Type::Function { function_info: Arc::new(function_info), generics: Arc::new(Vec::new()) },
-                closure.span.clone()
-            );
+            let closure_type = WithDefineInfo {
+                value: Type::Function { function_info: Arc::new(function_info), generics: Arc::new(Vec::new()) },
+                module_name: context.module_name.clone(),
+                span: closure.span.clone()
+            };
             
             type_environment.set_entity_type(EntityID::from(closure), closure_type);
             
@@ -2429,7 +2541,11 @@ fn type_inference_operator<'allocator, 'input>(
 
             type_environment.set_entity_type(
                 parent_temp_entity_id,
-                Spanned::new(Type::Unknown, operator.span.clone())
+                WithDefineInfo {
+                    value: Type::Unknown,
+                    module_name: context.module_name.clone(),
+                    span: operator.span.clone()
+                }
             );
             
             return;
@@ -2443,31 +2559,51 @@ fn type_inference_operator<'allocator, 'input>(
         if let Some(argument_type) = operator_function.value.get_indexed_element_type_with_replaced_generic(1) {
             type_environment.set_entity_type(
                 parent_temp_entity_id,
-                Spanned::new(argument_type, operator.span.clone())
+                WithDefineInfo {
+                    value: argument_type,
+                    module_name: context.module_name.clone(),
+                    span: operator.span.clone()
+                }
             );
 
             let result = type_environment.unify_with_implicit_convert(
                 Spanned::new(parent_temp_entity_id, right_entity_id.span.clone()),
                 right_entity_id.clone(),
-                current_scope_this_type,
-                true
+                true,
+                current_scope_this_type
             );
 
             add_error(result, type_environment);
 
             let return_type = operator_function.value.get_return_type_with_replaced_generic().unwrap();
 
-            Spanned::new(return_type, span)
+            WithDefineInfo {
+                value: return_type,
+                module_name: context.module_name.clone(),
+                span
+            }
         } else {
-            Spanned::new(Type::Unknown, span)
+            WithDefineInfo {
+                value: Type::Unknown,
+                module_name: context.module_name.clone(),
+                span
+            }
         }
     } else {
         let span = operator.span.start..left_entity_id.span.end;
 
         if let Some(return_type) = operator_function.value.get_return_type_with_replaced_generic() {
-            Spanned::new(return_type, span)
+            WithDefineInfo {
+                value: return_type,
+                module_name: context.module_name.clone(),
+                span
+            }
         } else {
-            Spanned::new(Type::Unknown, span)
+            WithDefineInfo {
+                value: Type::Unknown,
+                module_name: context.module_name.clone(),
+                span
+            }
         }
     };
 
@@ -2952,7 +3088,11 @@ fn type_inference_factor<'allocator, 'input>(
     } else {
         type_environment.set_entity_type(
             EntityID::from(ast),
-            Spanned::new(Type::Unknown, ast.span.clone())
+            WithDefineInfo {
+                value: Type::Unknown,
+                module_name: context.module_name.clone(),
+                span: ast.span.clone()
+            }
         );
     }
 }
@@ -3012,7 +3152,11 @@ fn type_inference_primary<'allocator, 'input>(
 
             type_environment.set_entity_type(
                 EntityID::from(ast),
-                Spanned::new(Type::Unknown, ast.span.clone())
+                WithDefineInfo {
+                    value: Type::Unknown,
+                    module_name: context.module_name.clone(),
+                    span: ast.span.clone()
+                }
             );
 
             return;
@@ -3036,7 +3180,11 @@ fn type_inference_primary<'allocator, 'input>(
 
             type_environment.set_entity_type(
                 EntityID::from(ast),
-                Spanned::new(Type::Unknown, ast.span.clone())
+                WithDefineInfo {
+                    value: Type::Unknown,
+                    module_name: context.module_name.clone(),
+                    span: ast.span.clone()
+                }
             );
 
             return;
@@ -3074,7 +3222,11 @@ fn type_inference_primary<'allocator, 'input>(
             };
             
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
-                Spanned::new(ty, second_expr.0.span.clone()),
+                WithDefineInfo {
+                    value: ty,
+                    module_name: context.module_name.clone(),
+                    span: second_expr.0.span.clone()
+                },
                 current_scope_implements_info_set,
                 true
             );
@@ -3241,7 +3393,11 @@ fn type_inference_primary<'allocator, 'input>(
 
             type_environment.set_entity_type(
                 EntityID::from(ast),
-                Spanned::new(Type::Unknown, ast.span.clone())
+                WithDefineInfo {
+                    value: Type::Unknown,
+                    module_name: context.module_name.clone(),
+                    span: ast.span.clone()
+                }
             );
         }
     } else {
@@ -3396,7 +3552,11 @@ fn type_inference_primary_left<'allocator, 'input>(
                                 } else {
                                     type_environment.set_entity_type(
                                         EntityID::from(&simple.0),
-                                        Spanned::new(Type::Unknown, identifier.span.clone())
+                                        WithDefineInfo {
+                                            value: Type::Unknown,
+                                            module_name: context.module_name.clone(),
+                                            span: identifier.span.clone()
+                                        }
                                     );
                                 }
                             },
@@ -3404,7 +3564,11 @@ fn type_inference_primary_left<'allocator, 'input>(
                                 let generic_type = generics_map.get(&resolved.define_info.entity_id).unwrap();
                                 type_environment.set_entity_type(
                                     EntityID::from(&simple.0),
-                                    Spanned::new(Type::Generic(generic_type.clone()), identifier.span.clone())
+                                    WithDefineInfo {
+                                        value: Type::Generic(generic_type.clone()),
+                                        module_name: context.module_name.clone(),
+                                        span: identifier.span.clone()
+                                    }
                                 );
                             },
                             _ => {
@@ -3417,7 +3581,11 @@ fn type_inference_primary_left<'allocator, 'input>(
                                 };
 
                                 let ty = type_environment.get_user_or_function_type_with_local_generic_id(
-                                    Spanned::new(ty, identifier.span.clone()),
+                                    WithDefineInfo {
+                                        value: ty,
+                                        module_name: context.module_name.clone(),
+                                        span: identifier.span.clone()
+                                    },
                                     current_scope_implements_info_set,
                                     true
                                 );
@@ -3480,10 +3648,17 @@ fn type_inference_primary_left<'allocator, 'input>(
                             }
 
                             if !numeric_compatible_types.is_empty() {
-                                let new_generic_id = type_environment.new_local_generic_id(identifier.span.clone());
+                                let new_generic_id = type_environment.new_local_generic_id(
+                                    identifier.span.clone(),
+                                    context.module_name.clone()
+                                );
                                 type_environment.set_generic_type(
                                     new_generic_id,
-                                    Spanned::new(Type::NumericLiteral(numeric_compatible_types), identifier.span.clone())
+                                    WithDefineInfo {
+                                        value: Type::NumericLiteral(numeric_compatible_types),
+                                        module_name: context.module_name.clone(),
+                                        span: identifier.span.clone()
+                                    }
                                 );
                                 Type::LocalGeneric(new_generic_id)
                             }  else {
@@ -3494,41 +3669,66 @@ fn type_inference_primary_left<'allocator, 'input>(
 
                         type_environment.set_entity_type(
                             EntityID::from(&simple.0),
-                            Spanned::new(ty, identifier.span.clone())
+                            WithDefineInfo {
+                                value: ty,
+                                module_name: context.module_name.clone(),
+                                span: identifier.span.clone()
+                            }
                         );
                     }
                 },
                 SimplePrimary::NullKeyword(null_keyword_span) => {
                     let generic_id = type_environment.new_local_generic_id(
-                        null_keyword_span.clone()
+                        null_keyword_span.clone(),
+                        context.module_name.clone()
                     );
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
-                        Spanned::new(Type::Option(Arc::new(Type::LocalGeneric(generic_id))), null_keyword_span.clone())
+                        WithDefineInfo {
+                            value: Type::Option(Arc::new(Type::LocalGeneric(generic_id))),
+                            module_name: context.module_name.clone(),
+                            span: null_keyword_span.clone()
+                        }
                     );
                 },
                 SimplePrimary::TrueKeyword(keyword_span) => {
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
-                        Spanned::new(Type::Bool, keyword_span.clone())
+                        WithDefineInfo {
+                            value: Type::Bool,
+                            module_name: context.module_name.clone(), 
+                            span: keyword_span.clone()
+                        }
                     );
                 },
                 SimplePrimary::FalseKeyword(keyword_span) => {
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
-                        Spanned::new(Type::Bool, keyword_span.clone())
+                        WithDefineInfo {
+                            value: Type::Bool,
+                            module_name: context.module_name.clone(),
+                            span: keyword_span.clone()
+                        }
                     );
                 },
                 SimplePrimary::ThisKeyword(literal) => {
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
-                        Spanned::new(current_scope_this_type.ty.clone(), literal.span.clone())
+                        WithDefineInfo {
+                            value: current_scope_this_type.ty.clone(),
+                            module_name: context.module_name.clone(),
+                            span: literal.span.clone()
+                        }
                     );
                 },
                 SimplePrimary::LargeThisKeyword(literal) => {
                     type_environment.set_entity_type(
                         EntityID::from(&simple.0),
-                        Spanned::new(current_scope_this_type.ty.clone(), literal.span.clone())
+                        WithDefineInfo {
+                            value: current_scope_this_type.ty.clone(),
+                            module_name: context.module_name.clone(),
+                            span: literal.span.clone()
+                        }
                     );
                 }
             }
@@ -3616,7 +3816,12 @@ fn type_inference_primary_left<'allocator, 'input>(
                 let init_expression_type = type_environment.resolve_entity_type(EntityID::from(init_expression));
                 
                 if new_array_init_expression.for_keyword_span.is_some() {
-                    let return_type = Type::LocalGeneric(type_environment.new_local_generic_id(init_expression.get_span()));
+                    let return_type = Type::LocalGeneric(
+                        type_environment.new_local_generic_id(
+                            init_expression.get_span(),
+                            context.module_name.clone()
+                        )
+                    );
                     
                     let define_info = FunctionDefineInfo {
                         module_name: context.module_name.clone(),
@@ -3643,8 +3848,10 @@ fn type_inference_primary_left<'allocator, 'input>(
                     if type_environment.unify_type(
                         &expected_type,
                         &init_expression.get_span(),
+                        &context.module_name,
                         &init_expression_type.value,
                         &init_expression_type.span,
+                        &context.module_name,
                         current_scope_this_type,
                         false,
                         true
@@ -3700,8 +3907,10 @@ fn type_inference_primary_left<'allocator, 'input>(
                 if type_environment.unify_type(
                     &length_expression_type.value,
                     &length_expression_type.span,
+                    &context.module_name,
                     &Type::Uint64,
                     &length_expression.get_span(),
+                    &context.module_name,
                     current_scope_this_type,
                     false,
                     true
@@ -3723,7 +3932,11 @@ fn type_inference_primary_left<'allocator, 'input>(
             
             type_environment.set_entity_type(
                 EntityID::from(&ast.first_expr),
-                Spanned::new(Type::Array(Arc::new(base_type)), new_array_init_expression.span.clone())
+                WithDefineInfo {
+                    value: Type::Array(Arc::new(base_type)),
+                    module_name: context.module_name.clone(),
+                    span: new_array_init_expression.span.clone()
+                }
             );
         },
         PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {
@@ -3734,13 +3947,20 @@ fn type_inference_primary_left<'allocator, 'input>(
                 }
             }
 
-            let base_type_generic = type_environment.new_local_generic_id(new_array_expression.span.clone());
+            let base_type_generic = type_environment.new_local_generic_id(
+                new_array_expression.span.clone(),
+                context.module_name.clone()
+            );
 
             let ty = Type::Array(Arc::new(Type::LocalGeneric(base_type_generic)));
 
             type_environment.set_entity_type(
                 EntityID::from(&ast.first_expr),
-                Spanned::new(ty, new_array_expression.span.clone())
+                WithDefineInfo {
+                    value: ty,
+                    module_name: context.module_name.clone(),
+                    span: new_array_expression.span.clone()
+                }
             );
             
             type_inference_blocks_or_expressions(
@@ -3830,7 +4050,11 @@ fn type_inference_primary_left<'allocator, 'input>(
             };
 
             let mut user_type = type_environment.get_user_or_function_type_with_local_generic_id(
-                Spanned::new(user_type, user_type_span),
+                WithDefineInfo {
+                    value: user_type,
+                    module_name: context.module_name.clone(),
+                    span: user_type_span
+                },
                 current_scope_implements_info_set,
                 true
             );
@@ -3845,7 +4069,11 @@ fn type_inference_primary_left<'allocator, 'input>(
                         if let Some(element_type) = user_type.value.get_element_type_with_replaced_generic(field_assign.name.value) {
                             type_environment.set_entity_type(
                                 EntityID::from(field_assign),
-                                Spanned::new(element_type.value, field_assign.name.span.clone())
+                                WithDefineInfo {
+                                    value: element_type.value,
+                                    module_name: context.module_name.clone(),
+                                    span: field_assign.name.span.clone()
+                                }
                             );
 
                             if let Ok(expression) = &field_assign.expression {
@@ -3874,8 +4102,8 @@ fn type_inference_primary_left<'allocator, 'input>(
                                 let result = type_environment.unify_with_implicit_convert(
                                     Spanned::new(EntityID::from(field_assign), field_assign.name.span.clone()),
                                     Spanned::new(EntityID::from(*expression), expression.get_span()),
-                                    current_scope_this_type,
-                                    false
+                                    false,
+                                    current_scope_this_type
                                 );
                                 add_error(result, type_environment);
                             }
@@ -3891,7 +4119,11 @@ fn type_inference_primary_left<'allocator, 'input>(
 
                 type_environment.set_entity_type(
                     EntityID::from(&ast.first_expr),
-                    Spanned::new(user_type.value, new_expression.span.clone())
+                    WithDefineInfo {
+                        value: user_type.value,
+                        module_name: context.module_name.clone(),
+                        span: new_expression.span.clone()
+                    }
                 );
             } else {
                 if !new_expression.path.is_empty() {
@@ -3910,7 +4142,11 @@ fn type_inference_primary_left<'allocator, 'input>(
                 
                 type_environment.set_entity_type(
                     EntityID::from(&ast.first_expr),
-                    Spanned::new(Type::Unknown, new_expression.span.clone())
+                    WithDefineInfo {
+                        value: Type::Unknown,
+                        module_name: context.module_name.clone(),
+                        span: new_expression.span.clone()
+                    }
                 );
             }
         },
@@ -3947,15 +4183,17 @@ fn type_inference_primary_left<'allocator, 'input>(
                 let result = type_environment.unify_type(
                     &Type::Bool,
                     &condition.get_span(),
+                    &context.module_name,
                     &condition_type.value,
                     &condition_type.span,
+                    &context.module_name,
                     current_scope_this_type,
                     false,
                     true
                 );
                 if result.is_err() {
                     type_environment.add_lazy_type_error_report(
-                        SimpleTypeError { error_code: IF_CONDITION_TYPE_ERROR, ty: condition_type }
+                        SimpleTypeError { error_code: IF_CONDITION_TYPE_ERROR, ty: condition_type.to_spanned() }
                     );
                 }
             }
@@ -3995,15 +4233,17 @@ fn type_inference_primary_left<'allocator, 'input>(
                                 let result = type_environment.unify_type(
                                     &Type::Bool,
                                     &condition.get_span(),
+                                    &context.module_name,
                                     &condition_type.value,
                                     &condition_type.span,
+                                    &context.module_name,
                                     current_scope_this_type,
                                     false,
                                     true
                                 );
                                 if result.is_err() {
                                     type_environment.add_lazy_type_error_report(
-                                        SimpleTypeError { error_code: IF_CONDITION_TYPE_ERROR, ty: condition_type }
+                                        SimpleTypeError { error_code: IF_CONDITION_TYPE_ERROR, ty: condition_type.to_spanned() }
                                     );
                                 }
                             }
@@ -4201,7 +4441,11 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
         _ => {
             type_environment.set_entity_type(
                 parent_ast_entity_id.value,
-                Spanned::new(Type::Unknown, parent_ast_entity_id.span)
+                WithDefineInfo {
+                    value: Type::Unknown,
+                    module_name: context.module_name.clone(),
+                    span: parent_ast_entity_id.span
+                }
             );
             return;
         }
@@ -4277,8 +4521,8 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
         let result = type_environment.unify_with_implicit_convert(
             Spanned::new(parent_ast_entity_id.value, first_type.span.clone()),
             block_or_expression_entity_id.clone(),
-            current_scope_this_type,
-            false
+            false,
+            current_scope_this_type
         );
 
         let second_type = type_environment.resolve_entity_type(block_or_expression_entity_id.value);
@@ -4311,8 +4555,10 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
                         type_environment.unify_type(
                             &first_type.value,
                             &first_type.span,
+                            &first_type.module_name,
                             &value_type,
                             &second_type.span,
+                            &second_type.module_name,
                             current_scope_this_type,
                             false,
                             true
@@ -4321,8 +4567,10 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
                         type_environment.unify_type(
                             &first_type.value,
                             &first_type.span,
+                            &first_type.module_name,
                             &value,
                             &second_type.span,
+                            &second_type.module_name,
                             current_scope_this_type,
                             false,
                             true
@@ -4462,7 +4710,11 @@ fn type_inference_primary_right<'allocator, 'input>(
             }
         };
 
-        let element_type = Spanned::new(element_type, second_expr.0.span.clone());
+        let element_type = WithDefineInfo {
+            value: element_type,
+            module_name: context.module_name.clone(),
+            span: second_expr.0.span.clone()
+        };
 
         type_environment.set_entity_type(
             literal_entity_id,
@@ -4576,7 +4828,7 @@ fn type_inference_primary_right<'allocator, 'input>(
 }
 
 fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
-    parent_type: Spanned<Type>,
+    parent_type: WithDefineInfo<Type>,
     element_name: Spanned<&str>,
     origin_type_filter: F,
     global_implements_info_set: &ImplementsInfoSet,
@@ -4592,7 +4844,13 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
         Type::LocalGeneric(generic_id) => {
             type_environment.resolve_generic_type(generic_id).1
         },
-        Type::This => Spanned::new(current_scope_this_type.ty.clone(), parent_type.span.clone()),
+        Type::This => {
+            WithDefineInfo {
+                value: current_scope_this_type.ty.clone(),
+                module_name: parent_type.module_name.clone(),
+                span: parent_type.span.clone()
+            }
+        },
         _ => parent_type
     };
 
@@ -4709,7 +4967,11 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
         'root: for (element_type, origin_type, _, interface_and_where_bounds) in pre_element_types {
 
             let ty = type_environment.get_user_or_function_type_with_local_generic_id(
-                Spanned::new(element_type.value.clone(), element_name.span.clone()),
+                WithDefineInfo {
+                    value: element_type.value.clone(),
+                    module_name: element_type.module_name.clone(),
+                    span: element_name.span.clone()
+                },
                 current_scope_implements_info_set,
                 false
             ).value;
@@ -4921,21 +5183,29 @@ fn type_inference_mapping_operator<'allocator, 'input>(
             let span = previous_entity_id.span.start..ast.span.end;
             type_environment.set_entity_type(
                 EntityID::from(&ast.value),
-                Spanned::new(value_type, span.clone())
+                WithDefineInfo {
+                    value: value_type,
+                    module_name: context.module_name.clone(),
+                    span: span.clone()
+                }
             );
 
             let result = type_environment.unify_with_implicit_convert(
                 Spanned::new(EntityID::from(&ast.value), span),
                 Spanned::new(EntityID::from(block.program), block.program.span.clone()),
-                current_scope_this_type,
-                false
+                false,
+                current_scope_this_type
             );
 
             add_error(result, type_environment);
         } else {
             type_environment.set_entity_type(
                 EntityID::from(&ast.value),
-                Spanned::new(Type::Unknown, ast.span.clone())
+                WithDefineInfo {
+                    value: Type::Unknown,
+                    module_name: context.module_name.clone(),
+                    span: ast.span.clone()
+                }
             );
         }
     } else {
@@ -4944,12 +5214,20 @@ fn type_inference_mapping_operator<'allocator, 'input>(
         if let Ok(value_type) = check_result {
             type_environment.set_entity_type(
                 EntityID::from(&ast.value),
-                Spanned::new(value_type, span)
+                WithDefineInfo {
+                    value: value_type,
+                    module_name: context.module_name.clone(),
+                    span
+                }
             );
         } else {
             type_environment.set_entity_type(
                 EntityID::from(&ast.value),
-                Spanned::new(previous_type.value, span)
+                WithDefineInfo {
+                    value: previous_type.value,
+                    module_name: context.module_name.clone(),
+                    span
+                }
             );
         }
     }
@@ -4977,7 +5255,7 @@ fn type_inference_generics<'allocator, 'input>(
         Type::Function { function_info: _, generics } => generics,
         _ => {
             let error = InvalidSetGenericsTypeError {
-                ty: ty.clone(),
+                ty: ty.to_spanned(),
                 set_span: ast.span.clone()
             };
             type_environment.add_lazy_type_error_report(error);
@@ -4990,7 +5268,7 @@ fn type_inference_generics<'allocator, 'input>(
             set_span: ast.span.clone(),
             expected: generics.len(),
             found: ast.elements.len(),
-            ty: ty.map(|ty| { ty.as_original_type() })
+            ty: ty.to_spanned().map(|ty| { ty.as_original_type() })
         };
         type_environment.add_lazy_type_error_report(error);
         return;
@@ -5014,7 +5292,11 @@ fn type_inference_generics<'allocator, 'input>(
                 context
             );
 
-            let ty = Spanned::new(ty.clone(), type_info.get_span());
+            let ty = WithDefineInfo{
+                value: ty.clone(),
+                module_name: context.module_name.clone(),
+                span: type_info.get_span()
+            };
 
             type_environment.set_generic_type(
                 *generic_id,
@@ -5022,10 +5304,11 @@ fn type_inference_generics<'allocator, 'input>(
             );
 
             type_environment.add_check_type_info_bounds(
-                ty.clone(),
+                ty.clone().to_spanned(),
                 &ty.value,
                 true,
-                current_scope_implements_info_set
+                current_scope_implements_info_set,
+                context
             );
         }
     }
@@ -5108,14 +5391,18 @@ fn type_inference_function_call<'allocator, 'input>(
                 if let Some(defined_arg_type) = function_type.get_indexed_element_type_with_replaced_generic(define_arg_index) {
                     type_environment.set_entity_type(
                         EntityID::from(ast),
-                        Spanned::new(defined_arg_type, arg_expr.get_span())
+                        WithDefineInfo {
+                            value: defined_arg_type,
+                            module_name: context.module_name.clone(),
+                            span: arg_expr.get_span()
+                        }
                     );
 
                     let result = type_environment.unify_with_implicit_convert(
                         Spanned::new(EntityID::from(*arg_expr), arg_expr.get_span()),
                         Spanned::new(EntityID::from(ast), arg_expr.get_span()),
-                        current_scope_this_type,
-                        true
+                        true,
+                        current_scope_this_type
                     );
 
                     if let Err(error) = result {
@@ -5148,16 +5435,24 @@ fn type_inference_function_call<'allocator, 'input>(
 
         type_environment.set_entity_type(
             EntityID::from(ast),
-            Spanned::new(return_type, ast.span.clone())
+            WithDefineInfo {
+                value: return_type,
+                module_name: context.module_name.clone(),
+                span: ast.span.clone()
+            }
         );
     } else {
         type_environment.add_lazy_type_error_report(
-            SimpleTypeError { error_code: FUNCTION_CALL_TYPE_ERROR, ty: function_type }
+            SimpleTypeError { error_code: FUNCTION_CALL_TYPE_ERROR, ty: function_type.to_spanned() }
         );
 
         type_environment.set_entity_type(
             EntityID::from(ast),
-            Spanned::new(Type::Unknown, ast.span.clone())
+            WithDefineInfo {
+                value: Type::Unknown,
+                module_name: context.module_name.clone(),
+                span: ast.span.clone()
+            }
         );
     }
 }
@@ -5202,20 +5497,25 @@ struct TypeMismatchErrorReport {
 
 impl TranspileReport for TypeMismatchErrorReport {
     fn print(&self, context: &TranspileModuleContext) {
-        let module_name = &context.module_name;
         let text = &context.context.localized_text;
         let error_code = 0034;
         let key = ErrorMessageKey::new(error_code);
 
         let message = key.get_massage(text, ErrorMessageType::Message);
 
-        let mut builder = Report::build(ReportKind::Error, module_name, self.type_0.span.start)
+        let mut builder = Report::build(
+                ReportKind::Error,
+                context.module_name.as_ref().clone(),
+                self.type_0.span.start
+            )
             .with_code(error_code)
             .with_message(message);
 
-        if &self.type_0.span == &self.type_1.span {
+        if &self.type_0.span == &self.type_1.span
+            && self.type_0.module_name.as_str() == self.type_1.module_name.as_str() {
+            
             builder.add_label(
-                Label::new((module_name, self.type_0.span.clone()))
+                Label::new((self.type_0.module_name.as_ref().clone(), self.type_0.span.clone()))
                     .with_color(Color::Red)
                     .with_message(
                         key.get_massage(text, ErrorMessageType::Label(2))
@@ -5225,7 +5525,7 @@ impl TranspileReport for TypeMismatchErrorReport {
             );
         } else {
             builder.add_label(
-                Label::new((module_name, self.type_0.span.clone()))
+                Label::new((self.type_0.module_name.as_ref().clone(), self.type_0.span.clone()))
                     .with_color(Color::Red)
                     .with_message(
                         key.get_massage(text, ErrorMessageType::Label(0))
@@ -5234,7 +5534,7 @@ impl TranspileReport for TypeMismatchErrorReport {
             );
 
             builder.add_label(
-                Label::new((module_name, self.type_1.span.clone()))
+                Label::new((self.type_1.module_name.as_ref().clone(), self.type_1.span.clone()))
                     .with_color(Color::Red)
                     .with_message(
                         key.get_massage(text, ErrorMessageType::Label(0))
@@ -5254,7 +5554,7 @@ impl TranspileReport for TypeMismatchErrorReport {
                 .replace("%type", generic.0.value.clone().fg(color).to_string().as_str());
 
             builder.add_label(
-                Label::new((module_name, generic.0.span.clone()))
+                Label::new((generic.0.module_name.as_ref().clone(), generic.0.span.clone()))
                     .with_color(color)
                     .with_message(message_0)
             );
@@ -5264,7 +5564,7 @@ impl TranspileReport for TypeMismatchErrorReport {
                 .replace("%type", generic.1.value.clone().fg(color).to_string().as_str());
 
             builder.add_label(
-                Label::new((module_name, generic.1.span.clone()))
+                Label::new((generic.1.module_name.as_ref().clone(), generic.1.span.clone()))
                     .with_color(color)
                     .with_message(message_1)
             );
@@ -5283,7 +5583,27 @@ impl TranspileReport for TypeMismatchErrorReport {
             builder.set_help(help);
         }
 
-        builder.finish().print((module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+        let mut module_names = vec![
+            context.module_name.as_ref().clone(),
+            self.type_0.module_name.as_ref().clone(),
+            self.type_1.module_name.as_ref().clone()
+        ];
+
+        for (ty_0, ty_1) in self.generics.iter() {
+            module_names.push(ty_0.module_name.as_ref().clone());
+            module_names.push(ty_1.module_name.as_ref().clone());
+        }
+
+        let context = &context.context;
+        let source_code_vec = module_names.iter()
+            .map(|module_name| { context.get_module_context(module_name).unwrap().source_code.clone() })
+            .collect::<Vec<_>>();
+        
+        let sources_vec = module_names.into_iter().zip(source_code_vec.iter())
+            .map(|(module_name, source_code)| { (module_name, source_code.code.as_str()) })
+            .collect::<Vec<_>>();
+
+        builder.finish().print(sources(sources_vec)).unwrap();
     }
 }
 

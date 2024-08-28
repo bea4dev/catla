@@ -1368,60 +1368,89 @@ impl ImplementsInfoSet {
 
         satisfied_implementations
     }
-/*
+
     pub(crate) fn type_inference_for_generic_bounds<'allocator>(
         &self,
         original_bound: &Type,
         local_generic_replaced_bound: &Type,
         local_generic_replaced_target: &Type,
-        target_span: Range<usize>,
-        bound_span: Range<usize>,
+        target_span: &Range<usize>,
+        target_type_module_name: &Arc<String>,
+        bound_span: &Range<usize>,
+        bound_type_module_name: &Arc<String>,
         allow_unknown: bool,
         type_environment: &mut TypeEnvironment,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         allocator: &'allocator Bump
-    ) -> Result<(), TypeMismatchError> {
-        let resolved_ty = type_environment.resolve_type(local_generic_replaced_target);
+    ) -> Vec<TypeMismatchError, &'allocator Bump> {
+        let resolved_target = if let Type::LocalGeneric(generic_id) = local_generic_replaced_target {
+            type_environment.resolve_generic_type(*generic_id).1.value
+        } else {
+            local_generic_replaced_target.clone()
+        };
 
-        match &resolved_ty {
+        let errors = Vec::new_in(allocator);
+
+        match &resolved_target {
             Type::UserType { user_type_info: target_user_type_info, generics: _, generics_span: _ } => {
                 if let Type::UserType { user_type_info: bound_user_type_info, generics: _, generics_span: _ } = original_bound {
                     if target_user_type_info.module_name.as_str() == bound_user_type_info.module_name.as_str()
                         && target_user_type_info.name.value.as_str() == bound_user_type_info.name.value.as_str() {
                         
-                        return type_environment.unify_type(
+                        if let Err(error) = type_environment.unify_type(
                             local_generic_replaced_bound,
-                            &bound_span,
+                            bound_span,
+                            bound_type_module_name,
                             local_generic_replaced_target,
-                            &target_span,
+                            target_span,
+                            target_type_module_name,
                             &ScopeThisType::new(Type::This),
                             allow_unknown,
                             false
-                        );
+                        ) {
+                            errors.push(error);
+                        }
+
+                        return errors;
                     }
                 }
             },
             Type::Generic(generic) => {
+                for bound in generic.bounds.freeze_and_get().iter() {
+                    let resolved_bound = if let Type::LocalGeneric(generic_id) = &bound.ty {
+                        type_environment.resolve_generic_type(*generic_id).1.value
+                    } else {
+                        bound.ty.clone()
+                    };
 
+                    if let Type::UserType { user_type_info: user_type_info_0, generics: _, generics_span: _ } = &resolved_bound {
+                        if let Type::UserType { user_type_info: user_type_info_1, generics: _, generics_span: _ } = &local_generic_replaced_bound {
+                            if user_type_info_0.module_name.as_str() == user_type_info_1.module_name.as_str()
+                                && user_type_info_0.name.value.as_str() == user_type_info_1.name.value.as_str() {
+                                
+                                if let Err(error) = type_environment.unify_type(
+                                    local_generic_replaced_bound,
+                                    bound_span,
+                                    bound_type_module_name,
+                                    &resolved_bound,
+                                    target_span,
+                                    target_type_module_name,
+                                    &ScopeThisType::new(Type::This),
+                                    allow_unknown,
+                                    false
+                                ) {
+                                    errors.push(error);
+                                }
+
+                                return errors;
+                            }
+                        }
+                    }
+                }
             },
             _ => {}
         }
 
-
-        if let Type::Generic(generic) = resolved_ty {
-            for bound in generic.bounds.freeze_and_get().iter() {
-                if ImplementsInfo::contains_target_type(
-                    interface,
-                    &bound.ty,
-                    self,
-                    current_scope_implements_info_set,
-                    type_environment,
-                    allow_unknown
-                ) {
-                    return true;
-                }
-            }
-        }
 
         let empty_map = IndexMap::new();
         let iter = match current_scope_implements_info_set {
@@ -1434,13 +1463,13 @@ impl ImplementsInfoSet {
         for implements_info in iter {
             if (ImplementsInfo::contains_target_type(
                 &implements_info.interface.value,
-                interface,
+                local_generic_replaced_bound,
                 self,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
             ) || ImplementsInfo::contains_target_type(
-                interface,
+                local_generic_replaced_bound,
                 &implements_info.interface.value,
                 self,
                 current_scope_implements_info_set,
@@ -1448,7 +1477,7 @@ impl ImplementsInfoSet {
                 allow_unknown
             )) && ImplementsInfo::contains_target_type(
                 &implements_info.concrete.value,
-                ty,
+                local_generic_replaced_target,
                 self,
                 current_scope_implements_info_set,
                 type_environment,
@@ -1457,8 +1486,11 @@ impl ImplementsInfoSet {
                 // init generic variables
                 let generics_define = &implements_info.generics;
                 let mut local_generics = Vec::new();
-                for _ in 0..generics_define.len() {
-                    let generic_id = type_environment.new_local_generic_id(0..0);
+                for generic_define in generics_define.iter() {
+                    let generic_id = type_environment.new_local_generic_id(
+                        generic_define.location.span.clone(),
+                        generic_define.location.module_name.clone()
+                    );
                     local_generics.push(Type::LocalGeneric(generic_id));
                 }
 
@@ -1473,24 +1505,28 @@ impl ImplementsInfoSet {
                     &local_generics
                 );
 
-                let resolved_ty = type_environment.resolve_type(ty);
-                let resolved_interface = type_environment.resolve_type(interface);
+                let resolved_ty = type_environment.resolve_type(local_generic_replaced_target);
+                let resolved_interface = type_environment.resolve_type(local_generic_replaced_bound);
 
-                // give answer to resolving generic variables
+                // give answer to resolve generic variables
                 let result1 = type_environment.unify_type(
                     &impl_concrete,
-                    &(0..0),
+                    &implements_info.concrete.span.clone(),
+                    &implements_info.module_name,
                     &resolved_ty,
-                    &(0..0),
+                    target_span,
+                    target_type_module_name,
                     &ScopeThisType::new(Type::This),
                     allow_unknown,
                     false
                 );
                 let result2 = type_environment.unify_type(
                     &impl_interface,
-                    &(0..0),
+                    &implements_info.interface.span,
+                    &implements_info.module_name,
                     &resolved_interface,
-                    &(0..0),
+                    bound_span,
+                    bound_type_module_name,
                     &ScopeThisType::new(Type::This),
                     allow_unknown,
                     false
@@ -1529,12 +1565,13 @@ impl ImplementsInfoSet {
                 }
 
                 if is_satisfied {
-                    return true;
+                    
                 }
             }
         }
-        false 
-    }*/
+
+        Ok(())
+    }
 
 }
 

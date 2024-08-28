@@ -1381,15 +1381,17 @@ impl ImplementsInfoSet {
         allow_unknown: bool,
         type_environment: &mut TypeEnvironment,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-        allocator: &'allocator Bump
-    ) -> Vec<TypeMismatchError, &'allocator Bump> {
+        errors: &mut Vec<TypeMismatchError, &'allocator Bump>,
+    ) {
         let resolved_target = if let Type::LocalGeneric(generic_id) = local_generic_replaced_target {
             type_environment.resolve_generic_type(*generic_id).1.value
         } else {
             local_generic_replaced_target.clone()
         };
 
-        let errors = Vec::new_in(allocator);
+        if &Type::Unknown == &resolved_target {
+            return;
+        }
 
         match &resolved_target {
             Type::UserType { user_type_info: target_user_type_info, generics: _, generics_span: _ } => {
@@ -1410,8 +1412,6 @@ impl ImplementsInfoSet {
                         ) {
                             errors.push(error);
                         }
-
-                        return errors;
                     }
                 }
             },
@@ -1441,8 +1441,6 @@ impl ImplementsInfoSet {
                                 ) {
                                     errors.push(error);
                                 }
-
-                                return errors;
                             }
                         }
                     }
@@ -1494,12 +1492,12 @@ impl ImplementsInfoSet {
                     local_generics.push(Type::LocalGeneric(generic_id));
                 }
 
-                let impl_concrete = Type::get_type_with_replaced_generics(
+                let temp_concrete = Type::get_type_with_replaced_generics(
                     &implements_info.concrete.value,
                     generics_define,
                     &local_generics
                 );
-                let impl_interface = Type::get_type_with_replaced_generics(
+                let temp_interface = Type::get_type_with_replaced_generics(
                     &implements_info.interface.value,
                     generics_define,
                     &local_generics
@@ -1510,7 +1508,7 @@ impl ImplementsInfoSet {
 
                 // give answer to resolve generic variables
                 let result1 = type_environment.unify_type(
-                    &impl_concrete,
+                    &temp_concrete,
                     &implements_info.concrete.span.clone(),
                     &implements_info.module_name,
                     &resolved_ty,
@@ -1521,7 +1519,7 @@ impl ImplementsInfoSet {
                     false
                 );
                 let result2 = type_environment.unify_type(
-                    &impl_interface,
+                    &temp_interface,
                     &implements_info.interface.span,
                     &implements_info.module_name,
                     &resolved_interface,
@@ -1565,12 +1563,97 @@ impl ImplementsInfoSet {
                 }
 
                 if is_satisfied {
-                    
+                    for generic in implements_info.generics.iter() {
+                        let target_type = Type::get_type_with_replaced_generics(
+                            &Type::Generic(generic.clone()),
+                            generics_define,
+                            &local_generics
+                        );
+
+                        for bound in generic.bounds.freeze_and_get().iter() {
+                            let replaced_bound_type = Type::get_type_with_replaced_generics(
+                                &bound.ty,
+                                generics_define,
+                                &local_generics
+                            );
+
+                            self.type_inference_for_generic_bounds(
+                                &bound.ty,
+                                &replaced_bound_type,
+                                &target_type,
+                                &generic.location.span,
+                                &generic.location.module_name,
+                                &bound.span,
+                                &bound.module_name,
+                                allow_unknown,
+                                type_environment,
+                                current_scope_implements_info_set,
+                                errors
+                            );
+                        }
+                    }
+
+                    for where_bound in implements_info.where_bounds.iter() {
+                        let target_type = Type::get_type_with_replaced_generics(
+                            &where_bound.target_type.value,
+                            generics_define,
+                            &local_generics
+                        );
+                        for bound in where_bound.bounds.iter() {
+                            let replaced_bound_type = Type::get_type_with_replaced_generics(
+                                &bound.ty,
+                                generics_define,
+                                &local_generics
+                            );
+
+                            self.type_inference_for_generic_bounds(
+                                &bound.ty,
+                                &replaced_bound_type,
+                                &target_type,
+                                &where_bound.target_type.span,
+                                &implements_info.module_name,
+                                &bound.span,
+                                &bound.module_name,
+                                allow_unknown,
+                                type_environment,
+                                current_scope_implements_info_set,
+                                errors
+                            );
+                        }
+                    }
+
+                    if let Err(error) = type_environment.unify_type(
+                        local_generic_replaced_target,
+                        target_span,
+                        target_type_module_name,
+                        &temp_concrete,
+                        &implements_info.concrete.span,
+                        &implements_info.module_name,
+                        &ScopeThisType::new(Type::This),
+                        allow_unknown,
+                        false
+                    ) {
+                        errors.push(error);
+                    }
+
+                    if let Err(error) = type_environment.unify_type(
+                        local_generic_replaced_bound,
+                        bound_span,
+                        bound_type_module_name,
+                        &temp_interface,
+                        &implements_info.interface.span,
+                        &implements_info.module_name,
+                        &ScopeThisType::new(Type::This),
+                        allow_unknown,
+                        false
+                    ) {
+                        errors.push(error);
+                    }
                 }
             }
         }
 
-        Ok(())
+
     }
 
 }

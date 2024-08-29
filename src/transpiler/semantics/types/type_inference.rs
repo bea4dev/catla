@@ -80,6 +80,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
     pub fn get_user_or_function_type_with_local_generic_id(
         &mut self,
         ty: WithDefineInfo<Type>,
+        global_implements_info_set: &ImplementsInfoSet,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         register_bounds_check: bool
     ) -> WithDefineInfo<Type> {
@@ -94,27 +95,94 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         };
 
         let number_of_generics = generics_define.len();
-        let mut generics = Vec::with_capacity(number_of_generics);
+        let mut local_generics = Vec::with_capacity(number_of_generics);
         for _ in 0..number_of_generics {
             let generic_id = self.new_local_generic_id(
                 ty.span.clone(),
                 ty.module_name.clone()
             );
-            generics.push(Type::LocalGeneric(generic_id));
+            local_generics.push(Type::LocalGeneric(generic_id));
         }
-        let generics = Arc::new(generics);
+        let local_generics = Arc::new(local_generics);
+
+
+        let mut errors = Vec::new();
+
+        for generic in generics_define.iter() {
+            let target_type = Type::get_type_with_replaced_generics(
+                &Type::Generic(generic.clone()),
+                generics_define,
+                &local_generics
+            );
+
+            for bound in generic.bounds.freeze_and_get().iter() {
+                let replaced_bound_type = Type::get_type_with_replaced_generics(
+                    &bound.ty,
+                    generics_define,
+                    &local_generics
+                );
+
+                global_implements_info_set.type_inference_for_generic_bounds(
+                    &bound.ty,
+                    &replaced_bound_type,
+                    &target_type,
+                    &generic.location.span,
+                    &generic.location.module_name,
+                    &bound.span,
+                    &bound.module_name,
+                    false,
+                    self,
+                    current_scope_implements_info_set,
+                    &mut errors
+                );
+            }
+        }
+
+        for where_bound in ty.value.get_where_bounds().unwrap().iter() {
+            let target_type = Type::get_type_with_replaced_generics(
+                &where_bound.target_type.value,
+                generics_define,
+                &local_generics
+            );
+            for bound in where_bound.bounds.iter() {
+                let replaced_bound_type = Type::get_type_with_replaced_generics(
+                    &bound.ty,
+                    generics_define,
+                    &local_generics
+                );
+
+                global_implements_info_set.type_inference_for_generic_bounds(
+                    &bound.ty,
+                    &replaced_bound_type,
+                    &target_type,
+                    &where_bound.target_type.span,
+                    &bound.module_name,
+                    &bound.span,
+                    &bound.module_name,
+                    false,
+                    self,
+                    current_scope_implements_info_set,
+                    &mut errors
+                );
+            }
+        }
+
+        for error in errors {
+            self.add_lazy_type_error_report(error);
+        }
+
 
         let ty = match &ty.value {
             Type::UserType { user_type_info, generics: _, generics_span: _ } => {
                 WithDefineInfo {
-                    value: Type::UserType { user_type_info: user_type_info.clone(), generics: generics.clone(), generics_span: None },
+                    value: Type::UserType { user_type_info: user_type_info.clone(), generics: local_generics.clone(), generics_span: None },
                     module_name: ty.module_name.clone(),
                     span: ty.span.clone()
                 }
             },
             Type::Function { function_info, generics: _ } => {
                 WithDefineInfo {
-                    value: Type::Function { function_info: function_info.clone(), generics: generics.clone() },
+                    value: Type::Function { function_info: function_info.clone(), generics: local_generics.clone() },
                     module_name: ty.module_name.clone(),
                     span: ty.span.clone()
                 }
@@ -122,7 +190,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             _ => unreachable!()
         };
         
-        for (generic_define, local_generic) in ty.value.get_generics_define_with_replaced_generic().unwrap().iter().zip(generics.iter()) {
+        for (generic_define, local_generic) in ty.value.get_generics_define_with_replaced_generic().unwrap().iter().zip(local_generics.iter()) {
             self.generic_bounds_checks.push(GenericsBoundCheck::Generics {
                 type_span: ty.span.clone(),
                 ty: WithDefineInfo {
@@ -3227,6 +3295,7 @@ fn type_inference_primary<'allocator, 'input>(
                     module_name: context.module_name.clone(),
                     span: second_expr.0.span.clone()
                 },
+                global_implements_info_set,
                 current_scope_implements_info_set,
                 true
             );
@@ -3586,6 +3655,7 @@ fn type_inference_primary_left<'allocator, 'input>(
                                         module_name: context.module_name.clone(),
                                         span: identifier.span.clone()
                                     },
+                                    global_implements_info_set,
                                     current_scope_implements_info_set,
                                     true
                                 );
@@ -4055,6 +4125,7 @@ fn type_inference_primary_left<'allocator, 'input>(
                     module_name: context.module_name.clone(),
                     span: user_type_span
                 },
+                global_implements_info_set,
                 current_scope_implements_info_set,
                 true
             );
@@ -4873,7 +4944,7 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
                         true,
                         None
                     ));
-                } else {
+                }/* else {
                     implementations.extend(
                         global_implements_info_set.collect_satisfied_implementations(
                             &bound.ty,
@@ -4900,7 +4971,7 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
                             }
                         })
                     );
-                }
+                }*/
             }
         }
         
@@ -4914,6 +4985,10 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
         for implementation in implementations {
             let element_type = implementation.implements_info.get_element_type(element_name.value);
             if let Some(element_type) = element_type {
+                for error in implementation.errors {
+                    type_environment.add_lazy_type_error_report(error);
+                }
+
                 let ty = Type::get_type_with_replaced_generics(
                     &element_type.value,
                     &implementation.implements_info.generics,
@@ -4972,6 +5047,7 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
                     module_name: element_type.module_name.clone(),
                     span: element_name.span.clone()
                 },
+                global_implements_info_set,
                 current_scope_implements_info_set,
                 false
             ).value;

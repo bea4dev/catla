@@ -1349,6 +1349,68 @@ impl ImplementsInfoSet {
             }
 
             if is_satisfied {
+                let mut errors = Vec::new();
+
+                for generic in implements_info.generics.iter() {
+                    let target_type = Type::get_type_with_replaced_generics(
+                        &Type::Generic(generic.clone()),
+                        generics_define,
+                        &local_generics
+                    );
+
+                    for bound in generic.bounds.freeze_and_get().iter() {
+                        let replaced_bound_type = Type::get_type_with_replaced_generics(
+                            &bound.ty,
+                            generics_define,
+                            &local_generics
+                        );
+
+                        self.type_inference_for_generic_bounds(
+                            &bound.ty,
+                            &replaced_bound_type,
+                            &target_type,
+                            &generic.location.span,
+                            &generic.location.module_name,
+                            &bound.span,
+                            &bound.module_name,
+                            true,
+                            type_environment,
+                            current_scope_implements_info_set,
+                            &mut errors
+                        );
+                    }
+                }
+
+                for where_bound in implements_info.where_bounds.iter() {
+                    let target_type = Type::get_type_with_replaced_generics(
+                        &where_bound.target_type.value,
+                        generics_define,
+                        &local_generics
+                    );
+                    for bound in where_bound.bounds.iter() {
+                        let replaced_bound_type = Type::get_type_with_replaced_generics(
+                            &bound.ty,
+                            generics_define,
+                            &local_generics
+                        );
+
+                        self.type_inference_for_generic_bounds(
+                            &bound.ty,
+                            &replaced_bound_type,
+                            &target_type,
+                            &where_bound.target_type.span,
+                            &implements_info.module_name,
+                            &bound.span,
+                            &bound.module_name,
+                            true,
+                            type_environment,
+                            current_scope_implements_info_set,
+                            &mut errors
+                        );
+                    }
+                }
+
+
                 let implements_info = ImplementsInfo {
                     generics: implements_info.generics.clone(),
                     interface: Spanned::new(impl_interface, implements_info.interface.span.clone()),
@@ -1361,7 +1423,8 @@ impl ImplementsInfoSet {
 
                 satisfied_implementations.push(CollectedImplementation {
                     implements_info,
-                    local_generics
+                    local_generics,
+                    errors
                 })
             }
         }
@@ -1369,7 +1432,7 @@ impl ImplementsInfoSet {
         satisfied_implementations
     }
 
-    pub(crate) fn type_inference_for_generic_bounds<'allocator>(
+    pub(crate) fn type_inference_for_generic_bounds(
         &self,
         original_bound: &Type,
         local_generic_replaced_bound: &Type,
@@ -1381,7 +1444,7 @@ impl ImplementsInfoSet {
         allow_unknown: bool,
         type_environment: &mut TypeEnvironment,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-        errors: &mut Vec<TypeMismatchError, &'allocator Bump>,
+        errors: &mut Vec<TypeMismatchError>
     ) {
         let resolved_target = if let Type::LocalGeneric(generic_id) = local_generic_replaced_target {
             type_environment.resolve_generic_type(*generic_id).1.value
@@ -1661,7 +1724,8 @@ impl ImplementsInfoSet {
 
 pub(crate) struct CollectedImplementation {
     pub implements_info: ImplementsInfo,
-    pub local_generics: Vec<Type>
+    pub local_generics: Vec<Type>,
+    pub errors: Vec<TypeMismatchError>
 }
 
 

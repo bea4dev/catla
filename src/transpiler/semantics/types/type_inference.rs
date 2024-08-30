@@ -38,6 +38,7 @@ pub(crate) struct TypeEnvironment<'allocator, 'input> {
     implicit_convert_map: HashMap<EntityID, ImplicitConvertKind, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, WithDefineInfo<Type>>,
     closures: Vec<&'allocator Closure<'allocator, 'input>, &'allocator Bump>,
+    lazy_generic_type_inference: Vec<LazyGenericTypeInference, &'allocator Bump>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
     current_generics_id: usize,
 }
@@ -56,6 +57,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             implicit_convert_map: HashMap::new_in(allocator),
             return_type,
             closures: Vec::new_in(allocator),
+            lazy_generic_type_inference: Vec::new_in(allocator),
             lazy_type_reports: Vec::new_in(allocator),
             current_generics_id: 0
         }
@@ -106,70 +108,12 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         let local_generics = Arc::new(local_generics);
 
 
-        let mut errors = Vec::new();
-
-        for generic in generics_define.iter() {
-            let target_type = Type::get_type_with_replaced_generics(
-                &Type::Generic(generic.clone()),
-                generics_define,
-                &local_generics
-            );
-
-            for bound in generic.bounds.freeze_and_get().iter() {
-                let replaced_bound_type = Type::get_type_with_replaced_generics(
-                    &bound.ty,
-                    generics_define,
-                    &local_generics
-                );
-
-                global_implements_info_set.type_inference_for_generic_bounds(
-                    &bound.ty,
-                    &replaced_bound_type,
-                    &target_type,
-                    &generic.location.span,
-                    &generic.location.module_name,
-                    &bound.span,
-                    &bound.module_name,
-                    false,
-                    self,
-                    current_scope_implements_info_set,
-                    &mut errors
-                );
-            }
-        }
-
-        for where_bound in ty.value.get_where_bounds().unwrap().iter() {
-            let target_type = Type::get_type_with_replaced_generics(
-                &where_bound.target_type.value,
-                generics_define,
-                &local_generics
-            );
-            for bound in where_bound.bounds.iter() {
-                let replaced_bound_type = Type::get_type_with_replaced_generics(
-                    &bound.ty,
-                    generics_define,
-                    &local_generics
-                );
-
-                global_implements_info_set.type_inference_for_generic_bounds(
-                    &bound.ty,
-                    &replaced_bound_type,
-                    &target_type,
-                    &where_bound.target_type.span,
-                    &bound.module_name,
-                    &bound.span,
-                    &bound.module_name,
-                    false,
-                    self,
-                    current_scope_implements_info_set,
-                    &mut errors
-                );
-            }
-        }
-
-        for error in errors {
-            self.add_lazy_type_error_report(error);
-        }
+        self.lazy_generic_type_inference.push(LazyGenericTypeInference {
+            generics_define: generics_define.clone(),
+            local_generics: local_generics.clone(),
+            where_bound: ty.value.get_where_bounds().unwrap().clone(),
+            current_scope_implements_info_set: current_scope_implements_info_set.clone()
+        });
 
 
         let ty = match &ty.value {
@@ -1159,6 +1103,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         warnings: &mut Vec<TranspileWarning>,
         context: &TranspileModuleContext
     ) {
+        self.lazy_type_inference_generics(global_implements_info_set);
+
         implicit_convert_map.extend(&self.implicit_convert_map);
 
         self.type_check_bounds(global_implements_info_set, errors);
@@ -1171,6 +1117,84 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         }
 
         self.check_impl_interface_generics(errors);
+    }
+
+    fn lazy_type_inference_generics(
+        &mut self,
+        global_implements_info_set: &ImplementsInfoSet
+    ) {
+        for type_infer in self.lazy_generic_type_inference.clone() {
+            let generics_define = &type_infer.generics_define;
+            let local_generics = type_infer.local_generics;
+            let where_bounds = type_infer.where_bound;
+            let current_scope_implements_info_set = &type_infer.current_scope_implements_info_set;
+
+            let mut errors = Vec::new();
+
+            for generic in generics_define.iter() {
+                let target_type = Type::get_type_with_replaced_generics(
+                    &Type::Generic(generic.clone()),
+                    generics_define,
+                    &local_generics
+                );
+
+                for bound in generic.bounds.freeze_and_get().iter() {
+                    let replaced_bound_type = Type::get_type_with_replaced_generics(
+                        &bound.ty,
+                        generics_define,
+                        &local_generics
+                    );
+
+                    global_implements_info_set.type_inference_for_generic_bounds(
+                        &bound.ty,
+                        &replaced_bound_type,
+                        &target_type,
+                        &generic.location.span,
+                        &generic.location.module_name,
+                        &bound.span,
+                        &bound.module_name,
+                        false,
+                        self,
+                        current_scope_implements_info_set,
+                        &mut errors
+                    );
+                }
+            }
+
+            for where_bound in where_bounds.iter() {
+                let target_type = Type::get_type_with_replaced_generics(
+                    &where_bound.target_type.value,
+                    generics_define,
+                    &local_generics
+                );
+                for bound in where_bound.bounds.iter() {
+                    let replaced_bound_type = Type::get_type_with_replaced_generics(
+                        &bound.ty,
+                        generics_define,
+                        &local_generics
+                    );
+
+                    global_implements_info_set.type_inference_for_generic_bounds(
+                        &bound.ty,
+                        &replaced_bound_type,
+                        &target_type,
+                        &where_bound.target_type.span,
+                        &bound.module_name,
+                        &bound.span,
+                        &bound.module_name,
+                        false,
+                        self,
+                        current_scope_implements_info_set,
+                        &mut errors
+                    );
+                }
+            }
+
+            for error in errors {
+                self.add_lazy_type_error_report(error);
+            }
+
+        }
     }
 
     fn type_check_bounds(&mut self, global_implements_info_set: &ImplementsInfoSet, errors: &mut Vec<TranspileError>) {
@@ -1188,7 +1212,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         self.resolve_generic_type(*generic_id).1
                     } else {
                         WithDefineInfo {
-                            value: self.resolve_type(&ty.value),
+                            value: ty.value.clone(),
                             module_name: ty.module_name.clone(),
                             span: ty.span.clone()
                         }
@@ -1422,6 +1446,14 @@ pub(crate) enum GenericsBoundCheck {
         bounds: Vec<Arc<Bound>>,
         scope_implements_info_set: Option<Arc<ImplementsInfoSet>>
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LazyGenericTypeInference {
+    generics_define: Vec<Arc<GenericType>>,
+    local_generics: Arc<Vec<Type>>,
+    where_bound: Arc<Vec<WhereBound>>,
+    current_scope_implements_info_set: Option<Arc<ImplementsInfoSet>>
 }
 
 

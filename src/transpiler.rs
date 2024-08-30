@@ -225,6 +225,10 @@ async fn transpile_module(
 
     merged_implements_infos.merge(&implements_infos);
 
+    if module_context.module_name.as_str() == "test::test" {
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+    }
+
     let mut implicit_convert_map = FxHashMap::default();
     let mut type_environment = TypeEnvironment::new_with_return_type(
         Either::Right(WithDefineInfo {

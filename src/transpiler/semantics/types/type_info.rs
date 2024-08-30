@@ -949,6 +949,8 @@ impl ImplementsInfo {
                     return true;
                 }
                 
+                println!("contains check | ty: {}, generic: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(self_type));
+
                 let generics_before = vec![self_generic_type.clone()];
                 let generics_after = vec![ty.clone()];
 
@@ -959,6 +961,8 @@ impl ImplementsInfo {
                         &generics_after
                     );
 
+                    println!("contains check impl | ty: {}, bound: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(&replaced_bound_type));
+
                     if !global_implements_info_set.is_implemented(
                         ty,
                         &replaced_bound_type,
@@ -966,9 +970,16 @@ impl ImplementsInfo {
                         current_scope_implements_info_set,
                         allow_unknown
                     ) {
+                        println!("contains check NOT! impl | ty: {}, bound: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(&replaced_bound_type));
                         return false;
                     }
+
+                    println!("contains check impl | OK! | ty: {}, bound: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(&replaced_bound_type));
                 }
+                dbg!(true);
+
+                println!("contains check | OK! | generic: {}, ty: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(self_type));
+
                 true
             },
             Type::LocalGeneric(_) => unreachable!(),
@@ -1116,7 +1127,40 @@ impl ImplementsInfoSet {
             _ => self.implements_infos.values().chain(empty_map.values())
         };
 
+        println!("check impl ty: {}, interface: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(interface));
+
         for implements_info in iter {
+            if ImplementsInfo::contains_target_type(
+                &implements_info.interface.value,
+                interface,
+                self,
+                current_scope_implements_info_set,
+                type_environment,
+                allow_unknown
+            ) || ImplementsInfo::contains_target_type(
+                interface,
+                &implements_info.interface.value,
+                self,
+                current_scope_implements_info_set,
+                type_environment,
+                allow_unknown
+            ) {
+                println!("ty: {}, impl_interface: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(&implements_info.interface.value));
+
+                if ImplementsInfo::contains_target_type(
+                    &implements_info.concrete.value,
+                    ty,
+                    self,
+                    current_scope_implements_info_set,
+                    type_environment,
+                    allow_unknown
+                ) {
+                    println!("ty: {}, impl_concrete: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(&implements_info.concrete.value));
+                }
+            }
+
+
+
             if (ImplementsInfo::contains_target_type(
                 &implements_info.interface.value,
                 interface,
@@ -1139,6 +1183,8 @@ impl ImplementsInfoSet {
                 type_environment,
                 allow_unknown
             ) {
+                println!("check impl ty: {}, interface: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(interface));
+
                 // init generic variables
                 let generics_define = &implements_info.generics;
                 let mut local_generics = Vec::new();
@@ -1163,6 +1209,9 @@ impl ImplementsInfoSet {
 
                 let resolved_ty = type_environment.resolve_type(ty);
                 let resolved_interface = type_environment.resolve_type(interface);
+
+                println!("{} == {}", type_environment.get_type_display_string(&impl_concrete), type_environment.get_type_display_string(&resolved_ty));
+                println!("{} == {}", type_environment.get_type_display_string(&impl_interface), type_environment.get_type_display_string(&resolved_interface));
 
                 // give answer to resolve generic variables
                 let result1 = type_environment.unify_type(
@@ -1190,8 +1239,11 @@ impl ImplementsInfoSet {
 
                 if result1.is_err() || result2.is_err() {
                     // ignore
-                    continue;
+                    println!("unify NO!");
+                    //continue;
                 }
+
+                println!("unify OK!");
 
                 let mut is_satisfied = true;
                 'check: for where_bound in implements_info.where_bounds.iter() {
@@ -1219,6 +1271,8 @@ impl ImplementsInfoSet {
                         }
                     }
                 }
+
+                println!("where bound check OK!");
 
                 if is_satisfied {
                     return true;
@@ -1273,7 +1327,11 @@ impl ImplementsInfoSet {
             _ => self.implements_infos.values().chain(empty_map.values())
         };
 
+        dbg!(type_environment.get_type_display_string(ty));
+
         for implements_info in iter {
+            dbg!(type_environment.get_type_display_string(&implements_info.concrete.value));
+
             if !ImplementsInfo::contains_target_type(
                 &implements_info.concrete.value,
                 ty,
@@ -1284,6 +1342,8 @@ impl ImplementsInfoSet {
             ) {
                 continue;
             }
+
+            println!("OK! | ty: {}, impl_concrete: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(&implements_info.concrete.value));
 
             // init generic variables
             let generics_define = &implements_info.generics;
@@ -1446,6 +1506,8 @@ impl ImplementsInfoSet {
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         errors: &mut Vec<TypeMismatchError>
     ) {
+        println!("lazy type infer | original_bound: {}, replaced_bound: {}, target: {}", type_environment.get_type_display_string(original_bound), type_environment.get_type_display_string(local_generic_replaced_bound), type_environment.get_type_display_string(local_generic_replaced_target));
+
         let resolved_target = if let Type::LocalGeneric(generic_id) = local_generic_replaced_target {
             type_environment.resolve_generic_type(*generic_id).1.value
         } else {
@@ -1521,16 +1583,21 @@ impl ImplementsInfoSet {
             _ => self.implements_infos.values().chain(empty_map.values())
         };
 
+        let regenerated_ty = type_environment.regenerate_local_generic(local_generic_replaced_target);
+        let regenerated_interface = type_environment.regenerate_local_generic(local_generic_replaced_bound);
+
+        dbg!(1);
+
         for implements_info in iter {
             if (ImplementsInfo::contains_target_type(
                 &implements_info.interface.value,
-                local_generic_replaced_bound,
+                original_bound,
                 self,
                 current_scope_implements_info_set,
                 type_environment,
                 allow_unknown
             ) || ImplementsInfo::contains_target_type(
-                local_generic_replaced_bound,
+                original_bound,
                 &implements_info.interface.value,
                 self,
                 current_scope_implements_info_set,
@@ -1544,6 +1611,7 @@ impl ImplementsInfoSet {
                 type_environment,
                 allow_unknown
             ) {
+                dbg!(2);
                 // init generic variables
                 let generics_define = &implements_info.generics;
                 let mut local_generics = Vec::new();
@@ -1564,17 +1632,14 @@ impl ImplementsInfoSet {
                     &implements_info.interface.value,
                     generics_define,
                     &local_generics
-                );
-
-                let resolved_ty = type_environment.resolve_type(local_generic_replaced_target);
-                let resolved_interface = type_environment.resolve_type(local_generic_replaced_bound);
+                ); 
 
                 // give answer to resolve generic variables
                 let result1 = type_environment.unify_type(
                     &temp_concrete,
                     &implements_info.concrete.span.clone(),
                     &implements_info.module_name,
-                    &resolved_ty,
+                    &regenerated_ty,
                     target_span,
                     target_type_module_name,
                     &ScopeThisType::new(Type::This),
@@ -1585,7 +1650,7 @@ impl ImplementsInfoSet {
                     &temp_interface,
                     &implements_info.interface.span,
                     &implements_info.module_name,
-                    &resolved_interface,
+                    &regenerated_interface,
                     bound_span,
                     bound_type_module_name,
                     &ScopeThisType::new(Type::This),
@@ -1595,8 +1660,11 @@ impl ImplementsInfoSet {
 
                 if result1.is_err() || result2.is_err() {
                     // ignore
+                    println!("unify NO! | {} == {} | {} == {}", type_environment.get_type_display_string(&temp_concrete), type_environment.get_type_display_string(&regenerated_ty), type_environment.get_type_display_string(&temp_interface), type_environment.get_type_display_string(&regenerated_interface));
                     continue;
                 }
+
+                dbg!(3);
 
                 let mut is_satisfied = true;
                 'check: for where_bound in implements_info.where_bounds.iter() {
@@ -1624,6 +1692,8 @@ impl ImplementsInfoSet {
                         }
                     }
                 }
+
+                dbg!(4);
 
                 if is_satisfied {
                     for generic in implements_info.generics.iter() {
@@ -1685,6 +1755,8 @@ impl ImplementsInfoSet {
                         }
                     }
 
+                    println!("before: {}", type_environment.get_type_display_string(local_generic_replaced_bound));
+
                     if let Err(error) = type_environment.unify_type(
                         local_generic_replaced_target,
                         target_span,
@@ -1712,6 +1784,8 @@ impl ImplementsInfoSet {
                     ) {
                         errors.push(error);
                     }
+
+                    println!("after: {}", type_environment.get_type_display_string(local_generic_replaced_bound));
                 }
             }
         }

@@ -1039,6 +1039,49 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         }
     }
 
+    pub(crate) fn regenerate_local_generic(&mut self, ty: &Type) -> Type {
+        match ty {            Type::NumericLiteral(_) => todo!(),
+            Type::UserType { user_type_info, generics, generics_span } => {
+                Type::UserType {
+                    user_type_info: user_type_info.clone(),
+                    generics: Arc::new(generics.iter().map(|ty| { self.regenerate_local_generic(ty) }).collect()),
+                    generics_span: generics_span.clone()
+                }
+            },
+            Type::Function { function_info, generics } => {
+                Type::Function {
+                    function_info: function_info.clone(),
+                    generics: Arc::new(generics.iter().map(|ty| { self.regenerate_local_generic(ty) }).collect())
+                }
+            },
+            Type::LocalGeneric(generic_id) => {
+                let resolved = self.resolve_generic_type(*generic_id).1;
+                
+                if &resolved.value == &Type::Unknown {
+                    Type::LocalGeneric(self.new_local_generic_id(
+                        resolved.span.clone(),
+                        resolved.module_name.clone()
+                    ))
+                } else {
+                    resolved.value.clone()
+                }
+            },
+            Type::Array(base_type) => {
+                Type::Array(Arc::new(self.regenerate_local_generic(&base_type)))
+            },
+            Type::Option(value_type) => {
+                Type::Option(Arc::new(self.regenerate_local_generic(&value_type)))
+            },
+            Type::Result { value, error } => {
+                Type::Result {
+                    value: Arc::new(self.regenerate_local_generic(&value)),
+                    error: Arc::new(self.regenerate_local_generic(&error))
+                }
+            },
+            _ => ty.clone()
+        }
+    }
+
     fn add_generics_info(&self, name: &mut String, generics: &Vec<Type>) {
         if !generics.is_empty() {
             *name += "<";
@@ -1145,6 +1188,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &local_generics
                     );
 
+                    println!("lazy infer generic | original bound: {}, replaced_bound: {}, target: {}", self.get_type_display_string(&bound.ty), self.get_type_display_string(&replaced_bound_type), self.get_type_display_string(&target_type));
+
                     global_implements_info_set.type_inference_for_generic_bounds(
                         &bound.ty,
                         &replaced_bound_type,
@@ -1173,6 +1218,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         generics_define,
                         &local_generics
                     );
+
+                    println!("lazy infer where bound | original bound: {}, replaced_bound: {}, target: {}", self.get_type_display_string(&bound.ty), self.get_type_display_string(&replaced_bound_type), self.get_type_display_string(&target_type));
 
                     global_implements_info_set.type_inference_for_generic_bounds(
                         &bound.ty,
@@ -5006,7 +5053,7 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
                 }*/
             }
         }
-        
+        dbg!(element_name.value);
         implementations.extend(global_implements_info_set.collect_satisfied_implementations(
             &parent_type.value,
             type_environment,

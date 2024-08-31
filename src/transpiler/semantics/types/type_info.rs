@@ -924,31 +924,6 @@ impl ImplementsInfo {
                 }
             },
             Type::Generic(self_generic_type) => {
-                if let Type::Generic(generic_type) = ty {
-                    for self_bound in self_generic_type.bounds.freeze_and_get().iter() {
-                        let mut is_satisfied = false;
-                        for bound in generic_type.bounds.freeze_and_get().iter() {
-                            if ImplementsInfo::contains_target_type(
-                                &self_bound.ty,
-                                &bound.ty,
-                                global_implements_info_set,
-                                current_scope_implements_info_set,
-                                type_environment,
-                                allow_unknown
-                            ) {
-                                is_satisfied = true;
-                                break;
-                            }
-                        }
-
-                        if !is_satisfied {
-                            return false;
-                        }
-                    }
-                    
-                    return true;
-                }
-                
                 println!("contains check | ty: {}, generic: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(self_type));
 
                 let generics_before = vec![self_generic_type.clone()];
@@ -1775,6 +1750,9 @@ impl ImplementsInfoSet {
 
                     println!("before: {}", type_environment.get_type_display_string(local_generic_replaced_bound));
 
+                    println!("unify | {} == {}", type_environment.get_type_display_string(&temp_result_ty), type_environment.get_type_display_string(&temp_concrete));
+                    dbg!(type_environment.get_type_display_string(&implements_info.concrete.value));
+
                     if let Err(error) = type_environment.unify_type(
                         &temp_result_ty,
                         target_span,
@@ -1795,6 +1773,8 @@ impl ImplementsInfoSet {
                             generics: error.generics
                         });
                     }
+
+                    println!("unify | {} == {}", type_environment.get_type_display_string(&temp_result_interface), type_environment.get_type_display_string(&temp_interface));
 
                     if let Err(error) = type_environment.unify_type(
                         &temp_result_interface,

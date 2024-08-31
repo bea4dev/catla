@@ -8,7 +8,7 @@ use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use indexmap::IndexMap;
 
-use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, TranspileError, TranspileWarning};
+use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, semantics::types::type_info::LazyGenericTypeInferError, TranspileError, TranspileWarning};
 
 use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, CollectedImplementation, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, LocalGenericID, OverrideElementsEnvironment, ScopeThisType, Type, WhereBound, WithDefineInfo}, user_type_element_collector::{get_type, parse_primitive_type}};
 
@@ -109,6 +109,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
 
         self.lazy_generic_type_inference.push(LazyGenericTypeInference {
+            origin_type: ty.clone(),
             generics_define: generics_define.clone(),
             local_generics: local_generics.clone(),
             where_bound: ty.value.get_where_bounds().unwrap().clone(),
@@ -1237,10 +1238,13 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 }
             }
 
-            for error in errors {
+            if !errors.is_empty() {
+                let error = LazyGenericTypeInferError::new(
+                    type_infer.origin_type,
+                    errors
+                );
                 self.add_lazy_type_error_report(error);
             }
-
         }
     }
 
@@ -1497,6 +1501,7 @@ pub(crate) enum GenericsBoundCheck {
 
 #[derive(Debug, Clone)]
 pub(crate) struct LazyGenericTypeInference {
+    origin_type: WithDefineInfo<Type>,
     generics_define: Vec<Arc<GenericType>>,
     local_generics: Arc<Vec<Type>>,
     where_bound: Arc<Vec<WhereBound>>,
@@ -2648,7 +2653,11 @@ fn type_inference_operator<'allocator, 'input>(
     let previous_type = type_environment.resolve_entity_type(left_entity_id.value);
 
     let operator_function = get_element_type(
-        previous_type.clone(),
+        WithDefineInfo {
+            value: previous_type.value.clone(),
+            module_name: context.module_name.clone(),
+            span: left_entity_id.span.clone()
+        },
         Spanned::new(operator_method, operator.span.clone()),
         |ty| {
             if let Type::UserType { user_type_info, generics: _, generics_span: _ } = ty {
@@ -4794,7 +4803,11 @@ fn type_inference_primary_right<'allocator, 'input>(
         let literal_entity_id = EntityID::from(&second_expr.0);
         
         let element_type = get_element_type(
-            parent_type,
+            WithDefineInfo {
+                value: parent_type.value.clone(),
+                module_name: context.module_name.clone(),
+                span: previous_primary.span.clone()
+            },
             second_expr.0.clone(),
             |_| { true },
             global_implements_info_set,
@@ -4990,6 +5003,8 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
 
     type_environment.fix_numeric_literal_type(&parent_type.value);
 
+    let original_parent_type = parent_type.clone();
+
     let parent_type = match parent_type.value {
         Type::LocalGeneric(generic_id) => {
             type_environment.resolve_generic_type(generic_id).1
@@ -5064,10 +5079,14 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
         for implementation in implementations {
             let element_type = implementation.implements_info.get_element_type(element_name.value);
             if let Some(element_type) = element_type {
-                for error in implementation.errors {
+                if !implementation.errors.is_empty() {
+                    let error = LazyGenericTypeInferError::new(
+                        original_parent_type.clone(),
+                        implementation.errors
+                    );
                     type_environment.add_lazy_type_error_report(error);
                 }
-
+                
                 let ty = Type::get_type_with_replaced_generics(
                     &element_type.value,
                     &implementation.implements_info.generics,
@@ -5622,7 +5641,7 @@ pub(crate) trait LazyTypeReport {
 pub(crate) struct TypeMismatchError {
     type_0: WithDefineInfo<Type>,
     type_1: WithDefineInfo<Type>,
-    generics: Vec<(WithDefineInfo<Type>, WithDefineInfo<Type>)>
+    pub generics: Vec<(WithDefineInfo<Type>, WithDefineInfo<Type>)>
 }
 
 impl LazyTypeReport for TypeMismatchError {

@@ -153,8 +153,12 @@ implements I1<int> for int {}
 function cccc(t: I1<int>) {
     let d = t.test5()
     let e: int = 100
+    let c = dddd(e)
     let e = e.test5()
-    let e = dddd(e)
+}
+
+function <I: I1<int>> eeee(i: I) {
+    let a = i.test5()
 }
 
 function <T, I: I1<T>> dddd(i: I) -> T {}

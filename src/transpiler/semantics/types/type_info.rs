@@ -1,6 +1,6 @@
 use std::{mem::swap, ops::Range, sync::{Arc, Mutex, MutexGuard, PoisonError}};
 
-use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
+use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
 use catla_parser::parser::{Spanned, StatementAttribute, UserTypeKindEnum};
 use derivative::Derivative;
@@ -8,9 +8,9 @@ use either::Either;
 use fxhash::FxHashMap;
 use indexmap::IndexMap;
 
-use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, TranspileError};
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, TranspileError, TranspileWarning};
 
-use super::type_inference::{TypeEnvironment, TypeMismatchError};
+use super::type_inference::{LazyTypeReport, TypeEnvironment, TypeMismatchError};
 
 
 #[derive(Debug, Clone, Derivative)]
@@ -1504,7 +1504,7 @@ impl ImplementsInfoSet {
         allow_unknown: bool,
         type_environment: &mut TypeEnvironment,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-        errors: &mut Vec<TypeMismatchError>
+        errors: &mut Vec<LazyGenericTypeMismatchError>
     ) {
         println!("lazy type infer | original_bound: {}, replaced_bound: {}, target: {}", type_environment.get_type_display_string(original_bound), type_environment.get_type_display_string(local_generic_replaced_bound), type_environment.get_type_display_string(local_generic_replaced_target));
 
@@ -1535,7 +1535,14 @@ impl ImplementsInfoSet {
                             allow_unknown,
                             false
                         ) {
-                            errors.push(error);
+                            errors.push(LazyGenericTypeMismatchError {
+                                origin: WithDefineInfo {
+                                    value: (),
+                                    module_name: bound_type_module_name.clone(),
+                                    span: bound_span.clone()
+                                },
+                                generics: error.generics
+                            });
                         }
                     }
                 }
@@ -1564,7 +1571,14 @@ impl ImplementsInfoSet {
                                     allow_unknown,
                                     false
                                 ) {
-                                    errors.push(error);
+                                    errors.push(LazyGenericTypeMismatchError {
+                                        origin: WithDefineInfo {
+                                            value: (),
+                                            module_name: bound_type_module_name.clone(),
+                                            span: bound_span.clone()
+                                        },
+                                        generics: error.generics
+                                    });
                                 }
                             }
                         }
@@ -1583,10 +1597,10 @@ impl ImplementsInfoSet {
             _ => self.implements_infos.values().chain(empty_map.values())
         };
 
-        let regenerated_ty = type_environment.regenerate_local_generic(local_generic_replaced_target);
-        let regenerated_interface = type_environment.regenerate_local_generic(local_generic_replaced_bound);
-
         dbg!(1);
+
+        let temp_result_ty = type_environment.regenerate_local_generic(local_generic_replaced_target);
+        let temp_result_interface = type_environment.regenerate_local_generic(local_generic_replaced_bound);
 
         for implements_info in iter {
             if (ImplementsInfo::contains_target_type(
@@ -1611,6 +1625,9 @@ impl ImplementsInfoSet {
                 type_environment,
                 allow_unknown
             ) {
+                let regenerated_ty = type_environment.regenerate_local_generic(local_generic_replaced_target);
+                let regenerated_interface = type_environment.regenerate_local_generic(local_generic_replaced_bound);
+
                 dbg!(2);
                 // init generic variables
                 let generics_define = &implements_info.generics;
@@ -1758,7 +1775,7 @@ impl ImplementsInfoSet {
                     println!("before: {}", type_environment.get_type_display_string(local_generic_replaced_bound));
 
                     if let Err(error) = type_environment.unify_type(
-                        local_generic_replaced_target,
+                        &temp_result_ty,
                         target_span,
                         target_type_module_name,
                         &temp_concrete,
@@ -1768,11 +1785,18 @@ impl ImplementsInfoSet {
                         allow_unknown,
                         false
                     ) {
-                        errors.push(error);
+                        errors.push(LazyGenericTypeMismatchError {
+                            origin: WithDefineInfo {
+                                value: (),
+                                module_name: bound_type_module_name.clone(),
+                                span: bound_span.clone()
+                            },
+                            generics: error.generics
+                        });
                     }
 
                     if let Err(error) = type_environment.unify_type(
-                        local_generic_replaced_bound,
+                        &temp_result_interface,
                         bound_span,
                         bound_type_module_name,
                         &temp_interface,
@@ -1782,7 +1806,14 @@ impl ImplementsInfoSet {
                         allow_unknown,
                         false
                     ) {
-                        errors.push(error);
+                        errors.push(LazyGenericTypeMismatchError {
+                            origin: WithDefineInfo {
+                                value: (),
+                                module_name: bound_type_module_name.clone(),
+                                span: bound_span.clone()
+                            },
+                            generics: error.generics
+                        });
                     }
 
                     println!("after: {}", type_environment.get_type_display_string(local_generic_replaced_bound));
@@ -1790,16 +1821,219 @@ impl ImplementsInfoSet {
             }
         }
 
+        if let Err(error) = type_environment.unify_type(
+            &local_generic_replaced_target,
+            target_span,
+            target_type_module_name,
+            &temp_result_ty,
+            target_span,
+            target_type_module_name,
+            &ScopeThisType::new(Type::This),
+            allow_unknown,
+            false
+        ) {
+            errors.push(LazyGenericTypeMismatchError {
+                origin: WithDefineInfo {
+                    value: (),
+                    module_name: bound_type_module_name.clone(),
+                    span: bound_span.clone()
+                },
+                generics: error.generics
+            });
+        }
+
+        if let Err(error) = type_environment.unify_type(
+            &local_generic_replaced_bound,
+            bound_span,
+            bound_type_module_name,
+            &temp_result_interface,
+            bound_span,
+            bound_type_module_name,
+            &ScopeThisType::new(Type::This),
+            allow_unknown,
+            false
+        ) {
+            errors.push(LazyGenericTypeMismatchError {
+                origin: WithDefineInfo {
+                    value: (),
+                    module_name: bound_type_module_name.clone(),
+                    span: bound_span.clone()
+                },
+                generics: error.generics
+            });
+        }
 
     }
 
 }
 
 
+pub(crate) struct LazyGenericTypeMismatchError {
+    origin: WithDefineInfo<()>,
+    generics: Vec<(WithDefineInfo<Type>, WithDefineInfo<Type>)>
+}
+
+
+
+pub(crate) struct LazyGenericTypeInferError {
+    origin_type: WithDefineInfo<Type>,
+    generics: Vec<(WithDefineInfo<Type>, WithDefineInfo<Type>, WithDefineInfo<()>)>
+}
+
+impl LazyGenericTypeInferError {
+    pub fn new(origin_type: WithDefineInfo<Type>, errors: Vec<LazyGenericTypeMismatchError>) -> Self {
+        let mut generics = Vec::new();
+        for error in errors {
+            for generic in error.generics {
+                generics.push((generic.0, generic.1, error.origin.clone()))
+            }
+        }
+
+        Self {
+            origin_type,
+            generics
+        }
+    }
+}
+
+impl LazyTypeReport for LazyGenericTypeInferError {
+    fn build_report(
+        &self,
+        type_environment: &TypeEnvironment,
+        _: &TranspileModuleContext
+    ) -> Either<TranspileError, TranspileWarning> {
+        
+        let generics = self.generics.iter()
+            .map(|(type_0, type_1, origin)| {
+                (
+                    type_0.clone().map(|ty| { type_environment.get_type_display_string(&ty) }),
+                    type_1.clone().map(|ty| { type_environment.get_type_display_string(&ty) }),
+                    origin.clone()
+                )
+            })
+            .collect();
+
+        Either::Left(TranspileError::new(GenericTypeInferErrorReport {
+            origin_type: self.origin_type.clone()
+                .map(|ty| { type_environment.get_type_display_string(&ty) }),
+            generics,
+        }))
+    }
+}
+
+pub(crate) struct GenericTypeInferErrorReport {
+    origin_type: WithDefineInfo<String>,
+    generics: Vec<(WithDefineInfo<String>, WithDefineInfo<String>, WithDefineInfo<()>)>
+}
+
+impl TranspileReport for GenericTypeInferErrorReport {
+    fn print(&self, context: &TranspileModuleContext) {
+        let text = &context.context.localized_text;
+        let error_code = 0074;
+        let key = ErrorMessageKey::new(error_code);
+
+        let message = key.get_massage(text, ErrorMessageType::Message);
+
+        let mut builder = Report::build(
+                ReportKind::Error,
+                self.origin_type.module_name.as_ref().clone(),
+                self.origin_type.span.start
+            )
+            .with_code(error_code)
+            .with_message(String::new());
+
+        builder.add_label(
+            Label::new((self.origin_type.module_name.as_ref().clone(), self.origin_type.span.clone()))
+                .with_color(Color::Red)
+                .with_message(key.get_massage(
+                    text,
+                    ErrorMessageType::Label(0))
+                        .replace("%type", self.origin_type.value.clone().fg(Color::Yellow).to_string().as_str())
+                )
+        );
+
+        let mut color_generator = ColorGenerator::new();
+        let mut generic_ids = String::new();
+        for i in 0..self.generics.len() {
+            let generic = &self.generics[i];
+            let color = color_generator.next();
+
+            let origin_message = key.get_massage(text, ErrorMessageType::Label(1))
+                .replace("%generic", format!("'{}", i.to_string()).fg(color).to_string().as_str());
+
+            builder.add_label(
+                Label::new((generic.2.module_name.as_ref().clone(), generic.2.span.clone()))
+                    .with_color(color)
+                    .with_message(origin_message)
+            );
+
+
+            let message_0 = key.get_massage(text, ErrorMessageType::Label(2))
+                .replace("%generic", format!("'{}", i.to_string()).fg(color).to_string().as_str())
+                .replace("%infer_type", generic.0.value.clone().fg(color).to_string().as_str());
+
+            builder.add_label(
+                Label::new((generic.0.module_name.as_ref().clone(), generic.0.span.clone()))
+                    .with_color(color)
+                    .with_message(message_0)
+            );
+
+
+            let message_1 = key.get_massage(text, ErrorMessageType::Label(2))
+                .replace("%generic", format!("'{}", i.to_string()).fg(color).to_string().as_str())
+                .replace("%infer_type", generic.1.value.clone().fg(color).to_string().as_str());
+
+            builder.add_label(
+                Label::new((generic.1.module_name.as_ref().clone(), generic.1.span.clone()))
+                    .with_color(color)
+                    .with_message(message_1)
+            );
+
+
+            if i != 0 {
+                generic_ids += " ";
+            }
+            generic_ids += format!("'{}", i).fg(color).to_string().as_str();
+        }
+
+        if !self.generics.is_empty() {
+            builder.set_note(key.get_massage(text, ErrorMessageType::Note));
+        }
+
+        if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
+            builder.set_help(help);
+        }
+
+        builder.set_message(message.replace("%generics", generic_ids.as_str()));
+
+        let mut module_names = vec![
+            self.origin_type.module_name.as_ref().clone()
+        ];
+
+        for (ty_0, ty_1, origin) in self.generics.iter() {
+            module_names.push(ty_0.module_name.as_ref().clone());
+            module_names.push(ty_1.module_name.as_ref().clone());
+            module_names.push(origin.module_name.as_ref().clone());
+        }
+
+        let context = &context.context;
+        let source_code_vec = module_names.iter()
+            .map(|module_name| { context.get_module_context(module_name).unwrap().source_code.clone() })
+            .collect::<Vec<_>>();
+        
+        let sources_vec = module_names.into_iter().zip(source_code_vec.iter())
+            .map(|(module_name, source_code)| { (module_name, source_code.code.as_str()) })
+            .collect::<Vec<_>>();
+
+        builder.finish().print(sources(sources_vec)).unwrap();
+    }
+}
+
+
 pub(crate) struct CollectedImplementation {
     pub implements_info: ImplementsInfo,
     pub local_generics: Vec<Type>,
-    pub errors: Vec<TypeMismatchError>
+    pub errors: Vec<LazyGenericTypeMismatchError>
 }
 
 

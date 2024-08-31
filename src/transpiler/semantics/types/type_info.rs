@@ -1330,7 +1330,7 @@ impl ImplementsInfoSet {
         dbg!(type_environment.get_type_display_string(ty));
 
         for implements_info in iter {
-            dbg!(type_environment.get_type_display_string(&implements_info.concrete.value));
+            println!("collect | ty: {}, concrete: {}, interface: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(&implements_info.concrete.value), type_environment.get_type_display_string(&implements_info.interface.value));
 
             if !ImplementsInfo::contains_target_type(
                 &implements_info.concrete.value,
@@ -1383,6 +1383,7 @@ impl ImplementsInfoSet {
             );
 
             if result.is_err() {
+                println!("unify NO! | {} == {}", type_environment.get_type_display_string(&impl_concrete), type_environment.get_type_display_string(&resolved_ty));
                 continue;
             }
 

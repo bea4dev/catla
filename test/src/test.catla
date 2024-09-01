@@ -164,8 +164,8 @@ function <I: I1<int>> eeee(i: I) {
 function <T, I: I1<T>> dddd(i: I) -> T {}
 
 
-interface TestInterface6<T> {}
-interface TestInterface7<T> {}
+interface TestInterface6<T>: TestInterface7<T> {}
+interface TestInterface7<T>: TestInterface8<T> {}
 interface TestInterface8<T> {
     function test8(let this) -> T;
 }

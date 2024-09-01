@@ -801,7 +801,7 @@ impl ImplementsInfo {
         }
 
         if let Type::LocalGeneric(generic_id) = ty {
-            let (_z, ty) = type_environment.resolve_generic_type(*generic_id);
+            let (_, ty) = type_environment.resolve_generic_type(*generic_id);
 
             return ImplementsInfo::contains_target_type(
                 self_type,
@@ -1014,7 +1014,7 @@ impl ImplementsInfo {
     }
     
     pub(crate) fn get_element_type(&self, element_name: &str) -> Option<WithDefineInfo<Type>> {
-        if self.is_bounds_info {
+        if self.is_bounds_info || self.element_types.is_empty() {
             self.interface.value.get_element_type_with_replaced_generic(element_name)
                 .map(|ty| {
                     WithDefineInfo {
@@ -1120,7 +1120,7 @@ impl ImplementsInfoSet {
                 type_environment,
                 allow_unknown
             ) {
-                println!("ty: {}, impl_interface: {}", type_environment.get_type_display_string(ty), type_environment.get_type_display_string(&implements_info.interface.value));
+                println!("interface: {}, impl_interface: {}", type_environment.get_type_display_string(interface), type_environment.get_type_display_string(&implements_info.interface.value));
 
                 if ImplementsInfo::contains_target_type(
                     &implements_info.concrete.value,

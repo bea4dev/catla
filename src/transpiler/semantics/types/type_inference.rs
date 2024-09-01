@@ -41,6 +41,7 @@ pub(crate) struct TypeEnvironment<'allocator, 'input> {
     lazy_generic_type_inference: Vec<LazyGenericTypeInference, &'allocator Bump>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
     current_generics_id: usize,
+    var_span_and_entity_ids: Vec<(Range<usize>, EntityID), &'allocator Bump>
 }
 
 impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
@@ -59,7 +60,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             closures: Vec::new_in(allocator),
             lazy_generic_type_inference: Vec::new_in(allocator),
             lazy_type_reports: Vec::new_in(allocator),
-            current_generics_id: 0
+            current_generics_id: 0,
+            var_span_and_entity_ids: Vec::new_in(allocator)
         }
     }
 
@@ -1161,6 +1163,28 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         }
 
         self.check_impl_interface_generics(errors);
+
+        self.print_var_type(context);
+    }
+
+    fn print_var_type(&self, context: &TranspileModuleContext) {
+        if !context.context.settings.is_debug {
+            return;
+        }
+
+        let mut builder = Report::build(ReportKind::Custom("Debug", Color::Cyan), &context.module_name, 0);
+
+        for var_type_and_span in self.var_span_and_entity_ids.iter() {
+            let ty = self.resolve_entity_type(var_type_and_span.1).value;
+            
+            builder.add_label(
+                Label::new((&context.module_name, var_type_and_span.0.clone()))
+                    .with_color(Color::Green)
+                    .with_message(self.get_type_display_string(&ty))
+            );
+        }
+        
+        builder.finish().print((&context.module_name, Source::from(context.source_code.code.as_str()))).unwrap();
     }
 
     fn lazy_type_inference_generics(
@@ -1535,7 +1559,6 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
     context: &TranspileModuleContext
 ) {
     let mut has_type = false;
-    let mut var_entity_id_and_spans = Vec::new_in(allocator);
 
     let mut override_elements_environment = OverrideElementsEnvironment::new(implements_interfaces);
 
@@ -2173,7 +2196,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                         }
 
                         if let Ok(name) = &variable_define.name {
-                            var_entity_id_and_spans.push((name.span.clone(), EntityID::from(variable_define)));
+                            type_environment.var_span_and_entity_ids.push((name.span.clone(), EntityID::from(variable_define)));
                         }
                     }
                 }
@@ -2298,21 +2321,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
     
     if !is_interface_scope {
         override_elements_environment.collect_errors(errors, context);
-    }
-
-    let mut builder = Report::build(ReportKind::Custom("Debug", Color::Cyan), &context.module_name, 0);
-
-    for var_type_and_span in var_entity_id_and_spans {
-        let ty = type_environment.resolve_entity_type(var_type_and_span.1).value;
-        
-        builder.add_label(
-            Label::new((&context.module_name, var_type_and_span.0))
-                .with_color(Color::Green)
-                .with_message(type_environment.get_type_display_string(&ty))
-        );
-    }
-    
-    builder.finish().print((&context.module_name, Source::from(context.source_code.code.as_str()))).unwrap();
+    } 
 }
 
 fn get_and_check_where_bounds_implements_info(

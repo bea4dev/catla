@@ -309,17 +309,17 @@ pub(crate) fn collect_module_element_types_program(
                     }
                 }
             },
-            StatementAST::UserTypeDefine(data_struct_define) => {
-                if let Ok(name) = &data_struct_define.name {
+            StatementAST::UserTypeDefine(user_type_define) => {
+                if let Ok(name) = &user_type_define.name {
                     let user_type = user_type_map.get(name.value).unwrap().clone();
 
-                    let current_scope_this_type = if data_struct_define.kind.value == UserTypeKindEnum::Interface {
+                    let current_scope_this_type = if user_type_define.kind.value == UserTypeKindEnum::Interface {
                         ScopeThisType::new(Type::This)
                     } else {
                         ScopeThisType::new(user_type.clone())
                     };
                     
-                    if let Some(generics_define) = &data_struct_define.generics_define {
+                    if let Some(generics_define) = &user_type_define.generics_define {
                         let generic_types = get_generic_type(
                             generics_define,
                             user_type_map,
@@ -337,9 +337,9 @@ pub(crate) fn collect_module_element_types_program(
                         set_generics_bounds(&user_type, generic_types);
                     }
                     
-                    if let Type::UserType{ user_type_info, generics: _, generics_span: _ } = user_type {
+                    if let Type::UserType{ user_type_info, generics: _, generics_span: _ } = &user_type {
                         let where_bounds = get_where_bounds(
-                            &data_struct_define.where_clause,
+                            &user_type_define.where_clause,
                             user_type_map,
                             import_element_map,
                             name_resolved_map,
@@ -355,44 +355,103 @@ pub(crate) fn collect_module_element_types_program(
                         *where_bounds_lock.as_mut().left().unwrap() = where_bounds;
                     }
 
-                    if let Some(super_type_info) = &data_struct_define.super_type_info {
-                        let concrete = user_type_map.get(name.value).unwrap().clone();
-                        let generics = if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &concrete {
-                            Arc::new(user_type_info.generics_define.clone())
-                        } else {
-                            Arc::new(Vec::new())
-                        };
-
-                        for type_info in super_type_info.type_infos.iter() {
-                            let interface = get_type(
-                                type_info,
-                                user_type_map,
-                                import_element_map,
-                                name_resolved_map,
-                                module_user_type_map,
-                                module_element_type_map,
-                                generics_map,
-                                &current_scope_this_type,
-                                errors,
-                                warnings,
-                                context
-                            );
-                            module_entity_type_map.insert(EntityID::from(type_info), interface.clone());
-
-                            let implements_info = ImplementsInfo {
-                                generics: generics.clone(),
-                                interface: Spanned::new(interface, type_info.get_span()),
-                                concrete: Spanned::new(concrete.clone(), name.span.clone()),
+                    if let Some(super_type_info) = &user_type_define.super_type_info {
+                        if user_type_define.kind.value == UserTypeKindEnum::Interface {
+                            let bound = Bound {
                                 module_name: context.module_name.clone(),
-                                where_bounds: Arc::new(Vec::new()),
-                                element_types: Arc::new(FxHashMap::default()),
-                                is_bounds_info: true
+                                span: name.span.clone(),
+                                ty: user_type.init_generics(),
+                                entity_id: EntityID::dummy()
                             };
-                            implements_infos.insert(EntityID::from(type_info), implements_info);
+
+                            let concrete_generic = Arc::new(GenericType {
+                                define_entity_id: EntityID::dummy(),
+                                name: Arc::new(name.value.to_string()),
+                                bounds: FreezableMutex::new(vec![Arc::new(bound)]),
+                                location: WithDefineInfo {
+                                    value: (),
+                                    module_name: context.module_name.clone(),
+                                    span: name.span.clone()
+                                }
+                            });
+
+                            let concrete = Type::Generic(concrete_generic.clone());
+
+                            let generics = if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &user_type {
+                                let mut generics = user_type_info.generics_define.clone();
+                                //generics.push(concrete_generic);
+                                generics.insert(0, concrete_generic);
+                                Arc::new(generics)
+                            } else {
+                                unreachable!()
+                            };
+
+                            for type_info in super_type_info.type_infos.iter() {
+                                let interface = get_type(
+                                    type_info,
+                                    user_type_map,
+                                    import_element_map,
+                                    name_resolved_map,
+                                    module_user_type_map,
+                                    module_element_type_map,
+                                    generics_map,
+                                    &current_scope_this_type,
+                                    errors,
+                                    warnings,
+                                    context
+                                );
+                                module_entity_type_map.insert(EntityID::from(type_info), interface.clone());
+
+                                let implements_info = ImplementsInfo {
+                                    generics: generics.clone(),
+                                    interface: Spanned::new(interface, type_info.get_span()),
+                                    concrete: Spanned::new(concrete.clone(), name.span.clone()),
+                                    module_name: context.module_name.clone(),
+                                    where_bounds: Arc::new(Vec::new()),
+                                    element_types: Arc::new(FxHashMap::default()),
+                                    is_bounds_info: false
+                                };
+                                implements_infos.insert(EntityID::from(type_info), implements_info);
+                            }
+                        } else {
+                            let concrete = user_type_map.get(name.value).unwrap().clone().init_generics();
+                            let generics = if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &concrete {
+                                Arc::new(user_type_info.generics_define.clone())
+                            } else {
+                                unreachable!()
+                            };
+
+                            for type_info in super_type_info.type_infos.iter() {
+                                let interface = get_type(
+                                    type_info,
+                                    user_type_map,
+                                    import_element_map,
+                                    name_resolved_map,
+                                    module_user_type_map,
+                                    module_element_type_map,
+                                    generics_map,
+                                    &current_scope_this_type,
+                                    errors,
+                                    warnings,
+                                    context
+                                );
+                                module_entity_type_map.insert(EntityID::from(type_info), interface.clone());
+
+                                let implements_info = ImplementsInfo {
+                                    generics: generics.clone(),
+                                    interface: Spanned::new(interface, type_info.get_span()),
+                                    concrete: Spanned::new(concrete.clone(), name.span.clone()),
+                                    module_name: context.module_name.clone(),
+                                    where_bounds: Arc::new(Vec::new()),
+                                    element_types: Arc::new(FxHashMap::default()),
+                                    is_bounds_info: true
+                                };
+                                implements_infos.insert(EntityID::from(type_info), implements_info);
+                            }
                         }
                     }
 
-                    if let Some(block) = &data_struct_define.block.value {
+                    if let Some(block) = &user_type_define.block.value {
                         let user_type = user_type_map.get(name.value).unwrap();
 
                         collect_module_element_types_program(

@@ -11,12 +11,13 @@ pub mod localize;
 
 fn main() {
 
-    #[cfg(not(target_os = "windows"))]
-    unsafe { backtrace_on_stack_overflow::enable() };
+    //#[cfg(not(target_os = "windows"))]
+    //unsafe { backtrace_on_stack_overflow::enable() };
 
     let settings = TranspileSettings {
         lang: "ja_JP".to_string(),
-        num_threads: num_cpus::get()
+        num_threads: num_cpus::get(),
+        is_debug: true
     };
 
     let mut resource_provider = DefaultSourceCodeProvider::new();

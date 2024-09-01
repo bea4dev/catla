@@ -105,7 +105,8 @@ impl TranspileContext {
 
 pub struct TranspileSettings {
     pub lang: String,
-    pub num_threads: usize
+    pub num_threads: usize,
+    pub is_debug: bool
 }
 
 

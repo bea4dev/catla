@@ -69,7 +69,8 @@ pub(crate) fn collect_user_type_program(
                         generics_define_span,
                         element_types: Mutex::new(FxHashMap::default()),
                         element_attributes: Default::default(),
-                        where_bounds: Default::default()
+                        where_bounds: Default::default(),
+                        super_type: Default::default()
                     };
 
                     if let Some(block) = &user_type_define.block.value {
@@ -117,7 +118,8 @@ pub(crate) fn collect_user_type_program(
                         generics_define_span,
                         element_types: Mutex::new(FxHashMap::default()),
                         element_attributes: Default::default(),
-                        where_bounds: Default::default()
+                        where_bounds: Default::default(),
+                        super_type: FreezableMutex::new(Vec::new())
                     };
 
                     let ty = Type::UserType {

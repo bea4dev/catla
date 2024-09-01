@@ -357,35 +357,6 @@ pub(crate) fn collect_module_element_types_program(
 
                     if let Some(super_type_info) = &user_type_define.super_type_info {
                         if user_type_define.kind.value == UserTypeKindEnum::Interface {
-                            let bound = Bound {
-                                module_name: context.module_name.clone(),
-                                span: name.span.clone(),
-                                ty: user_type.init_generics(),
-                                entity_id: EntityID::dummy()
-                            };
-
-                            let concrete_generic = Arc::new(GenericType {
-                                define_entity_id: EntityID::dummy(),
-                                name: Arc::new(name.value.to_string()),
-                                bounds: FreezableMutex::new(vec![Arc::new(bound)]),
-                                location: WithDefineInfo {
-                                    value: (),
-                                    module_name: context.module_name.clone(),
-                                    span: name.span.clone()
-                                }
-                            });
-
-                            let concrete = Type::Generic(concrete_generic.clone());
-
-                            let generics = if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &user_type {
-                                let mut generics = user_type_info.generics_define.clone();
-                                //generics.push(concrete_generic);
-                                generics.insert(0, concrete_generic);
-                                Arc::new(generics)
-                            } else {
-                                unreachable!()
-                            };
-
                             for type_info in super_type_info.type_infos.iter() {
                                 let interface = get_type(
                                     type_info,
@@ -402,16 +373,10 @@ pub(crate) fn collect_module_element_types_program(
                                 );
                                 module_entity_type_map.insert(EntityID::from(type_info), interface.clone());
 
-                                let implements_info = ImplementsInfo {
-                                    generics: generics.clone(),
-                                    interface: Spanned::new(interface, type_info.get_span()),
-                                    concrete: Spanned::new(concrete.clone(), name.span.clone()),
-                                    module_name: context.module_name.clone(),
-                                    where_bounds: Arc::new(Vec::new()),
-                                    element_types: Arc::new(FxHashMap::default()),
-                                    is_bounds_info: false
-                                };
-                                implements_infos.insert(EntityID::from(type_info), implements_info);
+                                if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &user_type {
+                                    let mut super_type = user_type_info.super_type.lock().unwrap();
+                                    super_type.as_mut().unwrap_left().push(interface);
+                                }
                             }
                         } else {
                             let concrete = user_type_map.get(name.value).unwrap().clone().init_generics();

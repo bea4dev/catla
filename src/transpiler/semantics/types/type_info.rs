@@ -141,7 +141,8 @@ impl Type {
                         generics_define_span: user_type_info.generics_define_span.clone(),
                         element_types: Mutex::new(element_types),
                         element_attributes: user_type_info.element_attributes.clone(),
-                        where_bounds: FreezableMutex::new(where_bounds)
+                        where_bounds: FreezableMutex::new(where_bounds),
+                        super_type: user_type_info.super_type.clone()
                     };
                     
                     Arc::new(user_type_info)
@@ -591,7 +592,8 @@ pub struct UserTypeInfo {
     pub generics_define_span: Option<Range<usize>>,
     pub element_types: Mutex<FxHashMap<String, WithDefineInfo<Type>>>,
     pub element_attributes: Arc<Mutex<FxHashMap<String, Vec<StatementAttribute>>>>,
-    pub where_bounds: FreezableMutex<Vec<WhereBound>>
+    pub where_bounds: FreezableMutex<Vec<WhereBound>>,
+    pub super_type: FreezableMutex<Vec<Type>>
 }
 
 impl PartialEq for UserTypeInfo {
@@ -1067,6 +1069,25 @@ impl ImplementsInfoSet {
     ) -> bool {
 
         let resolved_ty = type_environment.resolve_type(ty);
+        let resolved_interface = type_environment.resolve_type(interface);
+
+        if resolved_interface.is_interface() {
+            if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &resolved_ty {
+                if resolved_ty.is_interface() {
+                    for super_type in user_type_info.super_type.freeze_and_get().iter() {
+                        if self.is_implemented(
+                            super_type,
+                            interface,
+                            type_environment,
+                            current_scope_implements_info_set,
+                            allow_unknown
+                        ) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
 
         if ImplementsInfo::contains_target_type(
             interface,
@@ -1078,7 +1099,7 @@ impl ImplementsInfoSet {
         ) {
             return true;
         }
-        
+
         if let Type::Generic(generic) = resolved_ty {
             for bound in generic.bounds.freeze_and_get().iter() {
                 if ImplementsInfo::contains_target_type(
@@ -1087,6 +1108,16 @@ impl ImplementsInfoSet {
                     self,
                     current_scope_implements_info_set,
                     type_environment,
+                    allow_unknown
+                ) {
+                    return true;
+                }
+
+                if self.is_implemented(
+                    &bound.ty,
+                    interface,
+                    type_environment,
+                    current_scope_implements_info_set,
                     allow_unknown
                 ) {
                     return true;

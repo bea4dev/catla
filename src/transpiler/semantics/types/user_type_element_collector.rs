@@ -409,7 +409,7 @@ pub(crate) fn collect_module_element_types_program(
                                     module_name: context.module_name.clone(),
                                     where_bounds: Arc::new(Vec::new()),
                                     element_types: Arc::new(FxHashMap::default()),
-                                    is_bounds_info: true
+                                    is_bounds_info: false
                                 };
                                 implements_infos.insert(EntityID::from(type_info), implements_info);
                             }

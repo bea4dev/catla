@@ -955,6 +955,15 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             }
         }
     }
+
+    pub(crate) fn resolve_type_surface(&self, ty: &Type) -> Type {
+        match ty {
+            Type::LocalGeneric(generic_id) => {
+                self.resolve_generic_type(*generic_id).1.value
+            },
+            _ => ty.clone()
+        }
+    }
     
     pub fn get_type_display_string(&self, ty: &Type) -> String {
         match ty {
@@ -1147,9 +1156,10 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
         global_implements_info_set: &ImplementsInfoSet,
         errors: &mut Vec<TranspileError>,
         warnings: &mut Vec<TranspileWarning>,
-        context: &TranspileModuleContext
+        context: &TranspileModuleContext,
+        allocator: &'allocator Bump
     ) {
-        self.lazy_type_inference_generics(global_implements_info_set);
+        self.lazy_type_inference_generics(global_implements_info_set, allocator);
 
         implicit_convert_map.extend(&self.implicit_convert_map);
 
@@ -1189,7 +1199,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
     fn lazy_type_inference_generics(
         &mut self,
-        global_implements_info_set: &ImplementsInfoSet
+        global_implements_info_set: &ImplementsInfoSet,
+        allocator: &'allocator Bump
     ) {
         for type_infer in self.lazy_generic_type_inference.clone() {
             let generics_define = &type_infer.generics_define;
@@ -1226,7 +1237,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         false,
                         self,
                         current_scope_implements_info_set,
-                        &mut errors
+                        &mut errors,
+                        allocator
                     );
                 }
             }
@@ -1257,7 +1269,8 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         false,
                         self,
                         current_scope_implements_info_set,
-                        &mut errors
+                        &mut errors,
+                        allocator
                     );
                 }
             }
@@ -1788,7 +1801,14 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                         }
                     }
 
-                    type_environment.collect_info(implicit_convert_map, global_implements_info_set, errors, warnings, context);
+                    type_environment.collect_info(
+                        implicit_convert_map,
+                        global_implements_info_set,
+                        errors,
+                        warnings,
+                        context,
+                        allocator
+                    );
                 }
             },
             StatementAST::UserTypeDefine(user_type_define) => {
@@ -1926,7 +1946,14 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                         context
                     );
 
-                    type_environment.collect_info(implicit_convert_map, global_implements_info_set, errors, warnings, context);
+                    type_environment.collect_info(
+                        implicit_convert_map,
+                        global_implements_info_set,
+                        errors,
+                        warnings,
+                        context,
+                        allocator
+                    );
                 }
             },
             StatementAST::Implements(implements) => {
@@ -5033,7 +5060,30 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
     let mut pre_element_types = Vec::new_in(allocator);
     if let Some(element_type) = element_type {
         pre_element_types.push((element_type, parent_type.value.clone(), false, None));
-    } else {
+    } else if parent_type.value.is_interface() {
+        let mut super_types = Vec::new_in(allocator);
+        super_types.push(parent_type.value.clone());
+
+        loop {
+            let super_type = match super_types.pop() {
+                Some(ty) => ty,
+                _ => break
+            };
+
+            if let Some(element_type) = super_type.get_element_type_with_replaced_generic(element_name.value) {
+                pre_element_types.push((
+                    element_type,
+                    super_type.clone(),
+                    true,
+                    None
+                ));
+            }
+
+            super_types.extend(super_type.get_super_type_with_replaced_generics());
+        }
+    }
+
+    if pre_element_types.is_empty() {
         let mut implementations = Vec::new_in(allocator);
         
         if let Type::Generic(generic_define) = &parent_type.value {
@@ -5047,34 +5097,30 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
                         true,
                         None
                     ));
-                }/* else {
-                    implementations.extend(
-                        global_implements_info_set.collect_satisfied_implementations(
-                            &bound.ty,
-                            type_environment,
-                            current_scope_implements_info_set,
-                            allocator
-                        ).into_iter().map(|implementation| {
-                            let this_type = Type::Generic(generic_define.clone());
-                            
-                            let implements_info = implementation.implements_info;
-                            let implements_info = ImplementsInfo {
-                                generics: implements_info.generics,
-                                interface: implements_info.interface.map(|ty| { ty.replace_this_type(&this_type, true, true) }),
-                                concrete: implements_info.concrete.map(|ty| { ty.replace_this_type(&this_type, true, true) }),
-                                module_name: implements_info.module_name,
-                                where_bounds: Arc::new(Type::replace_where_bounds_this_type(&implements_info.where_bounds, &this_type)),
-                                element_types: Arc::new(Default::default()),
-                                is_bounds_info: true
-                            };
-                            
-                            CollectedImplementation {
-                                implements_info,
-                                local_generics: implementation.local_generics
-                            }
-                        })
-                    );
-                }*/
+                } else {
+                    let mut super_types = Vec::new_in(allocator);
+                    super_types.push(bound.ty.clone());
+
+                    loop {
+                        let super_type = match super_types.pop() {
+                            Some(ty) => ty,
+                            _ => break
+                        };
+
+                        if let Some(element_type) = super_type.get_element_type_with_replaced_generic(element_name.value) {
+                            let element_type = element_type
+                                .map(|ty| { ty.replace_this_type(&parent_type.value, true, true) });
+                            pre_element_types.push((
+                                element_type,
+                                super_type.clone(),
+                                true,
+                                None
+                            ));
+                        }
+
+                        super_types.extend(super_type.get_super_type_with_replaced_generics());
+                    }
+                }
             }
         }
         dbg!(element_name.value);

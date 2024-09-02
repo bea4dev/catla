@@ -263,12 +263,19 @@ async fn transpile_module(
         &module_context
     );
 
+    merged_implements_infos.validate_super_type(
+        &mut errors,
+        &module_context,
+        &allocator
+    );
+
     type_environment.collect_info(
         &mut implicit_convert_map,
         &merged_implements_infos,
         &mut errors,
         &mut warnings,
-        &module_context
+        &module_context,
+        &allocator
     );
 
     module_context.context.add_error_and_warning(module_name, errors, warnings);

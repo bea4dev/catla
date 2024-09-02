@@ -446,6 +446,21 @@ impl Type {
             _ => self.clone()
         }
     }
+
+    pub(crate) fn get_super_type_with_replaced_generics(&self) -> Vec<Type> {
+        match self {
+            Type::UserType { user_type_info, generics, generics_span: _ } => {
+                user_type_info.super_type.freeze_and_get().iter().map(|super_type| {
+                    Type::get_type_with_replaced_generics(
+                        super_type,
+                        &user_type_info.generics_define,
+                        generics
+                    )
+                }).collect()
+            },
+            _ => Vec::new()
+        }
+    }
     
     pub(crate) fn get_generics_define_length(&self) -> usize {
         match self {
@@ -1071,24 +1086,6 @@ impl ImplementsInfoSet {
         let resolved_ty = type_environment.resolve_type(ty);
         let resolved_interface = type_environment.resolve_type(interface);
 
-        if resolved_interface.is_interface() {
-            if let Type::UserType { user_type_info, generics: _, generics_span: _ } = &resolved_ty {
-                if resolved_ty.is_interface() {
-                    for super_type in user_type_info.super_type.freeze_and_get().iter() {
-                        if self.is_implemented(
-                            super_type,
-                            interface,
-                            type_environment,
-                            current_scope_implements_info_set,
-                            allow_unknown
-                        ) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-
         if ImplementsInfo::contains_target_type(
             interface,
             &resolved_ty,
@@ -1098,6 +1095,22 @@ impl ImplementsInfoSet {
             allow_unknown
         ) {
             return true;
+        }
+
+        if resolved_interface.is_interface() {
+            if resolved_ty.is_interface() {
+                for super_type in resolved_ty.get_super_type_with_replaced_generics() {
+                    if self.is_implemented(
+                        &super_type,
+                        interface,
+                        type_environment,
+                        current_scope_implements_info_set,
+                        allow_unknown
+                    ) {
+                        return true;
+                    }
+                }
+            }
         }
 
         if let Type::Generic(generic) = resolved_ty {
@@ -1443,7 +1456,8 @@ impl ImplementsInfoSet {
                             true,
                             type_environment,
                             current_scope_implements_info_set,
-                            &mut errors
+                            &mut errors,
+                            allocator
                         );
                     }
                 }
@@ -1472,7 +1486,8 @@ impl ImplementsInfoSet {
                             true,
                             type_environment,
                             current_scope_implements_info_set,
-                            &mut errors
+                            &mut errors,
+                            allocator
                         );
                     }
                 }
@@ -1499,7 +1514,7 @@ impl ImplementsInfoSet {
         satisfied_implementations
     }
 
-    pub(crate) fn type_inference_for_generic_bounds(
+    pub(crate) fn type_inference_for_generic_bounds<'allocator>(
         &self,
         original_bound: &Type,
         local_generic_replaced_bound: &Type,
@@ -1511,15 +1526,13 @@ impl ImplementsInfoSet {
         allow_unknown: bool,
         type_environment: &mut TypeEnvironment,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-        errors: &mut Vec<LazyGenericTypeMismatchError>
+        errors: &mut Vec<LazyGenericTypeMismatchError>,
+        allocator: &'allocator Bump
     ) {
         println!("lazy type infer | original_bound: {}, replaced_bound: {}, target: {}", type_environment.get_type_display_string(original_bound), type_environment.get_type_display_string(local_generic_replaced_bound), type_environment.get_type_display_string(local_generic_replaced_target));
 
-        let resolved_target = if let Type::LocalGeneric(generic_id) = local_generic_replaced_target {
-            type_environment.resolve_generic_type(*generic_id).1.value
-        } else {
-            local_generic_replaced_target.clone()
-        };
+        let resolved_target = type_environment.resolve_type_surface(local_generic_replaced_target);
+        let resolved_bound  = type_environment.resolve_type_surface(local_generic_replaced_bound);
 
         if &Type::Unknown == &resolved_target {
             return;
@@ -1551,42 +1564,68 @@ impl ImplementsInfoSet {
                                 generics: error.generics
                             });
                         }
+                    } else {
+                        for super_type in resolved_target.get_super_type_with_replaced_generics() {
+                            self.type_inference_for_generic_bounds(
+                                original_bound,
+                                local_generic_replaced_bound,
+                                &super_type,
+                                target_span,
+                                target_type_module_name,
+                                bound_span,
+                                bound_type_module_name,
+                                allow_unknown,
+                                type_environment,
+                                current_scope_implements_info_set,
+                                errors,
+                                allocator
+                            );
+                        }
                     }
                 }
             },
             Type::Generic(generic) => {
                 for bound in generic.bounds.freeze_and_get().iter() {
-                    let resolved_bound = if let Type::LocalGeneric(generic_id) = &bound.ty {
-                        type_environment.resolve_generic_type(*generic_id).1.value
-                    } else {
-                        bound.ty.clone()
-                    };
+                    if let Type::UserType { user_type_info: user_type_info_1, generics: _, generics_span: _ } = &resolved_bound {
 
-                    if let Type::UserType { user_type_info: user_type_info_0, generics: _, generics_span: _ } = &resolved_bound {
-                        if let Type::UserType { user_type_info: user_type_info_1, generics: _, generics_span: _ } = &local_generic_replaced_bound {
-                            if user_type_info_0.module_name.as_str() == user_type_info_1.module_name.as_str()
-                                && user_type_info_0.name.value.as_str() == user_type_info_1.name.value.as_str() {
-                                
-                                if let Err(error) = type_environment.unify_type(
-                                    local_generic_replaced_bound,
-                                    bound_span,
-                                    bound_type_module_name,
-                                    &resolved_bound,
-                                    target_span,
-                                    target_type_module_name,
-                                    &ScopeThisType::new(Type::This),
-                                    allow_unknown,
-                                    false
-                                ) {
-                                    errors.push(LazyGenericTypeMismatchError {
-                                        origin: WithDefineInfo {
-                                            value: (),
-                                            module_name: bound_type_module_name.clone(),
-                                            span: bound_span.clone()
-                                        },
-                                        generics: error.generics
-                                    });
+                        let mut super_types = Vec::new_in(allocator);
+                        super_types.push(bound.ty.clone());
+
+                        loop {
+                            let bound_type = match super_types.pop() {
+                                Some(ty) => ty,
+                                _ => break
+                            };
+
+                            let resolved_target_bound = type_environment.resolve_type_surface(&bound_type);
+
+                            if let Type::UserType { user_type_info: user_type_info_0, generics: _, generics_span: _ } = &resolved_target_bound {
+                                if user_type_info_0.module_name.as_str() == user_type_info_1.module_name.as_str()
+                                    && user_type_info_0.name.value.as_str() == user_type_info_1.name.value.as_str() {
+                                    
+                                    if let Err(error) = type_environment.unify_type(
+                                        local_generic_replaced_bound,
+                                        bound_span,
+                                        bound_type_module_name,
+                                        &resolved_target_bound,
+                                        target_span,
+                                        target_type_module_name,
+                                        &ScopeThisType::new(Type::This),
+                                        allow_unknown,
+                                        false
+                                    ) {
+                                        errors.push(LazyGenericTypeMismatchError {
+                                            origin: WithDefineInfo {
+                                                value: (),
+                                                module_name: bound_type_module_name.clone(),
+                                                span: bound_span.clone()
+                                            },
+                                            generics: error.generics
+                                        });
+                                    }
                                 }
+
+                                super_types.extend(resolved_target_bound.get_super_type_with_replaced_generics());
                             }
                         }
                     }
@@ -1745,7 +1784,8 @@ impl ImplementsInfoSet {
                                 allow_unknown,
                                 type_environment,
                                 current_scope_implements_info_set,
-                                errors
+                                errors,
+                                allocator
                             );
                         }
                     }
@@ -1774,7 +1814,8 @@ impl ImplementsInfoSet {
                                 allow_unknown,
                                 type_environment,
                                 current_scope_implements_info_set,
-                                errors
+                                errors,
+                                allocator
                             );
                         }
                     }
@@ -1875,6 +1916,57 @@ impl ImplementsInfoSet {
             });
         }
 
+    }
+
+    pub(crate) fn validate_super_type(
+        &self,
+        errors: &mut Vec<TranspileError>,
+        context: &TranspileModuleContext,
+        allocator: &Bump
+    ) {
+        let mut type_environment = TypeEnvironment::new_with_return_type(
+            Either::Left(EntityID::dummy()),
+            allocator
+        );
+
+        for implements_info in self.implements_infos.values() {
+            if implements_info.is_bounds_info
+                || implements_info.module_name.as_str() != context.module_name.as_str() {
+
+                continue;
+            }
+
+            for super_type in implements_info.interface.value.get_super_type_with_replaced_generics() {
+                let super_type = super_type.replace_this_type(
+                    &implements_info.concrete.value,
+                    true,
+                    true
+                );
+
+                if !self.is_implemented(
+                    &implements_info.concrete.value,
+                    &super_type,
+                    &mut type_environment,
+                    &None,
+                    false
+                ) {
+                    let error = SimpleError::new(
+                        0075,
+                        implements_info.interface.span.clone(),
+                        vec![
+                            (type_environment.get_type_display_string(&implements_info.concrete.value), Color::Yellow),
+                            (type_environment.get_type_display_string(&implements_info.interface.value), Color::Yellow),
+                            (type_environment.get_type_display_string(&super_type), Color::Cyan)
+                        ],
+                        vec![
+                            ((implements_info.module_name.clone(), implements_info.concrete.span.clone()), Color::Yellow),
+                            ((implements_info.module_name.clone(), implements_info.interface.span.clone()), Color::Red)
+                        ]
+                    );
+                    errors.push(error);
+                }
+            }
+        }
     }
 
 }

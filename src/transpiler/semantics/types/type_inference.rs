@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 
 use crate::transpiler::{advice::Advice, component::EntityID, context::TranspileModuleContext, error::{ErrorMessageKey, ErrorMessageType, SimpleError, TranspileReport}, name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo}, semantics::types::type_info::LazyGenericTypeInferError, TranspileError, TranspileWarning};
 
-use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, CollectedImplementation, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, LocalGenericID, OverrideElementsEnvironment, ScopeThisType, Type, WhereBound, WithDefineInfo}, user_type_element_collector::{get_type, parse_primitive_type}};
+use super::{import_module_collector::{get_module_name_from_new_expression, get_module_name_from_primary}, type_info::{Bound, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, LocalGenericID, OverrideElementsEnvironment, ScopeThisType, Type, WhereBound, WithDefineInfo}, user_type_element_collector::{get_type, parse_primitive_type}};
 
 
 
@@ -84,7 +84,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
     pub fn get_user_or_function_type_with_local_generic_id(
         &mut self,
         ty: WithDefineInfo<Type>,
-        global_implements_info_set: &ImplementsInfoSet,
         current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
         register_bounds_check: bool
     ) -> WithDefineInfo<Type> {
@@ -1224,8 +1223,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &local_generics
                     );
 
-                    println!("lazy infer generic | original bound: {}, replaced_bound: {}, target: {}", self.get_type_display_string(&bound.ty), self.get_type_display_string(&replaced_bound_type), self.get_type_display_string(&target_type));
-
                     global_implements_info_set.type_inference_for_generic_bounds(
                         &bound.ty,
                         &replaced_bound_type,
@@ -1234,6 +1231,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &generic.location.module_name,
                         &bound.span,
                         &bound.module_name,
+                        false,
                         false,
                         self,
                         current_scope_implements_info_set,
@@ -1256,8 +1254,6 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &local_generics
                     );
 
-                    println!("lazy infer where bound | original bound: {}, replaced_bound: {}, target: {}", self.get_type_display_string(&bound.ty), self.get_type_display_string(&replaced_bound_type), self.get_type_display_string(&target_type));
-
                     global_implements_info_set.type_inference_for_generic_bounds(
                         &bound.ty,
                         &replaced_bound_type,
@@ -1266,6 +1262,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &bound.module_name,
                         &bound.span,
                         &bound.module_name,
+                        false,
                         false,
                         self,
                         current_scope_implements_info_set,
@@ -1311,6 +1308,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         &generics_define.bounds.freeze_and_get(),
                         self,
                         scope_implements_info_set,
+                        false,
                         false
                     );
         
@@ -1348,6 +1346,7 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                         bounds,
                         self,
                         scope_implements_info_set,
+                        false,
                         false
                     );
 
@@ -3419,7 +3418,6 @@ fn type_inference_primary<'allocator, 'input>(
                     module_name: context.module_name.clone(),
                     span: second_expr.0.span.clone()
                 },
-                global_implements_info_set,
                 current_scope_implements_info_set,
                 true
             );
@@ -3779,7 +3777,6 @@ fn type_inference_primary_left<'allocator, 'input>(
                                         module_name: context.module_name.clone(),
                                         span: identifier.span.clone()
                                     },
-                                    global_implements_info_set,
                                     current_scope_implements_info_set,
                                     true
                                 );
@@ -4249,7 +4246,6 @@ fn type_inference_primary_left<'allocator, 'input>(
                     module_name: context.module_name.clone(),
                     span: user_type_span
                 },
-                global_implements_info_set,
                 current_scope_implements_info_set,
                 true
             );
@@ -5123,7 +5119,7 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
                 }
             }
         }
-        dbg!(element_name.value);
+        
         implementations.extend(global_implements_info_set.collect_satisfied_implementations(
             &parent_type.value,
             type_environment,
@@ -5200,7 +5196,6 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
                     module_name: element_type.module_name.clone(),
                     span: element_name.span.clone()
                 },
-                global_implements_info_set,
                 current_scope_implements_info_set,
                 false
             ).value;
@@ -5213,7 +5208,8 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
                             &bound.ty,
                             type_environment,
                             current_scope_implements_info_set,
-                            true
+                            true,
+                            false
                         ) {
                             continue 'root;
                         }

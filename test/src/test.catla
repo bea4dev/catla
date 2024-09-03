@@ -170,12 +170,6 @@ interface TestInterface8<T> {
     function test8(let this) -> T;
 }
 
-implements<T, I: TestInterface7<T>> TestInterface8<T> for I {
-    override function test8(let this) -> T {}
-}
-
-implements<T, I: TestInterface6<T>> TestInterface7<T> for I {}
-
 function <I: TestInterface6<int>> t8(i: I) {
     let a = i.test8()
     let b = tttt8(i)

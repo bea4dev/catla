@@ -28,6 +28,7 @@ const INVALID_ARRAY_INIT_EXPR_TYPE: usize = 0067;
 const INVALID_ARRAY_LENGTH_EXPR_TYPE: usize = 0068;
 const INVALID_PRIMARY_SEPARATOR: usize = 0071;
 const NOT_IMPLEMENTS_OPERATOR_INTERFACE: usize = 0072;
+const INVALID_LOGICAL_OPERATOR_EXPR_TYPE: usize = 0076;
 
 
 pub(crate) struct TypeEnvironment<'allocator, 'input> {
@@ -2424,6 +2425,17 @@ fn type_inference_expression<'allocator, 'input>(
 ) {
     match ast {
         ExpressionEnum::OrExpression(or_expression) => {
+            if !or_expression.right_exprs.is_empty() {
+                type_environment.set_entity_type(
+                    EntityID::from(ast),
+                    WithDefineInfo {
+                        value: Type::Bool,
+                        module_name: context.module_name.clone(),
+                        span: ast.get_span()
+                    }
+                );
+            }
+
             force_be_expression |= !or_expression.right_exprs.is_empty();
 
             type_inference_and_expression(
@@ -2448,10 +2460,24 @@ fn type_inference_expression<'allocator, 'input>(
                 context
             );
 
-            let mut results = Vec::new_in(allocator);
-            let mut previous = Spanned::new(EntityID::from(&or_expression.left_expr), or_expression.left_expr.span.clone());
+            if let Some(first_right_expr) = or_expression.right_exprs.first() {
+                if type_environment.unify(
+                    Spanned::new(EntityID::from(&or_expression.left_expr), or_expression.left_expr.span.clone()),
+                    Spanned::new(EntityID::from(ast), ast.get_span()),
+                    current_scope_this_type
+                ).is_err() {
+                    let found_type = type_environment.resolve_entity_type(EntityID::from(&or_expression.left_expr)).value;
+                    let error = LogicalOperatorTypeError {
+                        operator: Spanned::new("or".to_string(), first_right_expr.0.clone()),
+                        found_type: Spanned::new(found_type, or_expression.left_expr.span.clone())
+                    };
+                    type_environment.add_lazy_type_error_report(error);
+                }
+            }
 
             for right_expr in or_expression.right_exprs.iter() {
+                let operator_span = right_expr.0.clone();
+
                 if let Ok(right_expr) = &right_expr.1 {
                     type_inference_and_expression(
                         right_expr,
@@ -2477,23 +2503,27 @@ fn type_inference_expression<'allocator, 'input>(
 
                     let current = Spanned::new(EntityID::from(right_expr), right_expr.span.clone());
 
-                    let result = type_environment.unify(
-                        previous.clone(),
+                    if type_environment.unify(
                         current.clone(),
+                        Spanned::new(EntityID::from(ast), ast.get_span()),
                         current_scope_this_type
-                    );
-                    results.push(result);
-
-                    previous = current;
+                    ).is_err() {
+                        let found_type = type_environment.resolve_entity_type(EntityID::from(right_expr)).value;
+                        let error = LogicalOperatorTypeError {
+                            operator: Spanned::new("or".to_string(), operator_span),
+                            found_type: Spanned::new(found_type, right_expr.span.clone())
+                        };
+                        type_environment.add_lazy_type_error_report(error);
+                    }
                 }
             }
 
-            add_errors(results, type_environment);
-
-            type_environment.set_entity_id_equals(
-                previous.value,
-                EntityID::from(ast)
-            );
+            if or_expression.right_exprs.is_empty() {
+                type_environment.set_entity_id_equals(
+                    EntityID::from(&or_expression.left_expr),
+                    EntityID::from(ast)
+                );
+            }
         },
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
@@ -2825,6 +2855,17 @@ fn type_inference_and_expression<'allocator, 'input>(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
+    if !ast.right_exprs.is_empty() {
+        type_environment.set_entity_type(
+            EntityID::from(ast),
+            WithDefineInfo {
+                value: Type::Bool,
+                module_name: context.module_name.clone(),
+                span: ast.span.clone()
+            }
+        );
+    }
+
     force_be_expression |= !ast.right_exprs.is_empty();
 
     type_inference_compare_expression(
@@ -2849,10 +2890,24 @@ fn type_inference_and_expression<'allocator, 'input>(
         context
     );
 
-    let mut results = Vec::new_in(allocator);
-    let mut previous = Spanned::new(EntityID::from(&ast.left_expr), ast.left_expr.span.clone());
+    if let Some(first_right_expr) = ast.right_exprs.first() {
+        if type_environment.unify(
+            Spanned::new(EntityID::from(&ast.left_expr), ast.left_expr.span.clone()),
+            Spanned::new(EntityID::from(ast), ast.span.clone()),
+            current_scope_this_type
+        ).is_err() {
+            let found_type = type_environment.resolve_entity_type(EntityID::from(&ast.left_expr)).value;
+            let error = LogicalOperatorTypeError {
+                operator: Spanned::new("and".to_string(), first_right_expr.0.clone()),
+                found_type: Spanned::new(found_type, ast.left_expr.span.clone())
+            };
+            type_environment.add_lazy_type_error_report(error);
+        }
+    }
 
     for right_expr in ast.right_exprs.iter() {
+        let operator_span = right_expr.0.clone();
+
         if let Ok(right_expr) = &right_expr.1 {
             type_inference_compare_expression(
                 right_expr,
@@ -2878,22 +2933,24 @@ fn type_inference_and_expression<'allocator, 'input>(
             
             let current = Spanned::new(EntityID::from(right_expr), right_expr.span.clone());
 
-            let result = type_environment.unify(
-                previous.clone(),
+            if type_environment.unify(
                 current.clone(),
+                Spanned::new(EntityID::from(ast), ast.span.clone()),
                 current_scope_this_type
-            );
-            results.push(result);
-
-            previous = current;
+            ).is_err() {
+                let found_type = type_environment.resolve_entity_type(EntityID::from(right_expr)).value;
+                let error = LogicalOperatorTypeError {
+                    operator: Spanned::new("and".to_string(), operator_span),
+                    found_type: Spanned::new(found_type, right_expr.span.clone())
+                };
+                type_environment.add_lazy_type_error_report(error);
+            }
         }
     }
 
-    add_errors(results, type_environment);
-
-    if previous.value != EntityID::from(ast) {
+    if ast.right_exprs.is_empty() {
         type_environment.set_entity_id_equals(
-            previous.value,
+            EntityID::from(&ast.left_expr),
             EntityID::from(ast)
         );
     }
@@ -3140,7 +3197,7 @@ fn type_inference_mul_or_div_expression<'allocator, 'input>(
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
 ) {
-    force_be_expression |= ast.right_exprs.is_empty();
+    force_be_expression |= !ast.right_exprs.is_empty();
 
     type_inference_factor(
         &ast.left_expr,
@@ -6523,5 +6580,31 @@ impl TranspileReport for UnresolvedInterface {
         ];
 
         builder.finish().print(sources(source_list)).unwrap();
+    }
+}
+
+
+struct LogicalOperatorTypeError {
+    operator: Spanned<String>,
+    found_type: Spanned<Type>
+}
+
+impl LazyTypeReport for LogicalOperatorTypeError {
+    fn build_report(&self, type_environment: &TypeEnvironment, context: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
+        let error = SimpleError::new(
+            INVALID_LOGICAL_OPERATOR_EXPR_TYPE,
+            self.found_type.span.clone(),
+            vec![
+                (self.operator.value.clone(), Color::Yellow),
+                (type_environment.get_type_display_string(&self.found_type.value), Color::Red),
+                ("bool".to_string(), Color::Cyan)
+            ],
+            vec![
+                ((context.module_name.clone(), self.operator.span.clone()), Color::Yellow),
+                ((context.module_name.clone(), self.found_type.span.clone()), Color::Red)
+            ]
+        );
+
+        Either::Left(error)
     }
 }

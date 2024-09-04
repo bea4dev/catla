@@ -23,13 +23,10 @@ fn parse_or_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
 
     let mut right_exprs = Vec::new_in(cursor.allocator);
     loop {
-        let op_span_start = Span::start(cursor);
-        let cursor_position = cursor.current_position;
-        if cursor.next().get_kind() != TokenKind::VerticalBar || cursor.next().get_kind() != TokenKind::VerticalBar {
-            cursor.current_position = cursor_position;
+        if cursor.current().get_kind() != TokenKind::Or {
             break;
         }
-        let op_span = op_span_start.elapsed(cursor);
+        let op_span = cursor.next().unwrap().span.clone();
 
         skip(cursor, &[TokenKind::LineFeed]);
 
@@ -48,13 +45,10 @@ fn parse_and_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
     let mut right_exprs = Vec::new_in(cursor.allocator);
     loop {
-        let op_span_start = Span::start(cursor);
-        let cursor_position = cursor.current_position;
-        if cursor.next().get_kind() != TokenKind::And || cursor.next().get_kind() != TokenKind::And {
-            cursor.current_position = cursor_position;
+        if cursor.current().get_kind() != TokenKind::And {
             break;
         }
-        let op_span = op_span_start.elapsed(cursor);
+        let op_span = cursor.next().unwrap().span.clone();
 
         skip(cursor, &[TokenKind::LineFeed]);
 

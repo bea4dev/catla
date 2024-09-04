@@ -7,9 +7,11 @@ use transpiler::{context::AutoImport, resource::DefaultSourceCodeProvider};
 use crate::transpiler::{transpile, context::{TranspileSettings, TranspileContext}};
 
 pub mod transpiler;
-    pub mod localize;
+pub mod localize;
 
 fn main() {
+
+    std::env::set_var("RUST_BACKTRACE", "1");
 
     //#[cfg(not(target_os = "windows"))]
     //unsafe { backtrace_on_stack_overflow::enable() };

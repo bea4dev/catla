@@ -5753,7 +5753,7 @@ pub(crate) struct TypeMismatchError {
 }
 
 impl LazyTypeReport for TypeMismatchError {
-    fn build_report(&self, type_environment: &TypeEnvironment, context: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
+    fn build_report(&self, type_environment: &TypeEnvironment, _: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
         let func = |ty| { type_environment.get_type_display_string(&ty) };
 
         let type_0 = self.type_0.clone().map(func);
@@ -5896,10 +5896,6 @@ fn add_error(result: Result<(), TypeMismatchError>, type_environment: &mut TypeE
     }
 }
 
-
-fn add_errors<A: Allocator>(results: Vec<Result<(), TypeMismatchError>, A>, type_environment: &mut TypeEnvironment) {
-
-}
 
 
 struct OutOfEnvironmentVariable {

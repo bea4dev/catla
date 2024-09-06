@@ -5,7 +5,7 @@ use tokio::runtime::{Builder, Runtime};
 
 use crate::{localize::localizer::LocalizedText, transpiler::error::TranspileReport};
 
-use super::{future::SharedManualFuture, resource::SourceCodeProvider, semantics::types::type_info::{ImplementsInfoSet, Type}, SourceCode, TranspileError, TranspileWarning};
+use super::{future::{MultiTaskFuture, SharedManualFuture}, resource::SourceCodeProvider, semantics::types::type_info::{ImplementsInfoSet, Type}, SourceCode, TranspileError, TranspileWarning};
 
 
 pub struct TranspileContext {
@@ -16,6 +16,7 @@ pub struct TranspileContext {
     pub module_context_map: Mutex<HashMap<String, Arc<TranspileModuleContext>>>,
     error_and_warnings: Mutex<HashMap<String, (Vec<TranspileError>, Vec<TranspileWarning>)>>,
     pub(crate) future_runtime: Runtime,
+    pub(crate) transpile_future: MultiTaskFuture
 }
 
 impl TranspileContext {
@@ -40,7 +41,8 @@ impl TranspileContext {
             source_code_provider: Box::new(source_code_provider),
             module_context_map: Mutex::new(HashMap::new()),
             error_and_warnings: Mutex::new(HashMap::new()),
-            future_runtime
+            future_runtime,
+            transpile_future: MultiTaskFuture::new()
         })
     }
 

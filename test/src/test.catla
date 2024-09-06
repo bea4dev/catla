@@ -182,4 +182,4 @@ function t82(i: TestInterface6<int>) {
 
 function <T, I: TestInterface8<T>> tttt8(i: I) -> T {}
 
-if true or 100 {}
+if true or false {}

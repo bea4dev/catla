@@ -38,8 +38,6 @@ fn main() {
     
     transpile("test::test".to_string(), context.clone()).unwrap();
 
-    thread::sleep(Duration::from_secs(1));
-
     context.print_report();
 
 }

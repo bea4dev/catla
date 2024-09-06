@@ -1,4 +1,4 @@
-use std::{mem, sync::{Arc, Mutex}};
+use std::{mem, sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex}};
 
 use manual_future::{ManualFuture, ManualFutureCompleter};
 
@@ -54,3 +54,35 @@ impl<T: Send> SharedManualFuture<T> {
     }
 
 }
+
+
+pub struct MultiTaskFuture {
+    task_count: AtomicUsize,
+    future: SharedManualFuture<()>
+}
+
+impl MultiTaskFuture {
+    
+    pub fn new() -> Self {
+        Self {
+            task_count: AtomicUsize::new(0),
+            future: SharedManualFuture::new()
+        }
+    }
+
+    pub fn mark_as_running(&self) {
+        self.task_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub async fn mark_as_finished(&self) {
+        if self.task_count.fetch_sub(1, Ordering::Relaxed) == 1 {
+            self.future.complete(Arc::new(())).await;
+        }
+    }
+
+    pub fn get_future(&self) -> ManualFuture<Arc<()>> {
+        self.future.get()
+    }
+
+}
+

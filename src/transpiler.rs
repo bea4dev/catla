@@ -77,10 +77,19 @@ pub struct SourceCode {
 
 
 pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> Result<(), String> {
-    let module_context = TranspileContext::try_create_module_context(&context, &entry_module_name).unwrap()?;
+    let module_context = TranspileContext::try_create_module_context(
+        &context,
+        &entry_module_name
+    ).unwrap()?;
+
+    context.transpile_future.mark_as_running();
+
+    let transpile_context = context.clone();
 
     context.future_runtime.block_on(async move {
         transpile_module(entry_module_name, module_context).await;
+
+        transpile_context.transpile_future.get_future().await;
     });
 
     Ok(())
@@ -160,6 +169,8 @@ async fn transpile_module(
             };
             let module_name = module_name.value.clone();
 
+            context.transpile_future.mark_as_running();
+
             context.future_runtime.spawn(async move {
                 transpile_module(module_name, module_context).await
             });
@@ -230,53 +241,59 @@ async fn transpile_module(
     }
 
     let mut implicit_convert_map = FxHashMap::default();
-    let mut type_environment = TypeEnvironment::new_with_return_type(
-        Either::Right(WithDefineInfo {
-            value: Type::Unit,
-            module_name: module_context.module_name.clone(),
-            span: ast.span.clone()
-        }),
-        &allocator
-    );
-    type_inference_program(
-        ast,
-        &user_type_map,
-        &import_element_map,
-        &name_resolved_map,
-        &module_user_type_map,
-        &module_type_info,
-        &module_element_type_maps,
-        &generics_map,
-        &module_entity_type_map,
-        &merged_implements_infos,
-        &ScopeThisType::new(Type::Unknown),
-        &None,
-        false,
-        false,
-        &Vec::new(),
-        false,
-        &mut type_environment,
-        &mut implicit_convert_map,
-        &allocator,
-        &mut errors,
-        &mut warnings,
-        &module_context
-    );
 
-    merged_implements_infos.validate_super_type(
-        &mut errors,
-        &module_context,
-        &allocator
-    );
+    {
+        // This is not implemented 'Send'.
+        let mut type_environment = TypeEnvironment::new_with_return_type(
+            Either::Right(WithDefineInfo {
+                value: Type::Unit,
+                module_name: module_context.module_name.clone(),
+                span: ast.span.clone()
+            }),
+            &allocator
+        );
+        type_inference_program(
+            ast,
+            &user_type_map,
+            &import_element_map,
+            &name_resolved_map,
+            &module_user_type_map,
+            &module_type_info,
+            &module_element_type_maps,
+            &generics_map,
+            &module_entity_type_map,
+            &merged_implements_infos,
+            &ScopeThisType::new(Type::Unknown),
+            &None,
+            false,
+            false,
+            &Vec::new(),
+            false,
+            &mut type_environment,
+            &mut implicit_convert_map,
+            &allocator,
+            &mut errors,
+            &mut warnings,
+            &module_context
+        );
 
-    type_environment.collect_info(
-        &mut implicit_convert_map,
-        &merged_implements_infos,
-        &mut errors,
-        &mut warnings,
-        &module_context,
-        &allocator
-    );
+        merged_implements_infos.validate_super_type(
+            &mut errors,
+            &module_context,
+            &allocator
+        );
+
+        type_environment.collect_info(
+            &mut implicit_convert_map,
+            &merged_implements_infos,
+            &mut errors,
+            &mut warnings,
+            &module_context,
+            &allocator
+        );
+    }
 
     module_context.context.add_error_and_warning(module_name, errors, warnings);
+
+    module_context.context.transpile_future.mark_as_finished().await;
 }

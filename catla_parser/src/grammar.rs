@@ -26,7 +26,7 @@ bnf_rules!{
                             [ function_type_tag ] [ line_feed ] [ where_clause ] ( block | ";" )
     function_arguments  ::= "(" [ line_feed ] [ ( this_mutability | function_argument) [ line_feed ] ] { "," [ line_feed ] [ function_argument ] } ")"
     this_mutability     ::= ( "var" | "let" ) "this"
-    function_argument   ::= literal type_tag
+    function_argument   ::= variable_binding type_tag
 
     where_clause        ::= "where" [ line_feed ] [ where_element ] { "," [ line_feed ] [ where_element ] }
     where_element       ::= type_info [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]
@@ -54,7 +54,11 @@ bnf_rules!{
 
     block               ::= "{" program "}"
 
-    variable_define     ::= ( "let" | "var" ) literal [ type_tag ] [ "=" [ line_feed ] expression ]
+    variable_define     ::= ( "let" | "var" ) variable_binding [ type_tag ] [ "=" [ line_feed ] expression ]
+
+    variable_binding    ::= literal 
+                            | "(" [ line_feed ] variable_binding [ line_feed ]
+                              { "," [ line_feed ] [ variable_binding [ line_feed ] ] } ")"
 
     assignment          ::= expression "=" [ line_feed ] expression
 

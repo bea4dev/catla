@@ -156,7 +156,7 @@ pub enum StatementAttributeKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionArgument<'allocator, 'input> {
-    pub name: Literal<'input>,
+    pub name: VariableBinding<'allocator, 'input>,
     pub type_tag: TypeTag<'allocator, 'input>,
     pub span: Range<usize>
 }
@@ -291,7 +291,7 @@ pub type BlockRecovered<'allocator, 'input> = Recovered<'allocator, 'input, Bloc
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariableDefine<'allocator, 'input> {
     pub attributes: VariableAttributes<'allocator>,
-    pub name: LiteralResult<'allocator, 'input>,
+    pub binding: VariableBindingResult<'allocator, 'input>,
     pub type_tag: Option<TypeTag<'allocator, 'input>>,
     pub expression: Option<ExpressionResult<'allocator, 'input>>,
     pub span: Range<usize>
@@ -303,6 +303,15 @@ pub struct VariableAttributes<'allocator> {
     pub is_var: bool,
     pub var_let_span: Range<usize>
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariableBinding<'allocator, 'input> {
+    pub binding: Either<Literal<'input>, Vec<VariableBinding<'allocator, 'input>, &'allocator Bump>>,
+    pub error_tokens: Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>,
+    pub span: Range<usize>
+}
+
+pub type VariableBindingResult<'allocator, 'input> = ParseResult<'allocator, 'input, VariableBinding<'allocator, 'input>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Assignment<'allocator, 'input> {

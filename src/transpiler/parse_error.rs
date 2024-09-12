@@ -75,7 +75,7 @@ pub fn collect_parse_error_program(
             },
             StatementAST::VariableDefine(variable_define) => {
                 collect_parse_error_only_parse_result_error(
-                    &variable_define.name,
+                    &variable_define.binding,
                     Expected::VariableName,
                     0008,
                     errors,

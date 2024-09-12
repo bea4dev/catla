@@ -2164,7 +2164,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                 }
 
                 if &tag_type != &Type::Unknown {
-                    let span = variable_define.name.clone()
+                    let span = variable_define.binding.clone()
                         .map(|name| { name.span })
                         .unwrap_or(variable_define.span.clone());
 
@@ -2222,7 +2222,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
                             add_error(result, type_environment);
                         }
 
-                        if let Ok(name) = &variable_define.name {
+                        if let Ok(name) = &variable_define.binding {
                             type_environment.var_span_and_entity_ids.push((name.span.clone(), EntityID::from(variable_define)));
                         }
                     }

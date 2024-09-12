@@ -145,7 +145,7 @@ pub(crate) fn collect_module_element_types_program(
 
                     module_entity_type_map.insert(EntityID::from(field_define), type_info.clone());
 
-                    match &field_define.name {
+                    match &field_define.binding {
                         Ok(name) => {
                             Some((name.clone(), type_info, field_define.attributes.statement_attributes.iter().cloned().collect()))
                         },
@@ -640,7 +640,7 @@ pub(crate) fn collect_module_element_types_program(
                             }
                         },
                         _ => {
-                            let span = match &variable_define.name {
+                            let span = match &variable_define.binding {
                                 Ok(name) => name.span.clone(),
                                 _ => variable_define.span.clone()
                             };
@@ -658,7 +658,7 @@ pub(crate) fn collect_module_element_types_program(
 
                     module_entity_type_map.insert(EntityID::from(variable_define), variable_type.clone());
                     
-                    if let Ok(name) = &variable_define.name {
+                    if let Ok(name) = &variable_define.binding {
                         module_element_type_map.insert(name.value.to_string(), variable_type);
                     }
                 }

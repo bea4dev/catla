@@ -85,7 +85,7 @@ bnf_rules!{
     
     primary_right       ::= ( "." | "::" ) [ line_feed ] ( literal [ ":" generics_info ] [ function_call ] | mapping_operator )
     
-    simple_primary      ::= "(" expression ")"
+    simple_primary      ::= "(" [ line_feed ] expression [ line_feed ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
                             | literal
                             | "null"
                             | "true"

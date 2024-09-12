@@ -334,7 +334,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                     );
                 }
 
-                if let Ok(variable_name) = &variable_define.name {
+                if let Ok(variable_name) = &variable_define.binding {
                     let entity_id = EntityID::from(variable_define);
                     let define_info = DefineWithName {
                         entity_id,

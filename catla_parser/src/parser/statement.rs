@@ -284,14 +284,15 @@ fn parse_variable_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
         is_var, var_let_span: let_var.span.clone()
     };
 
-    let name = parse_literal_result(cursor);
+    let binding = parse_variable_binding(cursor)
+        .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
 
     let type_tag = parse_type_tag(cursor);
 
     let equal = cursor.current().get_kind();
     if equal != TokenKind::Equal {
         let span = statement_attributes.get(0).map_or(span.start_position, |spanned| { spanned.span.start })..span.elapsed(cursor).end;
-        return Some(VariableDefine { attributes, name, type_tag, expression: None, span });
+        return Some(VariableDefine { attributes, binding, type_tag, expression: None, span });
     }
     cursor.next();
 
@@ -301,7 +302,71 @@ fn parse_variable_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
 
     let span = statement_attributes.get(0).map_or(span.start_position, |spanned| { spanned.span.start })..span.elapsed(cursor).end;
 
-    return Some(VariableDefine { attributes, name, type_tag, expression: Some(expression), span })
+    return Some(VariableDefine { attributes, binding, type_tag, expression: Some(expression), span })
+}
+
+fn parse_variable_binding<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<VariableBinding<'allocator, 'input>> {
+    let span = Span::start(cursor);
+
+    let first_kind = cursor.current().get_kind();
+
+    return match first_kind {
+        TokenKind::Literal => {
+            Some(VariableBinding {
+                binding: Either::Left(cursor.current().unwrap().clone()),
+                error_tokens: Vec::new_in(cursor.allocator),
+                span: span.elapsed(cursor)
+            })
+        },
+        TokenKind::ParenthesisLeft => {
+            cursor.next();
+
+            skip(cursor, &[TokenKind::LineFeed]);
+
+            let mut error_tokens = Vec::new_in(cursor.allocator);
+            let mut bindings = Vec::new_in(cursor.allocator);
+
+            loop {
+                skip(cursor, &[TokenKind::LineFeed]);
+
+                let binding = match parse_variable_binding(cursor) {
+                    Some(binding) => binding,
+                    _ => {
+                        let dropped_tokens = read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::ParenthesisRight]);
+                        error_tokens.push(dropped_tokens);
+
+                        match cursor.peek_prev().get_kind() {
+                            TokenKind::Comma => continue,
+                            TokenKind::ParenthesisRight => break,
+                            _ => break
+                        }
+                    }
+                };
+
+                skip(cursor, &[TokenKind::LineFeed]);
+
+                bindings.push(binding);
+
+                let comma_or_paren = cursor.next().get_kind();
+                match comma_or_paren {
+                    TokenKind::ParenthesisRight => break,
+                    _ => {
+                        cursor.prev();
+                        continue;
+                    }
+                }
+            }
+
+            Some(VariableBinding {
+                binding,
+                error_tokens,
+                span: span.elapsed(cursor)
+            })
+        },
+        _ => {
+            None
+        }
+    }
 }
 
 fn parse_function_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<FunctionDefine<'allocator, 'input>> {

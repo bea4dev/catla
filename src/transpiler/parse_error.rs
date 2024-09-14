@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use bumpalo::Bump;
-use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, Expression, ExpressionEnum, Factor, FieldAssign, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause, WhereElement}};
+use catla_parser::{lexer::Token, parser::{ASTParseError, AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, Expression, ExpressionEnum, Factor, FieldAssign, FunctionCall, Generics, GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary, StatementAST, TupleTypeInfo, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause, WhereElement}};
 use either::Either::{Right, Left, self};
 
 use self::{statement::{not_separated_statement_error_1, statement_attributes_without_define}, misc::{unexpected_token_error, Expected, UnexpectedTokens}};
@@ -575,17 +575,18 @@ fn collect_parse_error_primary_left(
 ) {
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple_primary) => {
-            if let SimplePrimary::Expressions { expressions: expression, error_tokens, span: _ } = &simple_primary.0 {
-                collect_parse_error_with_parse_result(
-                    expression,
-                    collect_parse_error_expression,
-                    Expected::Expression,
-                    0013,
-                    errors,
-                    warnings,
-                    context
-                );
-                collect_error_tokens(error_tokens, Expected::Unnecessary, 0013, errors, context);
+            if let SimplePrimary::Expressions { expressions, error_tokens, span: _ } = &simple_primary.0 {
+                for expression in expressions.iter() {
+                    collect_parse_error_expression(
+                        expression,
+                        errors,
+                        warnings,
+                        context
+                    );
+                }
+                for error_tokens in error_tokens.iter() {
+                    collect_error_tokens(error_tokens, Expected::Unnecessary, 0013, errors, context);
+                }
             }
             if let Some(generics) = &simple_primary.1 {
                 collect_parse_error_with_parse_result(
@@ -856,6 +857,9 @@ fn collect_parse_error_type_info(
         },
         TypeInfo::ArrayType(array_type_info) => {
             collect_parse_error_array_type_info(array_type_info, errors, warnings, context);
+        },
+        TypeInfo::TupleType(tuple_type_info) => {
+            collect_parse_error_tuple_type_info(tuple_type_info, errors, warnings, context);
         }
     }
 }
@@ -900,6 +904,20 @@ fn collect_parse_error_array_type_info(
         errors,
         context
     );
+}
+
+fn collect_parse_error_tuple_type_info(
+    ast: &TupleTypeInfo,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) {
+    for type_info in ast.types.iter() {
+        collect_parse_error_type_info(type_info, errors, warnings, context);
+    }
+    for error_tokens in ast.error_tokens.iter() {
+        collect_error_tokens(error_tokens, Expected::TypeInfo, 0077, errors, context)
+    }
 }
 
 fn collect_parse_error_generics(

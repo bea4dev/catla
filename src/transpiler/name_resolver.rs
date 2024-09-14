@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::Range};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
-use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause}};
+use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TupleTypeInfo, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause}};
 use either::Either::{self, Left, Right};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -1481,6 +1481,28 @@ fn name_resolve_type_info<'allocator>(
                 allocator
             );
         }
+    }
+}
+
+fn name_resolve_tuple_type_info<'allocator>(
+    ast: &'allocator TupleTypeInfo<'allocator, '_>,
+    environment_id: EntityID,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    allocator: &'allocator Bump
+) {
+    for type_info in ast.types.iter() {
+        name_resolve_type_info(
+            type_info,
+            environment_id,
+            name_environments,
+            resolved_map,
+            errors,
+            warnings,
+            allocator
+        );
     }
 }
 

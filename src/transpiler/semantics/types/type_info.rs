@@ -39,6 +39,7 @@ pub enum Type {
     Generic(Arc<GenericType>),
     LocalGeneric(LocalGenericID),
     Array(Arc<Type>),
+    Tuple(Arc<Vec<Type>>),
     Option(Arc<Type>),
     Result { value: Arc<Type>, error: Arc<Type> },
     This,
@@ -99,6 +100,12 @@ impl Type {
             Type::Array(base_type) => {
                 let new_base_type = Type::get_type_with_replaced_generics(&base_type, generics_define, replace_generics);
                 Type::Array(Arc::new(new_base_type))
+            },
+            Type::Tuple(types) => {
+                let types = types.iter()
+                    .map(|ty| { Type::get_type_with_replaced_generics(ty, generics_define, replace_generics) })
+                    .collect();
+                Type::Tuple(Arc::new(types))
             },
             Type::Option(value_type) => {
                 let new_value_type = Type::get_type_with_replaced_generics(&value_type, generics_define, replace_generics);
@@ -203,8 +210,26 @@ impl Type {
                     location: generic.location.clone()
                 }))
             },
-            Type::Array(base_type) => Type::Array(Arc::new(base_type.replace_this_type(new_this_type, replace_field_recursive, replace_bounds))),
-            Type::Option(value) => Type::Option(Arc::new(value.replace_this_type(new_this_type, replace_field_recursive, replace_bounds))),
+            Type::Array(base_type) => {
+                Type::Array(Arc::new(base_type.replace_this_type(
+                    new_this_type,
+                    replace_field_recursive,
+                    replace_bounds
+                )))
+            },
+            Type::Tuple(types) => {
+                let types = types.iter()
+                    .map(|ty| { ty.replace_this_type(new_this_type, replace_field_recursive, replace_bounds) })
+                    .collect();
+                Type::Tuple(Arc::new(types))
+            },
+            Type::Option(value) => {
+                Type::Option(Arc::new(value.replace_this_type(
+                    new_this_type,
+                    replace_field_recursive,
+                    replace_bounds
+                )))
+            },
             Type::Result { value, error } => {
                 Type::Result {
                     value: Arc::new(value.replace_this_type(new_this_type, replace_field_recursive, replace_bounds)),
@@ -521,6 +546,9 @@ impl Type {
                     .any(|bound| { bound.ty.contains_unknown() })
             },
             Type::Array(base_type) => base_type.contains_unknown(),
+            Type::Tuple(types) => {
+                types.iter().any(|ty| { ty.contains_unknown() })
+            }
             Type::Option(value_type) => value_type.contains_unknown(),
             Type::Result { value, error } => {
                 value.contains_unknown() || error.contains_unknown()
@@ -983,6 +1011,31 @@ impl ImplementsInfo {
                         type_environment,
                         allow_unknown, ignore_super_type
                     )
+                } else {
+                    false
+                }
+            },
+            Type::Tuple(self_types) => {
+                if let Type::Tuple(types) = ty {
+                    if self_types.len() != types.len() {
+                        return false;
+                    }
+
+                    for (self_type, ty) in self_types.iter().zip(types.iter()) {
+                        if !ImplementsInfo::contains_target_type(
+                            self_type,
+                            ty,
+                            global_implements_info_set,
+                            current_scope_implements_info_set,
+                            type_environment,
+                            allow_unknown,
+                            ignore_super_type
+                        ) {
+                            return false;
+                        }
+                    }
+
+                    true
                 } else {
                     false
                 }
@@ -2228,6 +2281,22 @@ fn is_duplicated_implementation_type(type_1: &Type, type_2: &Type) -> bool {
                 return is_duplicated_implementation_type(base_type_1, base_type_2);
             }
             false
+        },
+        Type::Tuple(types_1) => {
+            if let Type::Tuple(types_2) = type_2 {
+                if types_1.len() != types_2.len() {
+                    return false;
+                }
+
+                for (type_1, type_2) in types_1.iter().zip(types_2.iter()) {
+                    if !is_duplicated_implementation_type(type_1, type_2) {
+                        return false;
+                    }
+                }
+                true
+            } else {
+                false
+            }
         },
         Type::Option(value_1) => {
             if let Type::Option(value_2) = type_2 {

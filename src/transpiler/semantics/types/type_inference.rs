@@ -797,6 +797,30 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                     false
                 }
             },
+            Type::Tuple(first_types) => {
+                if let Type::Tuple(second_types) = second_type {
+                    if first_types.len() != second_types.len() {
+                        false
+                    } else {
+                        for (first_type, second_type) in first_types.iter().zip(second_types.iter()) {
+                            self.unify_type_recursive(
+                                first_type,
+                                first_span,
+                                first_module_name,
+                                second_type,
+                                second_span,
+                                second_module_name,
+                                current_scope_this_type,
+                                allow_unknown,
+                                is_first_layer
+                            )?;
+                        }
+                        true
+                    }
+                } else {
+                    false
+                }
+            },
             Type::Option(first_type) => {
                 if let Type::Option(second_type) = second_type {
                     self.unify_type_recursive(
@@ -990,15 +1014,12 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
 
                 self.add_generics_info(&mut name, generics);
 
-                name += "(";
-                for i in 0..function_info.argument_types.len() {
-                    let argument = &function_info.argument_types[i];
-                    if i != 0 {
-                        name += ", ";
-                    }
-                    name += self.get_type_display_string(argument).as_str();
-                }
-                name += ")";
+                let argument_types = function_info.argument_types.iter()
+                    .map(|ty| { self.get_type_display_string(ty) })
+                    .collect::<Vec<String>>()
+                    .join(", ");
+
+                name += format!("({})", argument_types).as_str();
 
                 if function_info.return_type.value != Type::Unit {
                     name += " -> ";
@@ -1012,6 +1033,13 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 self.get_type_display_string(&self.resolve_generic_type(*generic_id).1.value)
             },
             Type::Array(base_type) => format!("[{}]", self.get_type_display_string(base_type)),
+            Type::Tuple(types) => {
+                let types = types.iter()
+                    .map(|ty| { self.get_type_display_string(ty) })
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                format!("({})", types)
+            }
             Type::Option(value_type) => format!("{}?", self.get_type_display_string(value_type)),
             Type::Result { value, error } => {
                 format!("{}!<{}>", self.get_type_display_string(value), self.get_type_display_string(error))
@@ -1040,6 +1068,12 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             },
             Type::LocalGeneric(generic_id) => self.resolve_generic_type(*generic_id).1.value,
             Type::Array(base_type) => Type::Array(Arc::new(self.resolve_type(&base_type))),
+            Type::Tuple(types) => {
+                let types = types.iter()
+                    .map(|ty| { self.resolve_type(ty) })
+                    .collect();
+                Type::Tuple(Arc::new(types))
+            },
             Type::Option(value) => Type::Option(Arc::new(self.resolve_type(&value))),
             Type::Result { value, error } => {
                 Type::Result {
@@ -1080,6 +1114,12 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
             },
             Type::Array(base_type) => {
                 Type::Array(Arc::new(self.regenerate_local_generic(&base_type)))
+            },
+            Type::Tuple(types) => {
+                let types = types.iter()
+                    .map(|ty| { self.regenerate_local_generic(ty) })
+                    .collect();
+                Type::Tuple(Arc::new(types))
             },
             Type::Option(value_type) => {
                 Type::Option(Arc::new(self.regenerate_local_generic(&value_type)))
@@ -1137,6 +1177,11 @@ impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
                 }
             },
             Type::Array(base_type) => self.fix_numeric_literal_type(&base_type),
+            Type::Tuple(types) => {
+                for ty in types.iter() {
+                    self.fix_numeric_literal_type(ty);
+                }
+            },
             Type::Option(value_type) => self.fix_numeric_literal_type(&value_type),
             Type::Result { value, error } => {
                 self.fix_numeric_literal_type(&value);

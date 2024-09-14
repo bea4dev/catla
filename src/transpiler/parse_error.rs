@@ -575,7 +575,7 @@ fn collect_parse_error_primary_left(
 ) {
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple_primary) => {
-            if let SimplePrimary::Expression { expression, error_tokens, span: _ } = &simple_primary.0 {
+            if let SimplePrimary::Expressions { expressions: expression, error_tokens, span: _ } = &simple_primary.0 {
                 collect_parse_error_with_parse_result(
                     expression,
                     collect_parse_error_expression,

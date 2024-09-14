@@ -156,7 +156,7 @@ pub enum StatementAttributeKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionArgument<'allocator, 'input> {
-    pub name: VariableBinding<'allocator, 'input>,
+    pub binding: VariableBinding<'allocator, 'input>,
     pub type_tag: TypeTag<'allocator, 'input>,
     pub span: Range<usize>
 }
@@ -556,9 +556,9 @@ pub enum PrimarySeparatorKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimplePrimary<'allocator, 'input> {
-    Expression{
-        expression: ExpressionResult<'allocator, 'input>,
-        error_tokens: Vec<Token<'input>, &'allocator Bump>,
+    Expressions{
+        expressions: Vec<Expression<'allocator, 'input>, &'allocator Bump>,
+        error_tokens: Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>,
         span: Range<usize>
     },
     Identifier(Literal<'input>),
@@ -572,7 +572,7 @@ pub enum SimplePrimary<'allocator, 'input> {
 impl SimplePrimary<'_, '_> {
     pub fn get_span(&self) -> Range<usize> {
         match self {
-            SimplePrimary::Expression { expression: _, error_tokens: _, span } => {
+            SimplePrimary::Expressions { expressions: _, error_tokens: _, span } => {
                 span.clone()
             },
             SimplePrimary::Identifier(literal) => literal.span.clone(),
@@ -696,16 +696,25 @@ pub enum TypeTagKindEnum {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeInfo<'allocator, 'input> {
     BaseType(BaseTypeInfo<'allocator, 'input>),
-    ArrayType(ArrayTypeInfo<'allocator, 'input>)
+    ArrayType(ArrayTypeInfo<'allocator, 'input>),
+    TupleType(TupleTypeInfo<'allocator, 'input>)
 }
 
 impl TypeInfo<'_, '_> {
     pub fn get_span(&self) -> Range<usize> {
         match self {
             TypeInfo::BaseType(base_type_info) => base_type_info.span.clone(),
-            TypeInfo::ArrayType(array_type_info) => array_type_info.span.clone()
+            TypeInfo::ArrayType(array_type_info) => array_type_info.span.clone(),
+            TypeInfo::TupleType(tuple_type_info) => tuple_type_info.span.clone()
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TupleTypeInfo<'allocator, 'input> {
+    pub types: Vec<TypeInfo<'allocator, 'input>, &'allocator Bump>,
+    pub error_tokens: Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>,
+    pub span: Range<usize>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -2,7 +2,7 @@ use bumpalo::Bump;
 
 use crate::lexer::TokenKind;
 
-use super::{parse_as_literal, parse_literal, read_until_token_found, recover_until_token_found, skip, unexpected_token_error, ArrayTypeInfo, BaseTypeInfo, Generics, GetTokenKind, Span, TokenCursor, TypeAttribute, TypeAttributeEnum, TypeInfo, TypeInfoResult, TypeTag, TypeTagKind, TypeTagKindEnum};
+use super::{parse_as_literal, parse_literal, read_until_token_found, recover_until_token_found, skip, unexpected_token_error, ArrayTypeInfo, BaseTypeInfo, Generics, GetTokenKind, Span, TokenCursor, TupleTypeInfo, TypeAttribute, TypeAttributeEnum, TypeInfo, TypeInfoResult, TypeTag, TypeTagKind, TypeTagKindEnum};
 
 
 pub fn parse_type_tag<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TypeTag<'allocator, 'input>> {
@@ -30,6 +30,9 @@ pub fn parse_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
     }
     if let Some(base_type_info) = parse_base_type_info(cursor) {
         return Some(TypeInfo::BaseType(base_type_info));
+    }
+    if let Some(tuple_type_info) = parse_tuple_type_info(cursor) {
+        return Some(TypeInfo::TupleType(tuple_type_info));
     }
     return None;
 }
@@ -99,6 +102,51 @@ pub fn parse_array_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'alloc
     }
     
     return Some(ArrayTypeInfo { type_info, error_tokens, bracket_right, span: span.elapsed(cursor) });
+}
+
+pub fn parse_tuple_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TupleTypeInfo<'allocator, 'input>> {
+    let span = Span::start(cursor);
+
+    if cursor.next().get_kind() != TokenKind::ParenthesisLeft {
+        cursor.prev();
+        return None;
+    }
+
+    let mut error_tokens = Vec::new_in(cursor.allocator);
+    let mut types = Vec::new_in(cursor.allocator);
+
+    loop {
+        skip(cursor, &[TokenKind::LineFeed]);
+
+        let type_info = match parse_type_info(cursor) {
+            Some(type_info) => type_info,
+            _ => {
+                let dropped_tokens = read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::ParenthesisRight]);
+                error_tokens.push(dropped_tokens);
+
+                match cursor.peek_prev().get_kind() {
+                    TokenKind::Comma => continue,
+                    TokenKind::ParenthesisRight => break,
+                    _ => break
+                }
+            }
+        };
+
+        skip(cursor, &[TokenKind::LineFeed]);
+
+        types.push(type_info);
+
+        let comma_or_paren = cursor.next().get_kind();
+        match comma_or_paren {
+            TokenKind::ParenthesisRight => break,
+            _ => {
+                cursor.prev();
+                continue;
+            }
+        }
+    }
+
+    return Some(TupleTypeInfo { types, error_tokens, span: span.elapsed(cursor) });
 }
 
 pub fn parse_type_info_result<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> TypeInfoResult<'allocator, 'input> {

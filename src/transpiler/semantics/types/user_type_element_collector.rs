@@ -1324,7 +1324,7 @@ fn collect_module_element_types_primary_left(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expression { expression, error_tokens: _, span: _ } => {
+                SimplePrimary::Expressions { expressions: expression, error_tokens: _, span: _ } => {
                     if let Ok(expression) = expression {
                         collect_module_element_types_expression(
                             &expression,

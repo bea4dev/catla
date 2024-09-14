@@ -12,11 +12,7 @@ fn test() {
 
     let source = 
 "
-interface Interface where This: Interface1 {}
-
-let array: [[Interface?]] = new { 0, 100, 200 }
-
-function test();
+let (value1, value2): (int, float) = (100, 100.0)
 ";
 
     let allocator = Bump::new();

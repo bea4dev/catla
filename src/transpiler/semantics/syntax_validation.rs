@@ -347,7 +347,7 @@ fn validate_syntax_primary_left(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expression { expression, error_tokens: _, span: _ } => {
+                SimplePrimary::Expressions { expressions: expression, error_tokens: _, span: _ } => {
                     if let Ok(expression) = expression {
                         validate_syntax_expression(&expression, context,errors, warnings);
                     }
@@ -493,7 +493,7 @@ fn is_valid_format_for_array_init_expr(
             }
             
             match simple_primary {
-                SimplePrimary::Expression { expression: _, error_tokens: _, span: _ } => false,
+                SimplePrimary::Expressions { expressions: _, error_tokens: _, span: _ } => false,
                 _ => true
             }
         } else {

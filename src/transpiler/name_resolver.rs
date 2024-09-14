@@ -400,7 +400,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                         span: argument.span.clone(),
                         define_kind: DefineKind::FunctionArgument
                     };
-                    let name = String::from_str_in(argument.name.value, allocator);
+                    let name = String::from_str_in(argument.binding.value, allocator);
                     name_environment.set_name_define_info(name, define_info);
                 }
 
@@ -766,10 +766,10 @@ fn name_resolve_expression<'allocator>(
                         match argument {
                             Left(argument) => {
                                 let entity_id = EntityID::from(argument);
-                                let name = String::from_str_in(argument.name.value, allocator);
+                                let name = String::from_str_in(argument.binding.value, allocator);
                                 let define_info = DefineWithName {
                                     entity_id,
-                                    span: argument.name.span.clone(),
+                                    span: argument.binding.span.clone(),
                                     define_kind: DefineKind::ClosureArgument
                                 };
                                 name_environment.set_name_define_info(name, define_info);
@@ -1071,7 +1071,7 @@ fn name_resolve_primary_left<'allocator>(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expression { expression, error_tokens: _, span: _ } => {
+                SimplePrimary::Expressions { expressions: expression, error_tokens: _, span: _ } => {
                     if let Ok(expression) = expression {
                         name_resolve_expression(
                             &expression,

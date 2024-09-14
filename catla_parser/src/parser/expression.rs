@@ -197,7 +197,8 @@ fn parse_primary_left<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, '
     let first_expr = if let Some(simple_primary) = parse_simple_primary(cursor) {
         let generics = if cursor.current().get_kind() == TokenKind::Colon {
             cursor.next();
-            Some(parse_generics(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) }))
+            Some(parse_generics(cursor)
+                .ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) }))
         } else {
             None
         };
@@ -343,17 +344,41 @@ fn parse_simple_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
 
             cursor.next();
 
-            let expression = parse_expression(cursor).
-                ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
+            let mut error_tokens = Vec::new_in(cursor.allocator);
+            let mut expressions = Vec::new_in(cursor.allocator);
 
-            let error_tokens = if cursor.next().get_kind() != TokenKind::ParenthesisRight {
-                cursor.prev();
-                read_until_token_found(cursor, &[TokenKind::ParenthesisRight])
-            } else {
-                Vec::new_in(cursor.allocator)
-            };
+            loop {
+                skip(cursor, &[TokenKind::LineFeed]);
 
-            Some(SimplePrimary::Expression { expression, error_tokens, span: span.elapsed(cursor) })
+                let expression = match parse_expression(cursor) {
+                    Some(expression) => expression,
+                    _ => {
+                        let dropped_tokens = read_until_token_found(cursor, &[TokenKind::Comma, TokenKind::ParenthesisRight]);
+                        error_tokens.push(dropped_tokens);
+
+                        match cursor.peek_prev().get_kind() {
+                            TokenKind::Comma => continue,
+                            TokenKind::ParenthesisRight => break,
+                            _ => break
+                        }
+                    }
+                };
+
+                skip(cursor, &[TokenKind::LineFeed]);
+
+                expressions.push(expression);
+
+                let comma_or_paren = cursor.next().get_kind();
+                match comma_or_paren {
+                    TokenKind::ParenthesisRight => break,
+                    _ => {
+                        cursor.prev();
+                        continue;
+                    }
+                }
+            }
+
+            Some(SimplePrimary::Expressions { expressions, error_tokens, span: span.elapsed(cursor) })
         },
         TokenKind::Literal   => Some(SimplePrimary::Identifier(parse_literal(cursor).unwrap())),
         TokenKind::Null      => Some(SimplePrimary::NullKeyword(cursor.next().unwrap().span.clone())),

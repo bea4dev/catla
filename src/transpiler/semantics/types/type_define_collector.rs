@@ -265,7 +265,7 @@ fn collect_user_type_primary_left(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expression { expression, error_tokens: _, span: _ } => {
+                SimplePrimary::Expressions { expressions: expression, error_tokens: _, span: _ } => {
                     if let Ok(expression) = expression {
                         collect_user_type_expression(&expression, user_type_map, context);
                     }

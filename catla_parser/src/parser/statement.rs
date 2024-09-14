@@ -312,8 +312,10 @@ fn parse_variable_binding<'allocator, 'input>(cursor: &mut TokenCursor<'allocato
 
     return match first_kind {
         TokenKind::Literal => {
+            let token = cursor.next().unwrap();
+
             Some(VariableBinding {
-                binding: Either::Left(cursor.current().unwrap().clone()),
+                binding: Either::Left(Spanned::new(token.text, token.span.clone())),
                 error_tokens: Vec::new_in(cursor.allocator),
                 span: span.elapsed(cursor)
             })
@@ -358,7 +360,7 @@ fn parse_variable_binding<'allocator, 'input>(cursor: &mut TokenCursor<'allocato
             }
 
             Some(VariableBinding {
-                binding,
+                binding: Either::Right(bindings),
                 error_tokens,
                 span: span.elapsed(cursor)
             })
@@ -624,7 +626,7 @@ pub fn parse_function_argument<'allocator, 'input>(cursor: &mut TokenCursor<'all
 
     let start_position = cursor.current_position;
 
-    let name = parse_literal(cursor)?;
+    let binding = parse_variable_binding(cursor)?;
     let type_tag = match parse_type_tag(cursor) {
         Some(type_tag) => type_tag,
         _ => {
@@ -633,7 +635,7 @@ pub fn parse_function_argument<'allocator, 'input>(cursor: &mut TokenCursor<'all
         }
     };
     
-    return Some(FunctionArgument { name, type_tag, span: span.elapsed(cursor) })
+    return Some(FunctionArgument { binding, type_tag, span: span.elapsed(cursor) })
 }
 
 pub fn parse_generics_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<GenericsDefine<'allocator, 'input>> {

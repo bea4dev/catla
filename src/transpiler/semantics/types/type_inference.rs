@@ -3741,7 +3741,7 @@ fn type_inference_primary_left<'allocator, 'input>(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expression { expression, error_tokens: _, span: _ } => {
+                SimplePrimary::Expressions { expressions: expression, error_tokens: _, span: _ } => {
                     if let Ok(expression) = expression {
                         type_inference_expression(
                             &expression,

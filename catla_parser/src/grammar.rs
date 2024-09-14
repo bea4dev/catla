@@ -129,7 +129,8 @@ bnf_rules!{
 
     type_tag            ::= ":" type_info
     function_type_tag   ::= "->" type_info
-    type_info           ::= array_type_info | base_type_info
+    type_info           ::= array_type_info | base_type_info | tuple_type_info
+    tuple_type_info     ::= "(" [ line_feed ] type_info [ line_feed ] { "," [ line_feed ] [ type_info [ line_feed ] ] } ")"
     array_type_info     ::= "[" [ line_feed ] type_info [ line_feed ] "]"
     base_type_info      ::= ( literal | "This" ) { "::" [ line_feed ] literal } [ generics_info ] { type_attribute }
     type_attribute      ::= "?" | ( "!" [ generics_info ] )

@@ -1071,8 +1071,8 @@ fn name_resolve_primary_left<'allocator>(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expressions { expressions: expression, error_tokens: _, span: _ } => {
-                    if let Ok(expression) = expression {
+                SimplePrimary::Expressions { expressions, error_tokens: _, span: _ } => {
+                    for expression in expressions.iter() {
                         name_resolve_expression(
                             &expression,
                             environment_id,
@@ -1473,6 +1473,17 @@ fn name_resolve_type_info<'allocator>(
         TypeInfo::ArrayType(array_type_info) => {
             name_resolve_array_type_info(
                 array_type_info,
+                environment_id,
+                name_environments,
+                resolved_map,
+                errors,
+                warnings,
+                allocator
+            );
+        },
+        TypeInfo::TupleType(tuple_type_info) => {
+            name_resolve_tuple_type_info(
+                tuple_type_info,
                 environment_id,
                 name_environments,
                 resolved_map,

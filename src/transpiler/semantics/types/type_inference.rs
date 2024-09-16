@@ -31,26 +31,26 @@ const NOT_IMPLEMENTS_OPERATOR_INTERFACE: usize = 0072;
 const INVALID_LOGICAL_OPERATOR_EXPR_TYPE: usize = 0076;
 
 
-pub(crate) struct TypeEnvironment<'allocator, 'input> {
+pub(crate) struct TypeEnvironment<'input, 'allocator> {
     entity_type_map: HashMap<EntityID, Either<EntityID, WithDefineInfo<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_type_map: HashMap<LocalGenericID, Either<LocalGenericID, WithDefineInfo<Type>>, DefaultHashBuilder, &'allocator Bump>,
     generic_bounds_checks: Vec<GenericsBoundCheck, &'allocator Bump>,
     impl_interface_generics_check: Vec<(Range<usize>, WithDefineInfo<Type>), &'allocator Bump>,
     implicit_convert_map: HashMap<EntityID, ImplicitConvertKind, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, WithDefineInfo<Type>>,
-    closures: Vec<&'allocator Closure<'allocator, 'input>, &'allocator Bump>,
+    closures: Vec<&'allocator Closure<'input, 'allocator>, &'allocator Bump>,
     lazy_generic_type_inference: Vec<LazyGenericTypeInference, &'allocator Bump>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
     current_generics_id: usize,
     var_span_and_entity_ids: Vec<(Range<usize>, EntityID), &'allocator Bump>
 }
 
-impl<'allocator, 'input> TypeEnvironment<'allocator, 'input> {
+impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
     
     pub fn new_with_return_type(
         return_type: Either<EntityID, WithDefineInfo<Type>>,
         allocator: &'allocator Bump
-    ) -> TypeEnvironment<'allocator, 'input> {
+    ) -> TypeEnvironment<'input, 'allocator> {
         Self {
             entity_type_map: HashMap::new_in(allocator),
             generic_type_map: HashMap::new_in(allocator),
@@ -1592,8 +1592,8 @@ pub(crate) struct LazyGenericTypeInference {
 
 
 
-pub(crate) fn type_inference_program<'allocator, 'input>(
-    ast: Program<'allocator, 'input>,
+pub(crate) fn type_inference_program<'input, 'allocator>(
+    ast: Program<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -1609,7 +1609,7 @@ pub(crate) fn type_inference_program<'allocator, 'input>(
     is_closure_scope: bool,
     implements_interfaces: &Vec<Spanned<Type>>,
     force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
@@ -2447,8 +2447,8 @@ fn get_and_check_where_bounds_implements_info(
     Some(Arc::new(ImplementsInfoSet { implements_infos }))
 }
 
-fn type_inference_expression<'allocator, 'input>(
-    ast: Expression<'allocator, 'input>,
+fn type_inference_expression<'input, 'allocator>(
+    ast: Expression<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -2461,7 +2461,7 @@ fn type_inference_expression<'allocator, 'input>(
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
@@ -2744,7 +2744,7 @@ fn type_inference_expression<'allocator, 'input>(
     }
 }
 
-fn type_inference_operator<'allocator, 'input>(
+fn type_inference_operator<'input, 'allocator>(
     left_entity_id: Spanned<EntityID>,
     right_entity_id: Option<Spanned<EntityID>>,
     parent_temp_entity_id: EntityID,
@@ -2755,7 +2755,7 @@ fn type_inference_operator<'allocator, 'input>(
     global_implements_info_set: &ImplementsInfoSet,
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext
@@ -2879,8 +2879,8 @@ fn type_inference_operator<'allocator, 'input>(
     );
 }
 
-fn type_inference_and_expression<'allocator, 'input>(
-    ast: &'allocator AndExpression<'allocator, 'input>,
+fn type_inference_and_expression<'input, 'allocator>(
+    ast: &'allocator AndExpression<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -2893,7 +2893,7 @@ fn type_inference_and_expression<'allocator, 'input>(
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
@@ -3001,8 +3001,8 @@ fn type_inference_and_expression<'allocator, 'input>(
     }
 }
 
-fn type_inference_compare_expression<'allocator, 'input>(
-    ast: &'allocator CompareExpression<'allocator, 'input>,
+fn type_inference_compare_expression<'input, 'allocator>(
+    ast: &'allocator CompareExpression<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -3015,7 +3015,7 @@ fn type_inference_compare_expression<'allocator, 'input>(
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
@@ -3113,8 +3113,8 @@ fn type_inference_compare_expression<'allocator, 'input>(
     );
 }
 
-fn type_inference_add_or_sub_expression<'allocator, 'input>(
-    ast: &'allocator AddOrSubExpression<'allocator, 'input>,
+fn type_inference_add_or_sub_expression<'input, 'allocator>(
+    ast: &'allocator AddOrSubExpression<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -3127,7 +3127,7 @@ fn type_inference_add_or_sub_expression<'allocator, 'input>(
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
@@ -3221,8 +3221,8 @@ fn type_inference_add_or_sub_expression<'allocator, 'input>(
     );
 }
 
-fn type_inference_mul_or_div_expression<'allocator, 'input>(
-    ast: &'allocator MulOrDivExpression<'allocator, 'input>,
+fn type_inference_mul_or_div_expression<'input, 'allocator>(
+    ast: &'allocator MulOrDivExpression<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -3235,7 +3235,7 @@ fn type_inference_mul_or_div_expression<'allocator, 'input>(
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     mut force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
@@ -3329,8 +3329,8 @@ fn type_inference_mul_or_div_expression<'allocator, 'input>(
     );
 }
 
-fn type_inference_factor<'allocator, 'input>(
-    ast: &'allocator Factor<'allocator, 'input>,
+fn type_inference_factor<'input, 'allocator>(
+    ast: &'allocator Factor<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -3343,7 +3343,7 @@ fn type_inference_factor<'allocator, 'input>(
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
@@ -3390,8 +3390,8 @@ fn type_inference_factor<'allocator, 'input>(
     }
 }
 
-fn type_inference_primary<'allocator, 'input>(
-    ast: &'allocator Primary<'allocator, 'input>,
+fn type_inference_primary<'input, 'allocator>(
+    ast: &'allocator Primary<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -3404,7 +3404,7 @@ fn type_inference_primary<'allocator, 'input>(
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
@@ -3761,8 +3761,8 @@ enum MappingTypeKind {
     Result { error_type: Type }
 }
 
-fn type_inference_primary_left<'allocator, 'input>(
-    ast: &'allocator PrimaryLeft<'allocator, 'input>,
+fn type_inference_primary_left<'input, 'allocator>(
+    ast: &'allocator PrimaryLeft<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -3775,7 +3775,7 @@ fn type_inference_primary_left<'allocator, 'input>(
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     mappings: &mut Vec<MappingTypeKind, &'allocator Bump>,
     allocator: &'allocator Bump,
@@ -4651,8 +4651,8 @@ fn type_inference_primary_left<'allocator, 'input>(
     }
 }
 
-fn type_inference_blocks_or_expressions<'allocator, 'input>(
-    blocks_or_expressions: Vec<Either<&'allocator Block<'allocator, 'input>, Expression<'allocator, 'input>>, &'allocator Bump>,
+fn type_inference_blocks_or_expressions<'input, 'allocator>(
+    blocks_or_expressions: Vec<Either<&'allocator Block<'input, 'allocator>, Expression<'input, 'allocator>>, &'allocator Bump>,
     parent_ast_entity_id: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -4666,7 +4666,7 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
     force_be_expression: bool,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
@@ -4910,8 +4910,8 @@ fn type_inference_blocks_or_expressions<'allocator, 'input>(
     type_environment.set_entity_type(parent_ast_entity_id.value, first_type.clone());
 }
 
-fn type_inference_primary_right<'allocator, 'input>(
-    ast: &PrimaryRight<'allocator, 'input>,
+fn type_inference_primary_right<'input, 'allocator>(
+    ast: &PrimaryRight<'input, 'allocator>,
     previous_primary: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -4924,7 +4924,7 @@ fn type_inference_primary_right<'allocator, 'input>(
     global_implements_info_set: &ImplementsInfoSet,
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     mappings: &mut Vec<MappingTypeKind, &'allocator Bump>,
     allocator: &'allocator Bump,
@@ -5131,7 +5131,7 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
     global_implements_info_set: &ImplementsInfoSet,
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     allocator: &'allocator Bump,
 ) -> Result<(WithDefineInfo<Type>, bool), Either<NotFoundTypeElementError, DuplicatedElement>> {
 
@@ -5408,8 +5408,8 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
     Ok((element_type, is_static))
 }
 
-fn type_inference_mapping_operator<'allocator, 'input>(
-    ast: &MappingOperator<'allocator, 'input>,
+fn type_inference_mapping_operator<'input, 'allocator>(
+    ast: &MappingOperator<'input, 'allocator>,
     previous_entity_id: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -5422,7 +5422,7 @@ fn type_inference_mapping_operator<'allocator, 'input>(
     global_implements_info_set: &ImplementsInfoSet,
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     mappings: &mut Vec<MappingTypeKind, &'allocator Bump>,
     allocator: &'allocator Bump,
@@ -5560,7 +5560,7 @@ fn type_inference_mapping_operator<'allocator, 'input>(
     }
 }
 
-fn type_inference_generics<'allocator, 'input>(
+fn type_inference_generics<'input, 'allocator>(
     ast: &Generics,
     previous: EntityID,
     user_type_map: &FxHashMap<String, Type>,
@@ -5571,7 +5571,7 @@ fn type_inference_generics<'allocator, 'input>(
     generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
     context: &TranspileModuleContext
@@ -5641,8 +5641,8 @@ fn type_inference_generics<'allocator, 'input>(
     }
 }
 
-fn type_inference_function_call<'allocator, 'input>(
-    ast: &FunctionCall<'allocator, 'input>,
+fn type_inference_function_call<'input, 'allocator>(
+    ast: &FunctionCall<'input, 'allocator>,
     function: EntityID,
     is_method_call: bool,
     user_type_map: &FxHashMap<String, Type>,
@@ -5656,7 +5656,7 @@ fn type_inference_function_call<'allocator, 'input>(
     global_implements_info_set: &ImplementsInfoSet,
     current_scope_this_type: &ScopeThisType,
     current_scope_implements_info_set: &Option<Arc<ImplementsInfoSet>>,
-    type_environment: &mut TypeEnvironment<'allocator, 'input>,
+    type_environment: &mut TypeEnvironment<'input, 'allocator>,
     implicit_convert_map: &mut FxHashMap<EntityID, ImplicitConvertKind>,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,

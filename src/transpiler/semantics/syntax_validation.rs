@@ -347,8 +347,8 @@ fn validate_syntax_primary_left(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expressions { expressions: expression, error_tokens: _, span: _ } => {
-                    if let Ok(expression) = expression {
+                SimplePrimary::Expressions { expressions, error_tokens: _, span: _ } => {
+                    for expression in expressions.iter() {
                         validate_syntax_expression(&expression, context,errors, warnings);
                     }
                 },

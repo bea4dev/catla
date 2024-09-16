@@ -5,7 +5,7 @@ use crate::lexer::TokenKind;
 use super::{parse_as_literal, parse_literal, read_until_token_found, recover_until_token_found, skip, unexpected_token_error, ArrayTypeInfo, BaseTypeInfo, Generics, GetTokenKind, Span, TokenCursor, TupleTypeInfo, TypeAttribute, TypeAttributeEnum, TypeInfo, TypeInfoResult, TypeTag, TypeTagKind, TypeTagKindEnum};
 
 
-pub fn parse_type_tag<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TypeTag<'allocator, 'input>> {
+pub fn parse_type_tag<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<TypeTag<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let type_tag_kind_token = cursor.next();
@@ -24,7 +24,7 @@ pub fn parse_type_tag<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, '
     return Some(TypeTag { tag_kind, type_info, span: span.elapsed(cursor) });
 }
 
-pub fn parse_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TypeInfo<'allocator, 'input>> {
+pub fn parse_type_info<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<TypeInfo<'input, 'allocator>> {
     if let Some(array_type_info) = parse_array_type_info(cursor) {
         return Some(TypeInfo::ArrayType(array_type_info));
     }
@@ -37,7 +37,7 @@ pub fn parse_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
     return None;
 }
 
-pub fn parse_base_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<BaseTypeInfo<'allocator, 'input>> {
+pub fn parse_base_type_info<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<BaseTypeInfo<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let mut path = Vec::new_in(cursor.allocator);
@@ -71,7 +71,7 @@ pub fn parse_base_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
     return Some(BaseTypeInfo { path, generics, type_attributes, span: span.elapsed(cursor) });
 }
 
-pub fn parse_array_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<ArrayTypeInfo<'allocator, 'input>> {
+pub fn parse_array_type_info<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<ArrayTypeInfo<'input, 'allocator>> {
     let span = Span::start(cursor);
     
     if cursor.next().get_kind() != TokenKind::BracketLeft {
@@ -104,7 +104,7 @@ pub fn parse_array_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'alloc
     return Some(ArrayTypeInfo { type_info, error_tokens, bracket_right, span: span.elapsed(cursor) });
 }
 
-pub fn parse_tuple_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TupleTypeInfo<'allocator, 'input>> {
+pub fn parse_tuple_type_info<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<TupleTypeInfo<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     if cursor.next().get_kind() != TokenKind::ParenthesisLeft {
@@ -149,11 +149,11 @@ pub fn parse_tuple_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'alloc
     return Some(TupleTypeInfo { types, error_tokens, span: span.elapsed(cursor) });
 }
 
-pub fn parse_type_info_result<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> TypeInfoResult<'allocator, 'input> {
+pub fn parse_type_info_result<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> TypeInfoResult<'input, 'allocator> {
     return parse_type_info(cursor).ok_or_else(|| { unexpected_token_error(cursor.allocator, cursor.current()) });
 }
 
-fn parse_type_attributes<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Vec<TypeAttribute<'allocator, 'input>, &'allocator Bump> {
+fn parse_type_attributes<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Vec<TypeAttribute<'input, 'allocator>, &'allocator Bump> {
     let mut attributes = Vec::new_in(cursor.allocator);
     loop {
         let attribute = match parse_type_attribute(cursor) {
@@ -165,7 +165,7 @@ fn parse_type_attributes<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
     return attributes;
 }
 
-fn parse_type_attribute<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TypeAttribute<'allocator, 'input>> {
+fn parse_type_attribute<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<TypeAttribute<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let attribute = match cursor.next().get_kind() {
@@ -180,7 +180,7 @@ fn parse_type_attribute<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     return Some(TypeAttribute::new(attribute, span.elapsed(cursor)));
 }
 
-pub fn parse_generics<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Generics<'allocator, 'input>> {
+pub fn parse_generics<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Generics<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     if cursor.next().get_kind() != TokenKind::LessThan {

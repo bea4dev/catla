@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::Range};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::{collections::String, Bump};
-use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TupleTypeInfo, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause}};
+use catla_parser::{grammar::number_literal_regex, parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, Block, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, TupleTypeInfo, TypeAttributeEnum, TypeInfo, TypeTag, VariableBinding, WhereClause}};
 use either::Either::{self, Left, Right};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -53,21 +53,21 @@ pub(crate) enum EnvironmentSeparatorKind {
 }
 
 #[derive(Debug)]
-pub(crate) struct NameEnvironment<'allocator> {
-    name_define_info_map: RefCell<HashMap<String<'allocator>, DefineWithName, DefaultHashBuilder, &'allocator Bump>>,
+pub(crate) struct NameEnvironment<'input, 'allocator> {
+    name_define_info_map: RefCell<HashMap<&'input str, DefineWithName, DefaultHashBuilder, &'allocator Bump>>,
     parent: Option<EntityID>,
     separator: Option<EnvironmentSeparatorKind>,
     span : Range<usize>
 }
 
-impl<'allocator> NameEnvironment<'allocator> {
+impl<'input, 'allocator> NameEnvironment<'input, 'allocator> {
     
     pub(crate) fn new(
         parent: Option<EntityID>,
         separator: Option<EnvironmentSeparatorKind>,
         span: Range<usize>,
         allocator: &'allocator Bump
-    ) -> NameEnvironment<'allocator> {
+    ) -> NameEnvironment<'input, 'allocator> {
         Self {
             name_define_info_map: RefCell::new(HashMap::new_in(allocator)),
             parent,
@@ -79,7 +79,7 @@ impl<'allocator> NameEnvironment<'allocator> {
     pub(crate) fn get_name_define_info(
         &self,
         name: &str,
-        environments: &ComponentContainer<NameEnvironment<'allocator>>
+        environments: &ComponentContainer<NameEnvironment<'input, 'allocator>>
     ) -> Option<FoundDefineInfo> {
         
         match self.name_define_info_map.borrow().get(name) {
@@ -114,7 +114,7 @@ impl<'allocator> NameEnvironment<'allocator> {
         }
     }
 
-    pub(crate) fn set_name_define_info(&self, name: String<'allocator>, define_info: DefineWithName) {
+    pub(crate) fn set_name_define_info(&self, name: &'input str, define_info: DefineWithName) {
         self.name_define_info_map.borrow_mut().insert(name, define_info);
     }
 
@@ -140,11 +140,11 @@ impl FoundDefineInfo {
 
 
 
-pub(crate) fn name_resolve_program<'allocator>(
-    ast: Program<'allocator, '_>,
+pub(crate) fn name_resolve_program<'input, 'allocator>(
+    ast: Program<'input, 'allocator>,
     parent_env_id: Option<EntityID>,
     is_user_type_scope: bool,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -183,8 +183,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                             already_exists.define_info.span.clone()
                         ));
                     } else {
-                        let name = String::from_str_in(element.value, allocator);
-                        name_environment.set_name_define_info(name, define_info);
+                        name_environment.set_name_define_info(element.value, define_info);
                     }
                 }
             },
@@ -205,28 +204,26 @@ pub(crate) fn name_resolve_program<'allocator>(
                             ));
                         }
                     } else {
-                        let name = String::from_str_in(name.value, allocator);
-                        name_environment.set_name_define_info(name, define_info);
+                        name_environment.set_name_define_info(name.value, define_info);
                     }
                 }
             },
-            StatementAST::UserTypeDefine(data_struct_define) => {
-                if let Ok(data_struct_name) = &data_struct_define.name {
-                    let entity_id = EntityID::from(data_struct_define);
+            StatementAST::UserTypeDefine(user_type_define) => {
+                if let Ok(user_type_name) = &user_type_define.name {
+                    let entity_id = EntityID::from(user_type_define);
                     let define_info = DefineWithName {
                         entity_id,
-                        span: data_struct_name.span.clone(),
+                        span: user_type_name.span.clone(),
                         define_kind: DefineKind::UserType
                     };
 
-                    if let Some(already_exists) = name_environment.get_name_define_info(data_struct_name.value, name_environments) {
+                    if let Some(already_exists) = name_environment.get_name_define_info(user_type_name.value, name_environments) {
                         errors.push(NameAlreadyExists::new(
                             define_info.span.clone(),
                             already_exists.define_info.span.clone()
                         ));
                     } else {
-                        let name = String::from_str_in(data_struct_name.value, allocator);
-                        name_environment.set_name_define_info(name, define_info);
+                        name_environment.set_name_define_info(user_type_name.value, define_info);
                     }
                 }
             },
@@ -245,8 +242,7 @@ pub(crate) fn name_resolve_program<'allocator>(
                             already_exists.define_info.span.clone()
                         ));
                     } else {
-                        let name = String::from_str_in(name.value, allocator);
-                        name_environment.set_name_define_info(name, define_info);
+                        name_environment.set_name_define_info(name.value, define_info);
                     }
                 }
             },
@@ -334,15 +330,13 @@ pub(crate) fn name_resolve_program<'allocator>(
                     );
                 }
 
-                if let Ok(variable_name) = &variable_define.binding {
-                    let entity_id = EntityID::from(variable_define);
-                    let define_info = DefineWithName {
-                        entity_id,
-                        span: variable_name.span.clone(),
-                        define_kind: DefineKind::Variable
-                    };
-                    let name = String::from_str_in(variable_name.value, allocator);
-                    name_environments[current_environment_id].set_name_define_info(name, define_info);
+                if let Ok(variable_binding) = &variable_define.binding {
+                    let name_environment = &name_environments[current_environment_id];
+                    register_variable_binding(
+                        variable_binding,
+                        name_environment,
+                        DefineKind::Variable
+                    );
                 }
             },
             StatementAST::FunctionDefine(function_define) => {
@@ -394,14 +388,11 @@ pub(crate) fn name_resolve_program<'allocator>(
                         allocator
                     );
 
-                    let entity_id = EntityID::from(argument);
-                    let define_info = DefineWithName {
-                        entity_id,
-                        span: argument.span.clone(),
-                        define_kind: DefineKind::FunctionArgument
-                    };
-                    let name = String::from_str_in(argument.binding.value, allocator);
-                    name_environment.set_name_define_info(name, define_info);
+                    register_variable_binding(
+                        &argument.binding,
+                        &name_environment,
+                        DefineKind::FunctionArgument
+                    );
                 }
 
                 if let Some(where_clause) = &function_define.where_clause {
@@ -626,10 +617,10 @@ pub(crate) fn name_resolve_program<'allocator>(
     }
 }
 
-fn name_resolve_generics_define<'allocator>(
-    ast: &'allocator GenericsDefine<'allocator, '_>,
+fn name_resolve_generics_define<'input, 'allocator>(
+    ast: &'allocator GenericsDefine<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -643,7 +634,7 @@ fn name_resolve_generics_define<'allocator>(
             define_kind: DefineKind::Generics
         };
         name_environments[environment_id].set_name_define_info(
-            String::from_str_in(element.name.value, allocator),
+            element.name.value,
             define_info
         );
 
@@ -661,10 +652,10 @@ fn name_resolve_generics_define<'allocator>(
     }
 }
 
-fn name_resolve_where_clause<'allocator>(
-    ast: &'allocator WhereClause<'allocator, '_>,
+fn name_resolve_where_clause<'input, 'allocator>(
+    ast: &'allocator WhereClause<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -694,10 +685,10 @@ fn name_resolve_where_clause<'allocator>(
     }
 }
 
-fn name_resolve_expression<'allocator>(
-    ast: Expression<'allocator, '_>,
+fn name_resolve_expression<'input, 'allocator>(
+    ast: Expression<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -753,36 +744,41 @@ fn name_resolve_expression<'allocator>(
             match &closure.arguments.arguments {
                 Left(argument) => {
                     let entity_id = EntityID::from(argument);
-                    let name = String::from_str_in(argument.value, allocator);
                     let define_info = DefineWithName {
                         entity_id,
                         span: argument.span.clone(),
                         define_kind: DefineKind::ClosureArgument
                     };
-                    name_environment.set_name_define_info(name, define_info);
+                    name_environment.set_name_define_info(argument.value, define_info);
                 },
                 Right(arguments) => {
                     for argument in arguments.iter() {
                         match argument {
                             Left(argument) => {
-                                let entity_id = EntityID::from(argument);
-                                let name = String::from_str_in(argument.binding.value, allocator);
-                                let define_info = DefineWithName {
-                                    entity_id,
-                                    span: argument.binding.span.clone(),
-                                    define_kind: DefineKind::ClosureArgument
-                                };
-                                name_environment.set_name_define_info(name, define_info);
+                                register_variable_binding(
+                                    &argument.binding,
+                                    &name_environment,
+                                    DefineKind::ClosureArgument
+                                );
+
+                                name_resolve_type_tag(
+                                    &argument.type_tag,
+                                    environment_id,
+                                    name_environments,
+                                    resolved_map,
+                                    errors,
+                                    warnings,
+                                    allocator
+                                );
                             },
                             Right(argument) => {
                                 let entity_id = EntityID::from(argument);
-                                let name = String::from_str_in(argument.value, allocator);
                                 let define_info = DefineWithName {
                                     entity_id,
                                     span: argument.span.clone(),
                                     define_kind: DefineKind::ClosureArgument
                                 };
-                                name_environment.set_name_define_info(name, define_info);
+                                name_environment.set_name_define_info(argument.value, define_info);
                             }
                         }
                     }
@@ -823,11 +819,33 @@ fn name_resolve_expression<'allocator>(
     }
 }
 
-fn name_resolve_block<'allocator>(
-    ast: &'allocator Block<'allocator, '_>,
+fn register_variable_binding<'input, 'allocator>(
+    ast: &VariableBinding<'input, 'allocator>,
+    name_environment: &NameEnvironment<'input, 'allocator>,
+    define_kind: DefineKind
+) {
+    match &ast.binding {
+        Left(literal) => {
+            let define_info = DefineWithName {
+                entity_id: EntityID::from(literal),
+                span: literal.span.clone(),
+                define_kind
+            };
+            name_environment.set_name_define_info(literal.value, define_info);
+        },
+        Right(bindings) => {
+            for binding in bindings.iter() {
+                register_variable_binding(binding, name_environment, define_kind);
+            }
+        }
+    }
+}
+
+fn name_resolve_block<'input, 'allocator>(
+    ast: &'allocator Block<'input, 'allocator>,
     environment_id: EntityID,
     is_user_type_scope: bool,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -854,10 +872,10 @@ fn name_resolve_block<'allocator>(
     );
 }
 
-fn name_resolve_and_expression<'allocator>(
-    ast: &'allocator AndExpression<'allocator, '_>,
+fn name_resolve_and_expression<'input, 'allocator>(
+    ast: &'allocator AndExpression<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -887,10 +905,10 @@ fn name_resolve_and_expression<'allocator>(
     }
 }
 
-fn name_resolve_compare_expression<'allocator>(
-    ast: &'allocator CompareExpression<'allocator, '_>,
+fn name_resolve_compare_expression<'input, 'allocator>(
+    ast: &'allocator CompareExpression<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -920,10 +938,10 @@ fn name_resolve_compare_expression<'allocator>(
     }
 }
 
-fn name_resolve_add_or_sub_expression<'allocator>(
-    ast: &'allocator AddOrSubExpression<'allocator, '_>,
+fn name_resolve_add_or_sub_expression<'input, 'allocator>(
+    ast: &'allocator AddOrSubExpression<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -953,10 +971,10 @@ fn name_resolve_add_or_sub_expression<'allocator>(
     }
 }
 
-fn name_resolve_mul_or_div_expression<'allocator>(
-    ast: &'allocator MulOrDivExpression<'allocator, '_>,
+fn name_resolve_mul_or_div_expression<'input, 'allocator>(
+    ast: &'allocator MulOrDivExpression<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -986,10 +1004,10 @@ fn name_resolve_mul_or_div_expression<'allocator>(
     }
 }
 
-fn name_resolve_factor<'allocator>(
-    ast: &'allocator Factor<'allocator, '_>,
+fn name_resolve_factor<'input, 'allocator>(
+    ast: &'allocator Factor<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1008,10 +1026,10 @@ fn name_resolve_factor<'allocator>(
     }
 }
 
-fn name_resolve_primary<'allocator>(
-    ast: &'allocator Primary<'allocator, '_>,
+fn name_resolve_primary<'input, 'allocator>(
+    ast: &'allocator Primary<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1059,10 +1077,10 @@ fn name_resolve_primary<'allocator>(
     }
 }
 
-fn name_resolve_primary_left<'allocator>(
-    ast: &'allocator PrimaryLeft<'allocator, '_>,
+fn name_resolve_primary_left<'input, 'allocator>(
+    ast: &'allocator PrimaryLeft<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1304,10 +1322,10 @@ fn name_resolve_primary_left<'allocator>(
     }
 }
 
-fn name_resolve_mapping_operator<'allocator>(
-    ast: &'allocator MappingOperatorKind<'allocator, '_>,
+fn name_resolve_mapping_operator<'input, 'allocator>(
+    ast: &'allocator MappingOperatorKind<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1332,10 +1350,10 @@ fn name_resolve_mapping_operator<'allocator>(
     }
 }
 
-fn name_resolve_primary_right<'allocator>(
-    ast: &'allocator PrimaryRight<'allocator, '_>,
+fn name_resolve_primary_right<'input, 'allocator>(
+    ast: &'allocator PrimaryRight<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1380,10 +1398,10 @@ fn name_resolve_primary_right<'allocator>(
     }
 }
 
-fn name_resolve_function_call<'allocator>(
-    ast: &'allocator FunctionCall<'allocator, '_>,
+fn name_resolve_function_call<'input, 'allocator>(
+    ast: &'allocator FunctionCall<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1405,10 +1423,10 @@ fn name_resolve_function_call<'allocator>(
 }
 
 
-fn name_resolve_generics<'allocator>(
-    ast: &'allocator Generics<'allocator, '_>,
+fn name_resolve_generics<'input, 'allocator>(
+    ast: &'allocator Generics<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1427,10 +1445,10 @@ fn name_resolve_generics<'allocator>(
     }
 }
 
-fn name_resolve_type_tag<'allocator>(
-    ast: &'allocator TypeTag<'allocator, '_>,
+fn name_resolve_type_tag<'input, 'allocator>(
+    ast: &'allocator TypeTag<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1449,10 +1467,10 @@ fn name_resolve_type_tag<'allocator>(
     }
 }
 
-fn name_resolve_type_info<'allocator>(
-    ast: &'allocator TypeInfo<'allocator, '_>,
+fn name_resolve_type_info<'input, 'allocator>(
+    ast: &'allocator TypeInfo<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1495,10 +1513,10 @@ fn name_resolve_type_info<'allocator>(
     }
 }
 
-fn name_resolve_tuple_type_info<'allocator>(
-    ast: &'allocator TupleTypeInfo<'allocator, '_>,
+fn name_resolve_tuple_type_info<'input, 'allocator>(
+    ast: &'allocator TupleTypeInfo<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1517,10 +1535,10 @@ fn name_resolve_tuple_type_info<'allocator>(
     }
 }
 
-fn name_resolve_array_type_info<'allocator>(
-    ast: &'allocator ArrayTypeInfo<'allocator, '_>,
+fn name_resolve_array_type_info<'input, 'allocator>(
+    ast: &'allocator ArrayTypeInfo<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1539,10 +1557,10 @@ fn name_resolve_array_type_info<'allocator>(
     }
 }
 
-fn name_resolve_base_type_info<'allocator>(
-    ast: &'allocator BaseTypeInfo<'allocator, '_>,
+fn name_resolve_base_type_info<'input, 'allocator>(
+    ast: &'allocator BaseTypeInfo<'input, 'allocator>,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
@@ -1589,11 +1607,11 @@ fn name_resolve_base_type_info<'allocator>(
     }
 }
 
-fn name_resolve_literal<'allocator>(
-    literal: &'allocator Literal<'allocator>,
+fn name_resolve_literal<'input, 'allocator>(
+    literal: &'allocator Literal<'input>,
     collect_error: bool,
     environment_id: EntityID,
-    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'allocator>>,
+    name_environments: &mut ComponentContainer<'allocator, NameEnvironment<'input, 'allocator>>,
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
 ) {

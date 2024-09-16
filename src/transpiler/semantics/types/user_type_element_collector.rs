@@ -1,13 +1,14 @@
-use std::{mem, ops::DerefMut, sync::Arc};
+use std::{mem, ops::{DerefMut, Range}, sync::Arc};
 
 use ariadne::Color;
-use catla_parser::parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, TypeAttributeEnum, TypeInfo, UserTypeKindEnum, WhereClause};
+use bumpalo::Bump;
+use catla_parser::parser::{AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, FunctionDefine, GenericsDefine, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, TupleTypeInfo, TypeAttributeEnum, TypeInfo, UserTypeKindEnum, VariableBinding, WhereClause};
 use either::Either;
 use fxhash::FxHashMap;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext, error::SimpleError, name_resolver::{DefineKind, FoundDefineInfo}, TranspileError, TranspileWarning};
 
-use super::type_info::{Bound, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, ScopeThisType, Type, WhereBound, WithDefineInfo};
+use super::{type_inference::TypeEnvironment, type_info::{Bound, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo, ImplementsInfoSet, ScopeThisType, Type, WhereBound, WithDefineInfo}};
 
 
 pub(crate) fn collect_module_element_types_program(
@@ -656,10 +657,24 @@ pub(crate) fn collect_module_element_types_program(
                         }
                     };
 
+                    let type_span = variable_define.type_tag
+                        .as_ref()
+                        .map(|type_tag| { type_tag.type_info.as_ref().ok() })
+                        .flatten()
+                        .map(|type_info| { type_info.get_span() })
+                        .unwrap_or(variable_define.span.clone());
+
                     module_entity_type_map.insert(EntityID::from(variable_define), variable_type.clone());
                     
-                    if let Ok(name) = &variable_define.binding {
-                        module_element_type_map.insert(name.value.to_string(), variable_type);
+                    if let Ok(binding) = &variable_define.binding {
+                        insert_binding_type(
+                            binding,
+                            variable_type,
+                            type_span,
+                            module_element_type_map,
+                            errors,
+                            context
+                        );
                     }
                 }
 
@@ -684,6 +699,78 @@ pub(crate) fn collect_module_element_types_program(
                 }
             }
             _ => {}
+        }
+    }
+}
+
+fn insert_binding_type(
+    ast: &VariableBinding,
+    ty: Type,
+    ty_span: Range<usize>,
+    module_element_type_map: &mut FxHashMap<String, Type>,
+    errors: &mut Vec<TranspileError>,
+    context: &TranspileModuleContext
+) {
+    match &ast.binding {
+        Either::Left(literal) => {
+            module_element_type_map.insert(literal.value.to_string(), ty);
+        },
+        Either::Right(bindings) => {
+            if let Type::Tuple(types) = &ty {
+                if bindings.len() != types.len() {
+                    let temp_allocator = Bump::new();
+                    let temp = TypeEnvironment::new_with_return_type(
+                        Either::Left(EntityID::dummy()),
+                        &temp_allocator
+                    );
+
+                    let error = SimpleError::new(
+                        0078,
+                        ast.span.clone(),
+                        vec![
+                            (temp.get_type_display_string(&ty), Color::Yellow),
+                            (types.len().to_string(), Color::Red),
+                            (bindings.len().to_string(), Color::Red)
+                        ],
+                        vec![
+                            ((context.module_name.clone(), ty_span.clone()), Color::Red),
+                            ((context.module_name.clone(), ast.span.clone()), Color::Red)
+                        ]
+                    );
+                    errors.push(error);
+                    return;
+                }
+
+                for (binding, ty) in bindings.iter().zip(types.iter()) {
+                    insert_binding_type(
+                        binding,
+                        ty.clone(),
+                        ty_span.clone(),
+                        module_element_type_map,
+                        errors,
+                        context
+                    );
+                }
+            } else {
+                let temp_allocator = Bump::new();
+                let temp = TypeEnvironment::new_with_return_type(
+                    Either::Left(EntityID::dummy()),
+                    &temp_allocator
+                );
+
+                let error = SimpleError::new(
+                    0079,
+                    ast.span.clone(),
+                    vec![
+                        (temp.get_type_display_string(&ty), Color::Yellow)
+                    ],
+                    vec![
+                        ((context.module_name.clone(), ty_span.clone()), Color::Red),
+                        ((context.module_name.clone(), ast.span.clone()), Color::Red)
+                    ]
+                );
+                errors.push(error);
+            }
         }
     }
 }
@@ -1324,8 +1411,8 @@ fn collect_module_element_types_primary_left(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expressions { expressions: expression, error_tokens: _, span: _ } => {
-                    if let Ok(expression) = expression {
+                SimplePrimary::Expressions { expressions, error_tokens: _, span: _ } => {
+                    for expression in expressions {
                         collect_module_element_types_expression(
                             &expression,
                             user_type_map,
@@ -1759,8 +1846,47 @@ pub(crate) fn get_type(
                 warnings,
                 context
             )
+        },
+        TypeInfo::TupleType(tuple_type_info) => {
+            get_tuple_type(
+                tuple_type_info, user_type_map, import_element_map, name_resolved_map, module_user_type_map, module_element_type_map, generics_map, current_scope_this_type, errors, warnings, context)
         }
     }
+}
+
+pub(crate) fn get_tuple_type(
+    ast: &TupleTypeInfo,
+    user_type_map: &FxHashMap<String, Type>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
+    generics_map: &FxHashMap<EntityID, Arc<GenericType>>,
+    current_scope_this_type: &ScopeThisType,
+    errors: &mut Vec<TranspileError>,
+    warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext
+) -> Type {
+    let mut types = Vec::new();
+
+    for type_info in ast.types.iter() {
+        let ty = get_type(
+            type_info,
+            user_type_map,
+            import_element_map,
+            name_resolved_map,
+            module_user_type_map,
+            module_element_type_map,
+            generics_map,
+            current_scope_this_type,
+            errors,
+            warnings,
+            context
+        );
+        types.push(ty);
+    }
+
+    Type::Tuple(Arc::new(types))
 }
 
 pub(crate) fn get_array_type(

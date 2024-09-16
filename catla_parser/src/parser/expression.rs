@@ -1,7 +1,7 @@
 use super::{*, types::parse_generics, statement::{parse_block, parse_function_argument}};
 
 
-pub fn parse_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Expression<'allocator, 'input>> {
+pub fn parse_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Expression<'input, 'allocator>> {
     let allocator = cursor.allocator;
     
     if let Some(return_expr) = parse_return_expression(cursor) {
@@ -16,7 +16,7 @@ pub fn parse_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     return None;
 }
 
-fn parse_or_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<OrExpression<'allocator, 'input>> {
+fn parse_or_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<OrExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let left_expr = parse_and_expression(cursor)?;
@@ -38,7 +38,7 @@ fn parse_or_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
     return Some(OrExpression { left_expr, right_exprs, span: span.elapsed(cursor) });
 }
 
-fn parse_and_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<AndExpression<'allocator, 'input>> {
+fn parse_and_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<AndExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let left_expr = parse_compare_expression(cursor)?;
@@ -60,7 +60,7 @@ fn parse_and_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     return Some(AndExpression { left_expr, right_exprs, span: span.elapsed(cursor) });
 }
 
-fn parse_compare_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<CompareExpression<'allocator, 'input>> {
+fn parse_compare_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<CompareExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let left_expr = parse_add_or_sub_expression(cursor)?;
@@ -93,7 +93,7 @@ fn parse_compare_expression<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
     return Some(CompareExpression { left_expr, right_exprs, span: span.elapsed(cursor) });
 }
 
-fn parse_add_or_sub_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<AddOrSubExpression<'allocator, 'input>> {
+fn parse_add_or_sub_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<AddOrSubExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let left_expr = parse_mul_or_div_expression(cursor)?;
@@ -122,7 +122,7 @@ fn parse_add_or_sub_expression<'allocator, 'input>(cursor: &mut TokenCursor<'all
     return Some(AddOrSubExpression { left_expr, right_exprs, span: span.elapsed(cursor) });
 }
 
-fn parse_mul_or_div_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<MulOrDivExpression<'allocator, 'input>> {
+fn parse_mul_or_div_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<MulOrDivExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let left_expr = parse_factor(cursor)?;
@@ -151,7 +151,7 @@ fn parse_mul_or_div_expression<'allocator, 'input>(cursor: &mut TokenCursor<'all
     return Some(MulOrDivExpression { left_expr, right_exprs, span: span.elapsed(cursor) });
 }
 
-fn parse_factor<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Factor<'allocator, 'input>> {
+fn parse_factor<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Factor<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let negative_keyword_span = if cursor.current().get_kind() == TokenKind::Minus {
@@ -174,7 +174,7 @@ fn parse_factor<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>
     return Some(Factor { negative_keyword_span, primary, span: span.elapsed(cursor) });
 }
 
-fn parse_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Primary<'allocator, 'input>> {
+fn parse_primary<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Primary<'input, 'allocator>> {
     let span = Span::start(cursor);
     
     let left = parse_primary_left(cursor)?;
@@ -191,7 +191,7 @@ fn parse_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input
     return Some(Primary { left, chain, span: span.elapsed(cursor) });
 }
 
-fn parse_primary_left<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<PrimaryLeft<'allocator, 'input>> {
+fn parse_primary_left<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<PrimaryLeft<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let first_expr = if let Some(simple_primary) = parse_simple_primary(cursor) {
@@ -222,7 +222,7 @@ fn parse_primary_left<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, '
     return Some(PrimaryLeft { first_expr, mapping_operator, span: span.elapsed(cursor) });
 }
 
-fn parse_if_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<IfExpression<'allocator, 'input>> {
+fn parse_if_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<IfExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let if_statement = parse_if_statement(cursor)?;
@@ -239,7 +239,7 @@ fn parse_if_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
     return Some(IfExpression { if_statement, chain, span: span.elapsed(cursor) });
 }
 
-fn parse_if_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<IfStatement<'allocator, 'input>> {
+fn parse_if_statement<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<IfStatement<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let if_keyword_token = cursor.next();
@@ -261,7 +261,7 @@ fn parse_if_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, '
     return Some(IfStatement { if_keyword_span, condition, block, span: span.elapsed(cursor) });
 }
 
-fn parse_else_if_or_else<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<ElseIfOrElse<'allocator, 'input>> {
+fn parse_else_if_or_else<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<ElseIfOrElse<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let else_keyword_token = cursor.next();
@@ -278,7 +278,7 @@ fn parse_else_if_or_else<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
     return Some(ElseIfOrElse { else_keyword_span, else_if_or_else, span: span.elapsed(cursor) });
 }
 
-fn parse_else_if_or_else_func<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Either<IfStatement<'allocator, 'input>, Block<'allocator, 'input>>> {
+fn parse_else_if_or_else_func<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Either<IfStatement<'input, 'allocator>, Block<'input, 'allocator>>> {
     return if let Some(if_statement) = parse_if_statement(cursor) {
         Some(Either::Left(if_statement))
     } else if let Some(block) = parse_block(cursor) {
@@ -288,7 +288,7 @@ fn parse_else_if_or_else_func<'allocator, 'input>(cursor: &mut TokenCursor<'allo
     };
 }
 
-fn parse_loop_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<LoopExpression<'allocator, 'input>> {
+fn parse_loop_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<LoopExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     if cursor.next().get_kind() != TokenKind::Loop {
@@ -302,7 +302,7 @@ fn parse_loop_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
     return Some(LoopExpression { block, span: span.elapsed(cursor) });
 }
 
-fn parse_primary_right<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<PrimaryRight<'allocator, 'input>> {
+fn parse_primary_right<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<PrimaryRight<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let separator_token = cursor.next();
@@ -337,7 +337,7 @@ fn parse_primary_right<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
     return Some(PrimaryRight { separator, second_expr, mapping_operator, span: span.elapsed(cursor) });
 }
 
-fn parse_simple_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<SimplePrimary<'allocator, 'input>> {
+fn parse_simple_primary<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<SimplePrimary<'input, 'allocator>> {
     return match cursor.current().get_kind() {
         TokenKind::ParenthesisLeft => {
             let span = Span::start(cursor);
@@ -390,7 +390,7 @@ fn parse_simple_primary<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     }
 }
 
-fn parse_function_call<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<FunctionCall<'allocator, 'input>> {
+fn parse_function_call<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<FunctionCall<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     if cursor.next().get_kind() != TokenKind::ParenthesisLeft {
@@ -433,7 +433,7 @@ fn parse_function_call<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
     return Some(FunctionCall { error_tokens, arg_exprs: Ok(arg_exprs), span: span.elapsed(cursor) });
 }
 
-fn parse_new_array_init_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<NewArrayInitExpression<'allocator, 'input>> {
+fn parse_new_array_init_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<NewArrayInitExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
     let start_position = cursor.current_position;
     
@@ -504,7 +504,7 @@ fn parse_new_array_init_expression<'allocator, 'input>(cursor: &mut TokenCursor<
     });
 }
 
-fn parse_new_array_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<NewArrayExpression<'allocator, 'input>> {
+fn parse_new_array_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<NewArrayExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
     let start_position = cursor.current_position;
     
@@ -558,7 +558,7 @@ fn parse_new_array_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allo
     return Some(NewArrayExpression { new_keyword_span, acyclic_keyword_span, value_expressions, error_tokens, span: span.elapsed(cursor) });
 }
 
-fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<NewExpression<'allocator, 'input>> {
+fn parse_new_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<NewExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
     
     let new_keyword_token = cursor.next();
@@ -679,7 +679,7 @@ fn parse_new_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     return Some(NewExpression { new_keyword_span, acyclic_keyword_span, path, error_tokens, field_assigns, span: span.elapsed(cursor) });
 }
 
-fn parse_mapping_operator<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<MappingOperator<'allocator, 'input>> {
+fn parse_mapping_operator<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<MappingOperator<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let first_token = cursor.next();
@@ -719,7 +719,7 @@ fn parse_mapping_operator<'allocator, 'input>(cursor: &mut TokenCursor<'allocato
     return Some(MappingOperator::new(mapping_operator_kind, span.elapsed(cursor)));
 }
 
-fn parse_return_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<ReturnExpression<'allocator, 'input>> {
+fn parse_return_expression<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<ReturnExpression<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let return_keyword_token = cursor.next();
@@ -734,7 +734,7 @@ fn parse_return_expression<'allocator, 'input>(cursor: &mut TokenCursor<'allocat
     return Some(ReturnExpression { return_keyword_span, expression, span: span.elapsed(cursor) });
 }
 
-fn parse_closure<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Closure<'allocator, 'input>> {
+fn parse_closure<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Closure<'input, 'allocator>> {
     let span = Span::start(cursor);
     let start_position = cursor.current_position;
 
@@ -763,7 +763,7 @@ fn parse_closure<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input
     return Some(Closure { arguments, error_tokens, fat_arrow_span, expression_or_block, span: span.elapsed(cursor) });
 }
 
-fn parse_expression_or_block<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Either<Expression<'allocator, 'input>, Block<'allocator, 'input>>> {
+fn parse_expression_or_block<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Either<Expression<'input, 'allocator>, Block<'input, 'allocator>>> {
     return if let Some(expression) = parse_expression(cursor) {
         Some(Either::Left(expression))
     } else if let Some(block) = parse_block(cursor) {
@@ -773,7 +773,7 @@ fn parse_expression_or_block<'allocator, 'input>(cursor: &mut TokenCursor<'alloc
     };
 }
 
-fn parse_closure_arguments<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<ClosureArguments<'allocator, 'input>> {
+fn parse_closure_arguments<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<ClosureArguments<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let start_position = cursor.current_position;

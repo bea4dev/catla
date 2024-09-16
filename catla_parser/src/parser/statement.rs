@@ -4,7 +4,7 @@ use super::{*, types::{parse_type_tag, parse_type_info}};
 use expression::{*};
 
 
-pub fn parse_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Statement<'allocator, 'input> {
+pub fn parse_statement<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Statement<'input, 'allocator> {
     if let Some(assignment) = parse_assignment(cursor) {
         return Ok(StatementAST::Assignment(assignment));
     }
@@ -36,7 +36,7 @@ pub fn parse_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 
     return Err(ASTParseError::UnexpectedToken(bump_vec![cursor.allocator, cursor.next().unwrap().clone()]))
 }
 
-fn parse_assignment<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Assignment<'allocator, 'input>> {
+fn parse_assignment<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Assignment<'input, 'allocator>> {
     let start_position = cursor.current_position;
     let span = Span::start(cursor);
 
@@ -67,7 +67,7 @@ fn parse_assignment<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'in
     return Some(Assignment { left_expr, right_expr, span: span.elapsed(cursor) })
 }
 
-fn parse_exchange<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Exchange<'allocator, 'input>> {
+fn parse_exchange<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Exchange<'input, 'allocator>> {
     let start_position = cursor.current_position;
     let span = Span::start(cursor);
 
@@ -98,7 +98,7 @@ fn parse_exchange<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'inpu
     return Some(Exchange { left_expr, right_expr, span: span.elapsed(cursor) })
 }
 
-fn parse_import<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Import<'allocator, 'input>> {
+fn parse_import<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Import<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let first = cursor.next().get_kind();
@@ -165,7 +165,7 @@ fn parse_import<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>
     }
 }
 
-fn parse_import_elements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> ImportElements<'allocator, 'input> {
+fn parse_import_elements<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> ImportElements<'input, 'allocator> {
     cursor.next();
 
     let mut elements = Vec::new_in(cursor.allocator);
@@ -216,7 +216,7 @@ fn parse_import_elements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
     return ImportElements { elements, error_tokens, brace_right };
 }
 
-fn parse_statement_with_attributes<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Result<StatementAST<'allocator, 'input>, Vec<StatementAttribute, &'allocator Bump>>> {
+fn parse_statement_with_attributes<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Result<StatementAST<'input, 'allocator>, Vec<StatementAttribute, &'allocator Bump>>> {
     let statement_attributes = parse_statement_attributes(cursor);
 
     if let Some(define) = parse_variable_define(cursor, &statement_attributes) {
@@ -238,7 +238,7 @@ fn parse_statement_with_attributes<'allocator, 'input>(cursor: &mut TokenCursor<
     };
 }
 
-fn parse_statement_attributes<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Vec<StatementAttribute, &'allocator Bump> {
+fn parse_statement_attributes<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Vec<StatementAttribute, &'allocator Bump> {
     let mut statement_attributes = Vec::new_in(cursor.allocator);
     loop {
         let next = match cursor.next() {
@@ -264,7 +264,7 @@ fn parse_statement_attributes<'allocator, 'input>(cursor: &mut TokenCursor<'allo
     return statement_attributes;
 }
 
-fn parse_variable_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<VariableDefine<'allocator, 'input>> {
+fn parse_variable_define<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<VariableDefine<'input, 'allocator>> {
     let span = Span::start(cursor);
     
     let let_var = match cursor.next() {
@@ -305,7 +305,7 @@ fn parse_variable_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
     return Some(VariableDefine { attributes, binding, type_tag, expression: Some(expression), span })
 }
 
-fn parse_variable_binding<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<VariableBinding<'allocator, 'input>> {
+fn parse_variable_binding<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<VariableBinding<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let first_kind = cursor.current().get_kind();
@@ -371,7 +371,7 @@ fn parse_variable_binding<'allocator, 'input>(cursor: &mut TokenCursor<'allocato
     }
 }
 
-fn parse_function_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<FunctionDefine<'allocator, 'input>> {
+fn parse_function_define<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<FunctionDefine<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let allocator = cursor.allocator;
@@ -411,7 +411,7 @@ fn parse_function_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
     return Some(FunctionDefine { attributes: statement_attributes.clone(), generics_define, name, args, type_tag, where_clause, block_or_semicolon, span });
 }
 
-fn parse_block_or_semicolon<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Either<Range<usize>, Block<'allocator, 'input>>> {
+fn parse_block_or_semicolon<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Either<Range<usize>, Block<'input, 'allocator>>> {
     match cursor.current().get_kind() {
         TokenKind::Semicolon => Some(Either::Left(cursor.next().unwrap().span.clone())),
         TokenKind::BraceLeft => parse_block(cursor).map(|block| { Either::Right(block) }),
@@ -419,7 +419,7 @@ fn parse_block_or_semicolon<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
     }
 }
 
-pub fn parse_where_clause<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, next_expected_token: TokenKind) -> Option<WhereClause<'allocator, 'input>> {
+pub fn parse_where_clause<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>, next_expected_token: TokenKind) -> Option<WhereClause<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let first_token = cursor.next().get_kind();
@@ -490,7 +490,7 @@ pub fn parse_where_clause<'allocator, 'input>(cursor: &mut TokenCursor<'allocato
     return Some(WhereClause { elements, error_tokens, next_expected_token, span: span.elapsed(cursor) });
 }
 
-pub fn parse_where_element<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<WhereElement<'allocator, 'input>> {
+pub fn parse_where_element<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<WhereElement<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let target_type = parse_type_info(cursor)?;
@@ -522,7 +522,7 @@ pub fn parse_where_element<'allocator, 'input>(cursor: &mut TokenCursor<'allocat
     return Some(WhereElement { target_type, bounds, span: span.elapsed(cursor) });
 }
 
-fn parse_function_arguments<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> FunctionArguments<'allocator, 'input> {
+fn parse_function_arguments<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> FunctionArguments<'input, 'allocator> {
     let span = Span::start(cursor);
 
     let paren_left = cursor.next().get_kind();
@@ -621,7 +621,7 @@ fn parse_function_arguments<'allocator, 'input>(cursor: &mut TokenCursor<'alloca
     return FunctionArguments { paren_left, this_mutability, arguments, error_tokens, paren_right, span: span.elapsed(cursor) };
 }
 
-pub fn parse_function_argument<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<FunctionArgument<'allocator, 'input>> {
+pub fn parse_function_argument<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<FunctionArgument<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let start_position = cursor.current_position;
@@ -638,7 +638,7 @@ pub fn parse_function_argument<'allocator, 'input>(cursor: &mut TokenCursor<'all
     return Some(FunctionArgument { binding, type_tag, span: span.elapsed(cursor) })
 }
 
-pub fn parse_generics_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<GenericsDefine<'allocator, 'input>> {
+pub fn parse_generics_define<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<GenericsDefine<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let first_token = cursor.next().get_kind();
@@ -696,7 +696,7 @@ pub fn parse_generics_define<'allocator, 'input>(cursor: &mut TokenCursor<'alloc
     return Some(GenericsDefine { elements, error_tokens, greater_than, span: span.elapsed(cursor) });
 }
 
-pub fn parse_generics_define_element<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<GenericsElement<'allocator, 'input>> {
+pub fn parse_generics_define_element<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<GenericsElement<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     let name = parse_literal(cursor)?;
@@ -728,7 +728,7 @@ pub fn parse_generics_define_element<'allocator, 'input>(cursor: &mut TokenCurso
     return Some(GenericsElement { name, bounds, span: span.elapsed(cursor) });
 }
 
-fn parse_user_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<UserTypeDefine<'allocator, 'input>> {
+fn parse_user_type_define<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>, statement_attributes: &Vec<StatementAttribute, &'allocator Bump>) -> Option<UserTypeDefine<'input, 'allocator>> {
     let span = Span::start(cursor);
     
     let kind_token = cursor.next();
@@ -765,7 +765,7 @@ fn parse_user_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocato
     return Some(UserTypeDefine { attributes: statement_attributes.clone(), kind, name, generics_define, super_type_info, error_tokens, where_clause, block, span: span.elapsed(cursor) });
 }
 
-fn parse_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<TypeDefine<'allocator, 'input>> {
+fn parse_type_define<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<TypeDefine<'input, 'allocator>> {
     let span = Span::start(cursor);
     
     if cursor.next().get_kind() != TokenKind::Type {
@@ -796,7 +796,7 @@ fn parse_type_define<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'i
     return Some(TypeDefine { name, generics_define, type_info, error_tokens, span: span.elapsed(cursor) });
 }
 
-fn parse_super_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<SuperTypeInfo<'allocator, 'input>> {
+fn parse_super_type_info<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<SuperTypeInfo<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     if cursor.next().get_kind() != TokenKind::Colon {
@@ -842,7 +842,7 @@ fn parse_super_type_info<'allocator, 'input>(cursor: &mut TokenCursor<'allocator
     return Some(SuperTypeInfo { type_infos, error_tokens, span: span.elapsed(cursor) });
 }
 
-fn parse_implements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Implements<'allocator, 'input>> {
+fn parse_implements<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Implements<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     if cursor.next().get_kind() != TokenKind::Implements {
@@ -875,7 +875,7 @@ fn parse_implements<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'in
     })
 }
 
-fn parse_drop_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<DropStatement<'allocator, 'input>> {
+fn parse_drop_statement<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<DropStatement<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     if cursor.next().get_kind() != TokenKind::Drop {
@@ -894,7 +894,7 @@ fn parse_drop_statement<'allocator, 'input>(cursor: &mut TokenCursor<'allocator,
     return Some(DropStatement { acyclic_keyword_span, expression, span: span.elapsed(cursor) });
 }
 
-pub fn parse_block<'allocator, 'input>(cursor: &mut TokenCursor<'allocator, 'input>) -> Option<Block<'allocator, 'input>> {
+pub fn parse_block<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Block<'input, 'allocator>> {
     let span = Span::start(cursor);
 
     if cursor.next().get_kind() != TokenKind::BraceLeft {

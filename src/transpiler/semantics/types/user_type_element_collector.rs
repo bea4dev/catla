@@ -147,8 +147,25 @@ pub(crate) fn collect_module_element_types_program(
                     module_entity_type_map.insert(EntityID::from(field_define), type_info.clone());
 
                     match &field_define.binding {
-                        Ok(name) => {
-                            Some((name.clone(), type_info, field_define.attributes.statement_attributes.iter().cloned().collect()))
+                        Ok(binding) => {
+                            match &binding.binding {
+                                Either::Left(literal) => {
+                                    Some((literal.clone(), type_info, field_define.attributes.statement_attributes.iter().cloned().collect()))
+                                },
+                                Either::Right(_) => {
+                                    let error = SimpleError::new(
+                                        0080,
+                                        binding.span.clone(),
+                                        vec![],
+                                        vec![
+                                            ((context.module_name.clone(), binding.span.clone()), Color::Red)
+                                        ]
+                                    );
+                                    errors.push(error);
+
+                                    None
+                                }
+                            }
                         },
                         _ => None
                     }
@@ -657,24 +674,27 @@ pub(crate) fn collect_module_element_types_program(
                         }
                     };
 
-                    let type_span = variable_define.type_tag
-                        .as_ref()
-                        .map(|type_tag| { type_tag.type_info.as_ref().ok() })
-                        .flatten()
-                        .map(|type_info| { type_info.get_span() })
-                        .unwrap_or(variable_define.span.clone());
-
                     module_entity_type_map.insert(EntityID::from(variable_define), variable_type.clone());
                     
                     if let Ok(binding) = &variable_define.binding {
-                        insert_binding_type(
-                            binding,
-                            variable_type,
-                            type_span,
-                            module_element_type_map,
-                            errors,
-                            context
-                        );
+                        match &binding.binding {
+                            Either::Left(literal) => {
+                                module_element_type_map.insert(literal.value.to_string(), variable_type);
+                            },
+                            Either::Right(_) => {
+                                let error = SimpleError::new(
+                                    0080,
+                                    binding.span.clone(),
+                                    vec![],
+                                    vec![
+                                        ((context.module_name.clone(), binding.span.clone()), Color::Red)
+                                    ]
+                                );
+                                errors.push(error);
+
+                                insert_binding_unknown(binding, module_element_type_map);
+                            }
+                        }
                     }
                 }
 
@@ -699,6 +719,22 @@ pub(crate) fn collect_module_element_types_program(
                 }
             }
             _ => {}
+        }
+    }
+}
+
+fn insert_binding_unknown(
+    ast: &VariableBinding,
+    module_element_type_map: &mut FxHashMap<String, Type>
+) {
+    match &ast.binding {
+        Either::Left(literal) => {
+            module_element_type_map.insert(literal.value.to_string(), Type::Unknown);
+        },
+        Either::Right(bindings) => {
+            for binding in bindings.iter() {
+                insert_binding_unknown(binding, module_element_type_map);
+            }
         }
     }
 }

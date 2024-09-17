@@ -1,7 +1,7 @@
 use std::{any::TypeId, fmt::Debug, hash::Hash, mem::transmute, ops::{Index, IndexMut}};
 
 use bumpalo::Bump;
-use catla_parser::parser::AST;
+use catla_parser::parser::{AST, AST_TYPE_NAME_MAP};
 use hashbrown::{HashMap, hash_map::DefaultHashBuilder};
 
 
@@ -16,6 +16,17 @@ impl EntityID {
         Self {
             ptr: 0,
             type_id: TypeId::of::<EntityID>()
+        }
+    }
+
+    pub fn get_type_name(&self) -> &'static str {
+        if self.type_id == TypeId::of::<EntityID>() {
+            return "Dummy";
+        }
+
+        match AST_TYPE_NAME_MAP.get(&self.type_id) {
+            Some(type_name) => type_name,
+            None => "Unknown"
         }
     }
 }

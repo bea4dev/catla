@@ -1,4 +1,3 @@
-
 pub mod parser_utils {
     macro_rules! bump_vec {
         ($allocator:expr) => (
@@ -18,6 +17,12 @@ pub mod parser_utils {
     macro_rules! impl_ast {
         ($($x:ty),*) => (
             $(impl AST for $x {})*
+            pub static AST_TYPE_NAME_MAP: std::sync::LazyLock<std::collections::HashMap<std::any::TypeId, &'static str>>
+                = std::sync::LazyLock::new(|| {
+                    let mut map = std::collections::HashMap::new();
+                    $(map.insert(typeid::of::<$x>(), std::any::type_name::<$x>());)*
+                    map
+            });
         );
     }
 

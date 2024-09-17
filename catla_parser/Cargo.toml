@@ -9,3 +9,4 @@ bnf_rules = "0.1.4"
 bumpalo = { version = "3.13.0", features = ["collections", "boxed", "allocator_api", "allocator-api2"] }
 proc-macro-regex = "1.1.0"
 allocator-api2 = "0.2.16"
+typeid = "1.0.2"

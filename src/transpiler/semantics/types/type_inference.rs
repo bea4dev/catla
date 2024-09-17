@@ -167,15 +167,16 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
 
     pub fn set_entity_type(&mut self, entity_id: EntityID, ty: WithDefineInfo<Type>) {
         let next_entity_id_or_type = match self.entity_type_map.get(&entity_id){
-            Some(value) => value.clone(),
+            Some(value) => value,
             None => {
-                self.entity_type_map.insert(entity_id, Either::Right(ty));
+                println!("{:?} = {}", entity_id, self.get_type_display_string(&ty.value));
+                self.entity_type_map.insert(entity_id, Either::Right(ty)); 
                 return;
             }
         };
 
         match next_entity_id_or_type {
-            Either::Left(entity_id) => self.set_entity_type(entity_id, ty),
+            Either::Left(entity_id) => self.set_entity_type(*entity_id, ty),
             Either::Right(_) => {
                 self.entity_type_map.insert(entity_id, Either::Right(ty));
             }
@@ -184,7 +185,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
 
     pub fn set_generic_type(&mut self, generic_id: LocalGenericID, ty: WithDefineInfo<Type>) {
         let next_generic_id_or_type = match self.generic_type_map.get(&generic_id) {
-            Some(value) => value.clone(),
+            Some(value) => value,
             None => {
                 self.generic_type_map.insert(generic_id, Either::Right(ty));
                 return;
@@ -192,7 +193,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
         };
 
         match next_generic_id_or_type {
-            Either::Left(generic_id) => self.set_generic_type(generic_id, ty),
+            Either::Left(generic_id) => self.set_generic_type(*generic_id, ty),
             Either::Right(_) => {
                 self.generic_type_map.insert(generic_id, Either::Right(ty));
             }
@@ -948,7 +949,8 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
     pub fn resolve_entity_type(&self, entity_id: EntityID) -> WithDefineInfo<Type> {
         let mut current_id = entity_id;
         loop {
-            let entity_id_or_type = self.entity_type_map.get(&current_id).unwrap();
+            let entity_id_or_type = self.entity_type_map.get(&current_id)
+                .expect(format!("Not found entity type! | EntityID: {:?}, Type : {}", current_id, entity_id.get_type_name()).as_str());
             match entity_id_or_type {
                 Either::Left(entity_id) => current_id = *entity_id,
                 Either::Right(ty) => return ty.clone()
@@ -959,7 +961,8 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
     pub fn resolve_entity_type_with_id(&self, entity_id: EntityID) -> (EntityID, WithDefineInfo<Type>) {
         let mut current_id = entity_id;
         loop {
-            let entity_id_or_type = self.entity_type_map.get(&current_id).unwrap();
+            let entity_id_or_type = self.entity_type_map.get(&current_id)
+                .expect(format!("Not found entity type! | EntityID: {:?}, Type : {}", current_id, entity_id.get_type_name()).as_str());
             match entity_id_or_type {
                 Either::Left(entity_id) => current_id = *entity_id,
                 Either::Right(ty) => return (current_id, ty.clone())
@@ -2209,18 +2212,23 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
                 }
 
                 if &tag_type != &Type::Unknown {
-                    let span = variable_define.binding.clone()
-                        .map(|name| { name.span })
-                        .unwrap_or(variable_define.span.clone());
-
-                    type_environment.set_entity_type(
-                        EntityID::from(variable_define),
-                        WithDefineInfo {
-                            value: tag_type.clone(),
-                            module_name: context.module_name.clone(),
-                            span
+                    if let Ok(binding) = &variable_define.binding {
+                        match &binding.binding {
+                            Either::Left(literal) => {
+                                type_environment.set_entity_type(
+                                    EntityID::from(literal),
+                                    WithDefineInfo {
+                                        value: tag_type.clone(),
+                                        module_name: context.module_name.clone(),
+                                        span: binding.span.clone()
+                                    }
+                                );
+                            },
+                            Either::Right(_) => {
+                                
+                            }
                         }
-                    );
+                    }
                 }
 
                 if let Some(expression) = &variable_define.expression {
@@ -3786,33 +3794,88 @@ fn type_inference_primary_left<'input, 'allocator>(
     match &ast.first_expr {
         PrimaryLeftExpr::Simple(simple) => {
             match &simple.0 {
-                SimplePrimary::Expressions { expressions: expression, error_tokens: _, span: _ } => {
-                    if let Ok(expression) = expression {
-                        type_inference_expression(
-                            &expression,
-                            user_type_map,
-                            import_element_map,
-                            name_resolved_map,
-                            module_user_type_map,
-                            module_element_type_map,
-                            module_element_type_maps,
-                            generics_map,
-                            module_entity_type_map,
-                            global_implements_info_set,
-                            current_scope_this_type,
-                            current_scope_implements_info_set,
-                            force_be_expression,
-                            type_environment,
-                            implicit_convert_map,
-                            allocator,
-                            errors,
-                            warnings,
-                            context
-                        );
-                        type_environment.set_entity_id_equals(
-                            EntityID::from(*expression),
-                            EntityID::from(&simple.0)
-                        );
+                SimplePrimary::Expressions { expressions, error_tokens: _, span } => {
+                    match expressions.len() {
+                        1 => {
+                            let expression = expressions.first().unwrap();
+
+                            type_inference_expression(
+                                &expression,
+                                user_type_map,
+                                import_element_map,
+                                name_resolved_map,
+                                module_user_type_map,
+                                module_element_type_map,
+                                module_element_type_maps,
+                                generics_map,
+                                module_entity_type_map,
+                                global_implements_info_set,
+                                current_scope_this_type,
+                                current_scope_implements_info_set,
+                                force_be_expression,
+                                type_environment,
+                                implicit_convert_map,
+                                allocator,
+                                errors,
+                                warnings,
+                                context
+                            );
+                            type_environment.set_entity_id_equals(
+                                EntityID::from(*expression),
+                                EntityID::from(&simple.0)
+                            );
+                        },
+                        0 => {
+                            type_environment.set_entity_type(
+                                EntityID::from(&simple.0),
+                                WithDefineInfo {
+                                    value: Type::Unit,
+                                    module_name: context.module_name.clone(),
+                                    span: span.clone()
+                                }
+                            );
+                        },
+                        _ => {
+                            let mut types = Vec::new();
+
+                            for expression in expressions.iter() {
+                                type_inference_expression(
+                                    &expression,
+                                    user_type_map,
+                                    import_element_map,
+                                    name_resolved_map,
+                                    module_user_type_map,
+                                    module_element_type_map,
+                                    module_element_type_maps,
+                                    generics_map,
+                                    module_entity_type_map,
+                                    global_implements_info_set,
+                                    current_scope_this_type,
+                                    current_scope_implements_info_set,
+                                    force_be_expression,
+                                    type_environment,
+                                    implicit_convert_map,
+                                    allocator,
+                                    errors,
+                                    warnings,
+                                    context
+                                );
+
+                                let ty = type_environment.resolve_entity_type(EntityID::from(*expression));
+                                types.push(ty.value);
+                            }
+
+                            let tuple_type = Type::Tuple(Arc::new(types));
+                            
+                            type_environment.set_entity_type(
+                                EntityID::from(&simple.0),
+                                WithDefineInfo {
+                                    value: tuple_type,
+                                    module_name: context.module_name.clone(),
+                                    span: span.clone()
+                                }
+                            );
+                        }
                     }
                 },
                 SimplePrimary::Identifier(identifier) => {
@@ -4025,6 +4088,19 @@ fn type_inference_primary_left<'input, 'allocator>(
                     );
                 }
             }
+
+            if type_environment.entity_type_map.get(&EntityID::from(&simple.0)).is_none() {
+                type_environment.set_entity_type(
+                    EntityID::from(&simple.0),
+                    WithDefineInfo {
+                        value: Type::Unknown,
+                        module_name: context.module_name.clone(),
+                        span: simple.0.get_span()
+                    }
+                );
+            }
+
+            dbg!(type_environment.get_type_display_string(&type_environment.resolve_entity_type(EntityID::from(&simple.0)).value));
 
             if let Some(generics) = &simple.1 {
                 if let Ok(generics) = generics {

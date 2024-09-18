@@ -1,8 +1,8 @@
-use std::{alloc::Allocator, ops::{Deref, Range}, sync::Arc};
+use std::{ops::{Deref, Range}, sync::Arc};
 
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::{collections::CollectIn, Bump};
-use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, Closure, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum};
+use catla_parser::parser::{AddOrSubExpression, AndExpression, Block, Closure, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes, UserTypeKindEnum, VariableBinding};
 use either::Either;
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
@@ -29,6 +29,8 @@ const INVALID_ARRAY_LENGTH_EXPR_TYPE: usize = 0068;
 const INVALID_PRIMARY_SEPARATOR: usize = 0071;
 const NOT_IMPLEMENTS_OPERATOR_INTERFACE: usize = 0072;
 const INVALID_LOGICAL_OPERATOR_EXPR_TYPE: usize = 0076;
+const INVALID_TUPLE_LENGTH: usize = 0078;
+const INVALID_TYPE_TUPLE_BINDING: usize = 0079;
 
 
 pub(crate) struct TypeEnvironment<'input, 'allocator> {
@@ -989,6 +991,19 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
                 self.resolve_generic_type(*generic_id).1.value
             },
             _ => ty.clone()
+        }
+    }
+
+    fn register_variable(&mut self, binding: &VariableBinding) {
+        match &binding.binding {
+            Either::Left(literal) => {
+                self.var_span_and_entity_ids.push((literal.span.clone(), EntityID::from(literal)))
+            },
+            Either::Right(bindings) => {
+                for binding in bindings.iter() {
+                    self.register_variable(binding);
+                }
+            }
         }
     }
     
@@ -2213,21 +2228,16 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
 
                 if &tag_type != &Type::Unknown {
                     if let Ok(binding) = &variable_define.binding {
-                        match &binding.binding {
-                            Either::Left(literal) => {
-                                type_environment.set_entity_type(
-                                    EntityID::from(literal),
-                                    WithDefineInfo {
-                                        value: tag_type.clone(),
-                                        module_name: context.module_name.clone(),
-                                        span: binding.span.clone()
-                                    }
-                                );
-                            },
-                            Either::Right(_) => {
-                                
-                            }
-                        }
+                        let tag_type_span = variable_define.type_tag.as_ref().unwrap()
+                            .type_info.as_ref().unwrap().get_span();
+
+                        bind_variable_for_tuple(
+                            binding,
+                            &tag_type,
+                            &tag_type_span,
+                            type_environment,
+                            context
+                        );
                     }
                 }
 
@@ -2256,27 +2266,64 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
                         );
 
                         if &tag_type == &Type::Unknown {
-                            type_environment.set_entity_id_equals(
-                                EntityID::from(*expression),
-                                EntityID::from(variable_define)
-                            );
-                        } else {
-                            let tag_type_span = variable_define.type_tag.as_ref()
-                            .map(|type_tag| {
-                                type_tag.type_info.as_ref().map(|type_info| { type_info.get_span() }).ok()
-                            }).flatten().unwrap_or(variable_define.span.clone());
+                            if let Ok(binding) = &variable_define.binding {
+                                match &binding.binding {
+                                    Either::Left(literal) => {
+                                        type_environment.set_entity_id_equals(
+                                            EntityID::from(*expression),
+                                            EntityID::from(literal)
+                                        );
+                                    },
+                                    Either::Right(_) => {
+                                        let expression_type = type_environment.resolve_entity_type(EntityID::from(*expression));
 
-                            let result = type_environment.unify_with_implicit_convert(
-                                Spanned::new(EntityID::from(*expression),expression.get_span()),
-                                Spanned::new(EntityID::from(variable_define), tag_type_span),
-                                true,
-                                current_scope_this_type
-                            );
-                            add_error(result, type_environment);
+                                        bind_variable_for_tuple(
+                                            binding,
+                                            &expression_type.value,
+                                            &expression.get_span(),
+                                            type_environment,
+                                            context
+                                        );
+                                    }
+                                }
+                            }
+                        } else {
+                            if let Ok(binding) = &variable_define.binding {
+                                let tag_type_span = variable_define.type_tag.as_ref()
+                                .map(|type_tag| {
+                                    type_tag.type_info.as_ref().map(|type_info| { type_info.get_span() }).ok()
+                                }).flatten().unwrap_or(variable_define.span.clone());
+
+                                match &binding.binding {
+                                    Either::Left(literal) => {
+                                        let result = type_environment.unify_with_implicit_convert(
+                                            Spanned::new(EntityID::from(*expression), expression.get_span()),
+                                            Spanned::new(EntityID::from(literal), tag_type_span),
+                                            true,
+                                            current_scope_this_type
+                                        );
+                                        add_error(result, type_environment);
+                                    },
+                                    Either::Right(_) => {
+                                        let expression_type = type_environment.resolve_entity_type(EntityID::from(*expression));
+
+                                        unify_variable_binding(
+                                            binding,
+                                            &expression_type.value,
+                                            &expression.get_span(),
+                                            current_scope_this_type,
+                                            type_environment,
+                                            context
+                                        );
+                                    }
+                                }
+                            }
                         }
 
-                        if let Ok(name) = &variable_define.binding {
-                            type_environment.var_span_and_entity_ids.push((name.span.clone(), EntityID::from(variable_define)));
+                        if let Ok(binding) = &variable_define.binding {
+                            if context.context.settings.is_debug {
+                                type_environment.register_variable(binding);
+                            }
                         }
                     }
                 }
@@ -2402,6 +2449,148 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
     if !is_interface_scope {
         override_elements_environment.collect_errors(errors, context);
     } 
+}
+
+fn bind_variable_for_tuple(
+    ast: &VariableBinding,
+    ty: &Type,
+    type_span: &Range<usize>,
+    type_environment: &mut TypeEnvironment,
+    context: &TranspileModuleContext
+) {
+    match &ast.binding {
+        Either::Left(literal) => {
+            type_environment.set_entity_type(
+                EntityID::from(literal),
+                WithDefineInfo {
+                    value: ty.clone(),
+                    module_name: context.module_name.clone(),
+                    span: literal.span.clone()
+                }
+            );
+        },
+        Either::Right(bindings) => {
+            let resolved_type = type_environment.resolve_type_surface(ty);
+
+            if let Type::Tuple(types) = &resolved_type {
+                if bindings.len() != types.len() {
+                    let error = InvalidTupleLength {
+                        ty: ty.clone(),
+                        type_span: type_span.clone(),
+                        binding_span: ast.span.clone(),
+                        types_length: types.len(),
+                        bindings_length: bindings.len()
+                    };
+                    type_environment.add_lazy_type_error_report(error);
+
+                    bind_variable_unknown(ast, type_environment, context);
+
+                    return;
+                }
+
+                for (binding, ty) in bindings.iter().zip(types.iter()) {
+                    bind_variable_for_tuple(binding, ty, type_span, type_environment, context);
+                }
+            } else {
+                let error = InvalidTypeTupleBinding {
+                    ty: ty.clone(),
+                    type_span: type_span.clone(),
+                    binding_span: ast.span.clone()
+                };
+                type_environment.add_lazy_type_error_report(error);
+
+                bind_variable_unknown(ast, type_environment, context);
+            }
+        }
+    }
+}
+
+fn bind_variable_unknown(
+    ast: &VariableBinding,
+    type_environment: &mut TypeEnvironment,
+    context: &TranspileModuleContext
+) {
+    match &ast.binding {
+        Either::Left(literal) => {
+            type_environment.set_entity_type(
+                EntityID::from(literal),
+                WithDefineInfo {
+                    value: Type::Unknown,
+                    module_name: context.module_name.clone(),
+                    span: ast.span.clone()
+                }
+            );
+        },
+        Either::Right(bindings) => {
+            for binding in bindings.iter() {
+                bind_variable_unknown(binding, type_environment, context);
+            }
+        }
+    }
+}
+
+fn unify_variable_binding(
+    ast: &VariableBinding,
+    ty: &Type,
+    type_span: &Range<usize>,
+    current_scope_this_type: &ScopeThisType,
+    type_environment: &mut TypeEnvironment,
+    context: &TranspileModuleContext
+) {
+    match &ast.binding {
+        Either::Left(literal) => {
+            let literal_type = type_environment.resolve_entity_type(EntityID::from(literal));
+
+            let result = type_environment.unify_type(
+                ty,
+                type_span,
+                &context.module_name,
+                &literal_type.value,
+                &literal_type.span,
+                &literal_type.module_name,
+                current_scope_this_type,
+                false,
+                true
+            );
+            add_error(result, type_environment);
+        }
+        Either::Right(bindings) => {
+            let resolved_type = type_environment.resolve_type_surface(ty);
+
+            if let Type::Tuple(types) = &resolved_type {
+                if bindings.len() != types.len() {
+                    let error = InvalidTupleLength {
+                        ty: ty.clone(),
+                        type_span: type_span.clone(),
+                        binding_span: ast.span.clone(),
+                        types_length: types.len(),
+                        bindings_length: bindings.len()
+                    };
+                    type_environment.add_lazy_type_error_report(error);
+
+                    return;
+                }
+
+                for (binding, ty) in bindings.iter().zip(types.iter()) {
+                    unify_variable_binding(
+                        binding,
+                        ty,
+                        type_span,
+                        current_scope_this_type,
+                        type_environment,
+                        context
+                    );
+                }
+            } else {
+                let error = InvalidTypeTupleBinding {
+                    ty: ty.clone(),
+                    type_span: type_span.clone(),
+                    binding_span: ast.span.clone()
+                };
+                type_environment.add_lazy_type_error_report(error);
+            }
+        }
+    }
 }
 
 fn get_and_check_where_bounds_implements_info(
@@ -6719,6 +6908,60 @@ impl LazyTypeReport for LogicalOperatorTypeError {
             vec![
                 ((context.module_name.clone(), self.operator.span.clone()), Color::Yellow),
                 ((context.module_name.clone(), self.found_type.span.clone()), Color::Red)
+            ]
+        );
+
+        Either::Left(error)
+    }
+}
+
+
+struct InvalidTupleLength {
+    ty: Type,
+    type_span: Range<usize>,
+    binding_span: Range<usize>,
+    types_length: usize,
+    bindings_length: usize
+}
+
+impl LazyTypeReport for InvalidTupleLength {
+    fn build_report(&self, type_environment: &TypeEnvironment, context: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
+        let error = SimpleError::new(
+            INVALID_TUPLE_LENGTH,
+            self.binding_span.clone(),
+            vec![
+                (type_environment.get_type_display_string(&self.ty), Color::Yellow),
+                (self.types_length.to_string(), Color::Red),
+                (self.bindings_length.to_string(), Color::Red)
+            ],
+            vec![
+                ((context.module_name.clone(), self.type_span.clone()), Color::Red),
+                ((context.module_name.clone(), self.binding_span.clone()), Color::Red)
+            ]
+        );
+        
+        Either::Left(error)
+    }
+}
+
+
+struct InvalidTypeTupleBinding {
+    ty: Type,
+    type_span: Range<usize>,
+    binding_span: Range<usize>
+}
+
+impl LazyTypeReport for InvalidTypeTupleBinding {
+    fn build_report(&self, type_environment: &TypeEnvironment, context: &TranspileModuleContext) -> Either<TranspileError, TranspileWarning> {
+        let error = SimpleError::new(
+            INVALID_TYPE_TUPLE_BINDING,
+            self.binding_span.clone(),
+            vec![
+                (type_environment.get_type_display_string(&self.ty), Color::Yellow)
+            ],
+            vec![
+                ((context.module_name.clone(), self.type_span.clone()), Color::Yellow),
+                ((context.module_name.clone(), self.binding_span.clone()), Color::Red)
             ]
         );
 

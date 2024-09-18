@@ -1,6 +1,6 @@
 #![feature(allocator_api)]
 
-use std::{path::Path, thread, time::Duration};
+use std::path::Path;
 
 use transpiler::{context::AutoImport, resource::DefaultSourceCodeProvider};
 

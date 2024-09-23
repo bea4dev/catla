@@ -74,7 +74,7 @@ pub(crate) struct TypeEnvironment<'input, 'allocator> {
         HashMap<EntityID, ImplicitConvertKind, DefaultHashBuilder, &'allocator Bump>,
     return_type: Either<EntityID, WithDefineInfo<Type>>,
     closures: Vec<&'allocator Closure<'input, 'allocator>, &'allocator Bump>,
-    lazy_generic_type_inference: Vec<LazyGenericTypeInference, &'allocator Bump>,
+    lazy_generic_infer_type: Vec<LazyGenericTypeInference, &'allocator Bump>,
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
     current_generics_id: usize,
     var_span_and_entity_ids: Vec<(Range<usize>, EntityID), &'allocator Bump>,
@@ -93,7 +93,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
             implicit_convert_map: HashMap::new_in(allocator),
             return_type,
             closures: Vec::new_in(allocator),
-            lazy_generic_type_inference: Vec::new_in(allocator),
+            lazy_generic_infer_type: Vec::new_in(allocator),
             lazy_type_reports: Vec::new_in(allocator),
             current_generics_id: 0,
             var_span_and_entity_ids: Vec::new_in(allocator),
@@ -147,7 +147,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
         }
         let local_generics = Arc::new(local_generics);
 
-        self.lazy_generic_type_inference
+        self.lazy_generic_infer_type
             .push(LazyGenericTypeInference {
                 origin_type: ty.clone(),
                 generics_define: generics_define.clone(),
@@ -1408,7 +1408,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
         context: &TranspileModuleContext,
         allocator: &'allocator Bump,
     ) {
-        self.lazy_type_inference_generics(global_implements_info_set, allocator);
+        self.lazy_infer_type_generics(global_implements_info_set, allocator);
 
         implicit_convert_map.extend(&self.implicit_convert_map);
 
@@ -1456,12 +1456,12 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
             .unwrap();
     }
 
-    fn lazy_type_inference_generics(
+    fn lazy_infer_type_generics(
         &mut self,
         global_implements_info_set: &ImplementsInfoSet,
         allocator: &'allocator Bump,
     ) {
-        for type_infer in self.lazy_generic_type_inference.clone() {
+        for type_infer in self.lazy_generic_infer_type.clone() {
             let generics_define = &type_infer.generics_define;
             let local_generics = type_infer.local_generics;
             let where_bounds = type_infer.where_bound;
@@ -1483,7 +1483,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
                         &local_generics,
                     );
 
-                    global_implements_info_set.type_inference_for_generic_bounds(
+                    global_implements_info_set.infer_type_for_generic_bounds(
                         &bound.ty,
                         &replaced_bound_type,
                         &target_type,
@@ -1514,7 +1514,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
                         &local_generics,
                     );
 
-                    global_implements_info_set.type_inference_for_generic_bounds(
+                    global_implements_info_set.infer_type_for_generic_bounds(
                         &bound.ty,
                         &replaced_bound_type,
                         &target_type,
@@ -1843,7 +1843,7 @@ pub(crate) struct LazyGenericTypeInference {
     current_scope_implements_info_set: Option<Arc<ImplementsInfoSet>>,
 }
 
-pub(crate) fn type_inference_program<'input, 'allocator>(
+pub(crate) fn infer_type_program<'input, 'allocator>(
     ast: Program<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -1879,7 +1879,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
 
         match statement {
             StatementAST::Assignment(assignment) => {
-                type_inference_expression(
+                infer_type_expression(
                     assignment.left_expr,
                     user_type_map,
                     import_element_map,
@@ -1901,7 +1901,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
                     context,
                 );
                 if let Ok(right_expr) = &assignment.right_expr {
-                    type_inference_expression(
+                    infer_type_expression(
                         &right_expr,
                         user_type_map,
                         import_element_map,
@@ -1936,7 +1936,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
                 }
             }
             StatementAST::Exchange(exchange) => {
-                type_inference_expression(
+                infer_type_expression(
                     exchange.left_expr,
                     user_type_map,
                     import_element_map,
@@ -1958,7 +1958,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
                     context,
                 );
                 if let Ok(right_expr) = &exchange.right_expr {
-                    type_inference_expression(
+                    infer_type_expression(
                         &right_expr,
                         user_type_map,
                         import_element_map,
@@ -2097,7 +2097,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
 
                     if let Some(semicolon_or_block) = &function_define.block_or_semicolon.value {
                         if let Either::Right(block) = semicolon_or_block {
-                            type_inference_program(
+                            infer_type_program(
                                 block.program,
                                 user_type_map,
                                 import_element_map,
@@ -2265,7 +2265,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
                         allocator,
                     );
 
-                    type_inference_program(
+                    infer_type_program(
                         block.program,
                         user_type_map,
                         import_element_map,
@@ -2415,7 +2415,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
                 }
 
                 if let Some(block) = &implements.block.value {
-                    type_inference_program(
+                    infer_type_program(
                         block.program,
                         user_type_map,
                         import_element_map,
@@ -2443,7 +2443,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
             }
             StatementAST::DropStatement(drop_statement) => {
                 if let Ok(expression) = drop_statement.expression {
-                    type_inference_expression(
+                    infer_type_expression(
                         expression,
                         user_type_map,
                         import_element_map,
@@ -2470,7 +2470,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
                 let is_last_statement = i == ast.statements.len() - 1;
                 let force_be_expression = force_be_expression && is_last_statement;
 
-                type_inference_expression(
+                infer_type_expression(
                     &expression,
                     user_type_map,
                     import_element_map,
@@ -2556,7 +2556,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
 
                 if let Some(expression) = &variable_define.expression {
                     if let Ok(expression) = expression {
-                        type_inference_expression(
+                        infer_type_expression(
                             &expression,
                             user_type_map,
                             import_element_map,
@@ -2679,7 +2679,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
                 if let Some(block_or_expr) = &closure.expression_or_block.value {
                     match block_or_expr {
                         Either::Left(expression) => {
-                            type_inference_expression(
+                            infer_type_expression(
                                 *expression,
                                 user_type_map,
                                 import_element_map,
@@ -2717,7 +2717,7 @@ pub(crate) fn type_inference_program<'input, 'allocator>(
                             }
                         }
                         Either::Right(block) => {
-                            type_inference_program(
+                            infer_type_program(
                                 block.program,
                                 user_type_map,
                                 import_element_map,
@@ -2991,7 +2991,7 @@ fn get_and_check_where_bounds_implements_info(
     Some(Arc::new(ImplementsInfoSet { implements_infos }))
 }
 
-fn type_inference_expression<'input, 'allocator>(
+fn infer_type_expression<'input, 'allocator>(
     ast: Expression<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -3027,7 +3027,7 @@ fn type_inference_expression<'input, 'allocator>(
 
             force_be_expression |= !or_expression.right_exprs.is_empty();
 
-            type_inference_and_expression(
+            infer_type_and_expression(
                 &or_expression.left_expr,
                 user_type_map,
                 import_element_map,
@@ -3076,7 +3076,7 @@ fn type_inference_expression<'input, 'allocator>(
                 let operator_span = right_expr.0.clone();
 
                 if let Ok(right_expr) = &right_expr.1 {
-                    type_inference_and_expression(
+                    infer_type_and_expression(
                         right_expr,
                         user_type_map,
                         import_element_map,
@@ -3129,7 +3129,7 @@ fn type_inference_expression<'input, 'allocator>(
         }
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
-                type_inference_expression(
+                infer_type_expression(
                     expression,
                     user_type_map,
                     import_element_map,
@@ -3293,7 +3293,7 @@ fn type_inference_expression<'input, 'allocator>(
     }
 }
 
-fn type_inference_operator<'input, 'allocator>(
+fn infer_type_operator<'input, 'allocator>(
     left_entity_id: Spanned<EntityID>,
     right_entity_id: Option<Spanned<EntityID>>,
     parent_temp_entity_id: EntityID,
@@ -3448,7 +3448,7 @@ fn type_inference_operator<'input, 'allocator>(
     type_environment.set_entity_type(parent_temp_entity_id, return_type);
 }
 
-fn type_inference_and_expression<'input, 'allocator>(
+fn infer_type_and_expression<'input, 'allocator>(
     ast: &'allocator AndExpression<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -3482,7 +3482,7 @@ fn type_inference_and_expression<'input, 'allocator>(
 
     force_be_expression |= !ast.right_exprs.is_empty();
 
-    type_inference_compare_expression(
+    infer_type_compare_expression(
         &ast.left_expr,
         user_type_map,
         import_element_map,
@@ -3528,7 +3528,7 @@ fn type_inference_and_expression<'input, 'allocator>(
         let operator_span = right_expr.0.clone();
 
         if let Ok(right_expr) = &right_expr.1 {
-            type_inference_compare_expression(
+            infer_type_compare_expression(
                 right_expr,
                 user_type_map,
                 import_element_map,
@@ -3577,7 +3577,7 @@ fn type_inference_and_expression<'input, 'allocator>(
     }
 }
 
-fn type_inference_compare_expression<'input, 'allocator>(
+fn infer_type_compare_expression<'input, 'allocator>(
     ast: &'allocator CompareExpression<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -3600,7 +3600,7 @@ fn type_inference_compare_expression<'input, 'allocator>(
 ) {
     force_be_expression |= !ast.right_exprs.is_empty();
 
-    type_inference_add_or_sub_expression(
+    infer_type_add_or_sub_expression(
         &ast.left_expr,
         user_type_map,
         import_element_map,
@@ -3628,7 +3628,7 @@ fn type_inference_compare_expression<'input, 'allocator>(
         let operator = right_expr.0.clone().map(|op| op.as_str());
 
         if let Ok(right_expr) = &right_expr.1 {
-            type_inference_add_or_sub_expression(
+            infer_type_add_or_sub_expression(
                 right_expr,
                 user_type_map,
                 import_element_map,
@@ -3662,7 +3662,7 @@ fn type_inference_compare_expression<'input, 'allocator>(
                 _ => unreachable!(),
             };
 
-            type_inference_operator(
+            infer_type_operator(
                 previous.clone(),
                 Some(current.clone()),
                 EntityID::from(ast),
@@ -3686,7 +3686,7 @@ fn type_inference_compare_expression<'input, 'allocator>(
     type_environment.set_entity_id_equals(previous.value, EntityID::from(ast));
 }
 
-fn type_inference_add_or_sub_expression<'input, 'allocator>(
+fn infer_type_add_or_sub_expression<'input, 'allocator>(
     ast: &'allocator AddOrSubExpression<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -3709,7 +3709,7 @@ fn type_inference_add_or_sub_expression<'input, 'allocator>(
 ) {
     force_be_expression |= !ast.right_exprs.is_empty();
 
-    type_inference_mul_or_div_expression(
+    infer_type_mul_or_div_expression(
         &ast.left_expr,
         user_type_map,
         import_element_map,
@@ -3737,7 +3737,7 @@ fn type_inference_add_or_sub_expression<'input, 'allocator>(
         let operator = right_expr.0.clone().map(|op| op.as_str());
 
         if let Ok(right_expr) = &right_expr.1 {
-            type_inference_mul_or_div_expression(
+            infer_type_mul_or_div_expression(
                 right_expr,
                 user_type_map,
                 import_element_map,
@@ -3767,7 +3767,7 @@ fn type_inference_add_or_sub_expression<'input, 'allocator>(
                 _ => unreachable!(),
             };
 
-            type_inference_operator(
+            infer_type_operator(
                 previous.clone(),
                 Some(current.clone()),
                 EntityID::from(ast),
@@ -3791,7 +3791,7 @@ fn type_inference_add_or_sub_expression<'input, 'allocator>(
     type_environment.set_entity_id_equals(previous.value, EntityID::from(ast));
 }
 
-fn type_inference_mul_or_div_expression<'input, 'allocator>(
+fn infer_type_mul_or_div_expression<'input, 'allocator>(
     ast: &'allocator MulOrDivExpression<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -3814,7 +3814,7 @@ fn type_inference_mul_or_div_expression<'input, 'allocator>(
 ) {
     force_be_expression |= !ast.right_exprs.is_empty();
 
-    type_inference_factor(
+    infer_type_factor(
         &ast.left_expr,
         user_type_map,
         import_element_map,
@@ -3842,7 +3842,7 @@ fn type_inference_mul_or_div_expression<'input, 'allocator>(
         let operator = right_expr.0.clone().map(|op| op.as_str());
 
         if let Ok(right_expr) = &right_expr.1 {
-            type_inference_factor(
+            infer_type_factor(
                 right_expr,
                 user_type_map,
                 import_element_map,
@@ -3872,7 +3872,7 @@ fn type_inference_mul_or_div_expression<'input, 'allocator>(
                 _ => unreachable!(),
             };
 
-            type_inference_operator(
+            infer_type_operator(
                 previous.clone(),
                 Some(current.clone()),
                 EntityID::from(ast),
@@ -3896,7 +3896,7 @@ fn type_inference_mul_or_div_expression<'input, 'allocator>(
     type_environment.set_entity_id_equals(previous.value, EntityID::from(ast));
 }
 
-fn type_inference_factor<'input, 'allocator>(
+fn infer_type_factor<'input, 'allocator>(
     ast: &'allocator Factor<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -3918,7 +3918,7 @@ fn type_inference_factor<'input, 'allocator>(
     context: &TranspileModuleContext,
 ) {
     if let Ok(primary) = &ast.primary {
-        type_inference_primary(
+        infer_type_primary(
             primary,
             user_type_map,
             import_element_map,
@@ -3954,7 +3954,7 @@ fn type_inference_factor<'input, 'allocator>(
     }
 }
 
-fn type_inference_primary<'input, 'allocator>(
+fn infer_type_primary<'input, 'allocator>(
     ast: &'allocator Primary<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -4097,7 +4097,7 @@ fn type_inference_primary<'input, 'allocator>(
 
             if let Some(generics) = &second_expr.1 {
                 if let Ok(generics) = generics {
-                    type_inference_generics(
+                    infer_type_generics(
                         generics,
                         EntityID::from(&second_expr.0),
                         user_type_map,
@@ -4119,7 +4119,7 @@ fn type_inference_primary<'input, 'allocator>(
             let mut mappings = Vec::new_in(allocator);
 
             let entity_id = if let Some(function_call) = &second_expr.2 {
-                type_inference_function_call(
+                infer_type_function_call(
                     function_call,
                     EntityID::from(&second_expr.0),
                     false,
@@ -4151,7 +4151,7 @@ fn type_inference_primary<'input, 'allocator>(
             };
 
             let mut previous = if let Some(mapping_operator) = &next_primary.mapping_operator {
-                type_inference_mapping_operator(
+                infer_type_mapping_operator(
                     mapping_operator,
                     entity_id,
                     user_type_map,
@@ -4185,7 +4185,7 @@ fn type_inference_primary<'input, 'allocator>(
             for i in (count + 1)..ast.chain.len() {
                 let primary_right = &ast.chain[i];
 
-                type_inference_primary_right(
+                infer_type_primary_right(
                     primary_right,
                     previous,
                     user_type_map,
@@ -4259,7 +4259,7 @@ fn type_inference_primary<'input, 'allocator>(
     } else {
         let mut mappings = Vec::new_in(allocator);
 
-        type_inference_primary_left(
+        infer_type_primary_left(
             &ast.left,
             user_type_map,
             import_element_map,
@@ -4284,7 +4284,7 @@ fn type_inference_primary<'input, 'allocator>(
 
         let mut previous = Spanned::new(EntityID::from(&ast.left), ast.left.span.clone());
         for primary_right in ast.chain.iter() {
-            type_inference_primary_right(
+            infer_type_primary_right(
                 primary_right,
                 previous,
                 user_type_map,
@@ -4318,7 +4318,7 @@ enum MappingTypeKind {
     Result { error_type: Type },
 }
 
-fn type_inference_primary_left<'input, 'allocator>(
+fn infer_type_primary_left<'input, 'allocator>(
     ast: &'allocator PrimaryLeft<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -4351,7 +4351,7 @@ fn type_inference_primary_left<'input, 'allocator>(
                     1 => {
                         let expression = expressions.first().unwrap();
 
-                        type_inference_expression(
+                        infer_type_expression(
                             &expression,
                             user_type_map,
                             import_element_map,
@@ -4391,7 +4391,7 @@ fn type_inference_primary_left<'input, 'allocator>(
                         let mut types = Vec::new();
 
                         for expression in expressions.iter() {
-                            type_inference_expression(
+                            infer_type_expression(
                                 &expression,
                                 user_type_map,
                                 import_element_map,
@@ -4666,7 +4666,7 @@ fn type_inference_primary_left<'input, 'allocator>(
 
             if let Some(generics) = &simple.1 {
                 if let Ok(generics) = generics {
-                    type_inference_generics(
+                    infer_type_generics(
                         generics,
                         EntityID::from(&simple.0),
                         user_type_map,
@@ -4686,7 +4686,7 @@ fn type_inference_primary_left<'input, 'allocator>(
             }
 
             if let Some(function_call) = &simple.2 {
-                type_inference_function_call(
+                infer_type_function_call(
                     function_call,
                     EntityID::from(&simple.0),
                     false,
@@ -4722,7 +4722,7 @@ fn type_inference_primary_left<'input, 'allocator>(
         }
         PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
             let base_type = if let Ok(init_expression) = new_array_init_expression.init_expression {
-                type_inference_expression(
+                infer_type_expression(
                     init_expression,
                     user_type_map,
                     import_element_map,
@@ -4826,7 +4826,7 @@ fn type_inference_primary_left<'input, 'allocator>(
             };
 
             if let Ok(length_expression) = new_array_init_expression.length_expression {
-                type_inference_expression(
+                infer_type_expression(
                     length_expression,
                     user_type_map,
                     import_element_map,
@@ -4921,7 +4921,7 @@ fn type_inference_primary_left<'input, 'allocator>(
                 },
             );
 
-            type_inference_blocks_or_expressions(
+            infer_type_blocks_or_expressions(
                 expressions,
                 Spanned::new(
                     EntityID::from(new_array_expression),
@@ -5059,7 +5059,7 @@ fn type_inference_primary_left<'input, 'allocator>(
                             );
 
                             if let Ok(expression) = &field_assign.expression {
-                                type_inference_expression(
+                                infer_type_expression(
                                     &expression,
                                     user_type_map,
                                     import_element_map,
@@ -5144,7 +5144,7 @@ fn type_inference_primary_left<'input, 'allocator>(
 
             let first_statement = &if_expression.if_statement;
             if let Ok(condition) = &first_statement.condition {
-                type_inference_expression(
+                infer_type_expression(
                     &condition,
                     user_type_map,
                     import_element_map,
@@ -5196,7 +5196,7 @@ fn type_inference_primary_left<'input, 'allocator>(
                     match else_if_or_block {
                         Either::Left(if_statement) => {
                             if let Ok(condition) = &if_statement.condition {
-                                type_inference_expression(
+                                infer_type_expression(
                                     &condition,
                                     user_type_map,
                                     import_element_map,
@@ -5264,7 +5264,7 @@ fn type_inference_primary_left<'input, 'allocator>(
                 errors.push(TranspileError::new(error));
             }
 
-            type_inference_blocks_or_expressions(
+            infer_type_blocks_or_expressions(
                 blocks,
                 Spanned::new(EntityID::from(&ast.first_expr), if_expression.span.clone()),
                 user_type_map,
@@ -5289,7 +5289,7 @@ fn type_inference_primary_left<'input, 'allocator>(
         }
         PrimaryLeftExpr::LoopExpression(loop_expression) => {
             if let Ok(block) = &loop_expression.block {
-                type_inference_program(
+                infer_type_program(
                     block.program,
                     user_type_map,
                     import_element_map,
@@ -5318,7 +5318,7 @@ fn type_inference_primary_left<'input, 'allocator>(
     }
 
     if let Some(mapping_operator) = &ast.mapping_operator {
-        type_inference_mapping_operator(
+        infer_type_mapping_operator(
             mapping_operator,
             Spanned::new(EntityID::from(&ast.first_expr), ast.first_expr.get_span()),
             user_type_map,
@@ -5348,7 +5348,7 @@ fn type_inference_primary_left<'input, 'allocator>(
     }
 }
 
-fn type_inference_blocks_or_expressions<'input, 'allocator>(
+fn infer_type_blocks_or_expressions<'input, 'allocator>(
     blocks_or_expressions: Vec<
         Either<&'allocator Block<'input, 'allocator>, Expression<'input, 'allocator>>,
         &'allocator Bump,
@@ -5376,7 +5376,7 @@ fn type_inference_blocks_or_expressions<'input, 'allocator>(
     let mut first_type = match blocks_or_expressions.first() {
         Some(block_or_expression) => match block_or_expression {
             Either::Left(block) => {
-                type_inference_program(
+                infer_type_program(
                     block.program,
                     user_type_map,
                     import_element_map,
@@ -5404,7 +5404,7 @@ fn type_inference_blocks_or_expressions<'input, 'allocator>(
                 type_environment.resolve_entity_type(EntityID::from(block.program))
             }
             Either::Right(expression) => {
-                type_inference_expression(
+                infer_type_expression(
                     expression,
                     user_type_map,
                     import_element_map,
@@ -5451,7 +5451,7 @@ fn type_inference_blocks_or_expressions<'input, 'allocator>(
 
         let block_or_expression_entity_id = match block_or_expression {
             Either::Left(block) => {
-                type_inference_program(
+                infer_type_program(
                     block.program,
                     user_type_map,
                     import_element_map,
@@ -5479,7 +5479,7 @@ fn type_inference_blocks_or_expressions<'input, 'allocator>(
                 Spanned::new(EntityID::from(block.program), block.span.clone())
             }
             Either::Right(expression) => {
-                type_inference_expression(
+                infer_type_expression(
                     expression,
                     user_type_map,
                     import_element_map,
@@ -5611,7 +5611,7 @@ fn type_inference_blocks_or_expressions<'input, 'allocator>(
     type_environment.set_entity_type(parent_ast_entity_id.value, first_type.clone());
 }
 
-fn type_inference_primary_right<'input, 'allocator>(
+fn infer_type_primary_right<'input, 'allocator>(
     ast: &PrimaryRight<'input, 'allocator>,
     previous_primary: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
@@ -5718,7 +5718,7 @@ fn type_inference_primary_right<'input, 'allocator>(
 
         if let Some(generics) = &second_expr.1 {
             if let Ok(generics) = generics {
-                type_inference_generics(
+                infer_type_generics(
                     generics,
                     literal_entity_id,
                     user_type_map,
@@ -5738,7 +5738,7 @@ fn type_inference_primary_right<'input, 'allocator>(
         }
 
         let last_entity_id = if let Some(function_call) = &second_expr.2 {
-            type_inference_function_call(
+            infer_type_function_call(
                 function_call,
                 literal_entity_id,
                 ast.separator.value == PrimarySeparatorKind::Dot,
@@ -5788,7 +5788,7 @@ fn type_inference_primary_right<'input, 'allocator>(
     };
 
     if let Some(mapping_operator) = &ast.mapping_operator {
-        type_inference_mapping_operator(
+        infer_type_mapping_operator(
             mapping_operator,
             second_expr_id,
             user_type_map,
@@ -6110,7 +6110,7 @@ fn get_element_type<'allocator, 'input, F: Fn(&Type) -> bool>(
     Ok((element_type, is_static))
 }
 
-fn type_inference_mapping_operator<'input, 'allocator>(
+fn infer_type_mapping_operator<'input, 'allocator>(
     ast: &MappingOperator<'input, 'allocator>,
     previous_entity_id: Spanned<EntityID>,
     user_type_map: &FxHashMap<String, Type>,
@@ -6185,7 +6185,7 @@ fn type_inference_mapping_operator<'input, 'allocator>(
     }
 
     if let Some(block) = &block {
-        type_inference_program(
+        infer_type_program(
             block.program,
             user_type_map,
             import_element_map,
@@ -6264,7 +6264,7 @@ fn type_inference_mapping_operator<'input, 'allocator>(
     }
 }
 
-fn type_inference_generics<'input, 'allocator>(
+fn infer_type_generics<'input, 'allocator>(
     ast: &Generics,
     previous: EntityID,
     user_type_map: &FxHashMap<String, Type>,
@@ -6349,7 +6349,7 @@ fn type_inference_generics<'input, 'allocator>(
     }
 }
 
-fn type_inference_function_call<'input, 'allocator>(
+fn infer_type_function_call<'input, 'allocator>(
     ast: &FunctionCall<'input, 'allocator>,
     function: EntityID,
     is_method_call: bool,
@@ -6405,7 +6405,7 @@ fn type_inference_function_call<'input, 'allocator>(
             let mut define_arg_index = if is_method_call { 1 } else { 0 };
 
             for arg_expr in arg_exprs.iter() {
-                type_inference_expression(
+                infer_type_expression(
                     &arg_expr,
                     user_type_map,
                     import_element_map,

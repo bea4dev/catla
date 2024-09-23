@@ -1725,7 +1725,7 @@ impl ImplementsInfoSet {
                             &local_generics,
                         );
 
-                        self.type_inference_for_generic_bounds(
+                        self.infer_type_for_generic_bounds(
                             &bound.ty,
                             &replaced_bound_type,
                             &target_type,
@@ -1756,7 +1756,7 @@ impl ImplementsInfoSet {
                             &local_generics,
                         );
 
-                        self.type_inference_for_generic_bounds(
+                        self.infer_type_for_generic_bounds(
                             &bound.ty,
                             &replaced_bound_type,
                             &target_type,
@@ -1795,7 +1795,7 @@ impl ImplementsInfoSet {
         satisfied_implementations
     }
 
-    pub(crate) fn type_inference_for_generic_bounds<'allocator>(
+    pub(crate) fn infer_type_for_generic_bounds<'allocator>(
         &self,
         original_bound: &Type,
         local_generic_replaced_bound: &Type,
@@ -1857,7 +1857,7 @@ impl ImplementsInfoSet {
                         }
                     } else if !ignore_super_type {
                         for super_type in resolved_target.get_super_type_with_replaced_generics() {
-                            self.type_inference_for_generic_bounds(
+                            self.infer_type_for_generic_bounds(
                                 original_bound,
                                 local_generic_replaced_bound,
                                 &super_type,
@@ -2079,7 +2079,7 @@ impl ImplementsInfoSet {
                                 &local_generics,
                             );
 
-                            self.type_inference_for_generic_bounds(
+                            self.infer_type_for_generic_bounds(
                                 &bound.ty,
                                 &replaced_bound_type,
                                 &target_type,
@@ -2110,7 +2110,7 @@ impl ImplementsInfoSet {
                                 &local_generics,
                             );
 
-                            self.type_inference_for_generic_bounds(
+                            self.infer_type_for_generic_bounds(
                                 &bound.ty,
                                 &replaced_bound_type,
                                 &target_type,

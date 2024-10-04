@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use transpiler::{context::AutoImport, resource::DefaultSourceCodeProvider};
+use transpiler::{context::{AutoImport, OptimizationSettings}, resource::DefaultSourceCodeProvider};
 
 use crate::transpiler::{transpile, context::{TranspileSettings, TranspileContext}};
 
@@ -16,10 +16,15 @@ fn main() {
     //#[cfg(not(target_os = "windows"))]
     //unsafe { backtrace_on_stack_overflow::enable() };
 
+    let optimization = OptimizationSettings {
+        lifetime_analyzer: true
+    };
+
     let settings = TranspileSettings {
         lang: "ja_JP".to_string(),
         num_threads: num_cpus::get(),
-        is_debug: true
+        is_transpiler_debug: true,
+        optimization
     };
 
     let mut resource_provider = DefaultSourceCodeProvider::new();

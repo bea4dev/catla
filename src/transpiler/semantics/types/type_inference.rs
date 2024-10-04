@@ -55,6 +55,8 @@ const INVALID_LOGICAL_OPERATOR_EXPR_TYPE: usize = 0076;
 const INVALID_TUPLE_LENGTH: usize = 0078;
 const INVALID_TYPE_TUPLE_BINDING: usize = 0079;
 
+
+
 pub(crate) struct TypeEnvironment<'input, 'allocator> {
     entity_type_map: HashMap<
         EntityID,
@@ -1427,7 +1429,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
     }
 
     fn print_var_type(&self, context: &TranspileModuleContext) {
-        if !context.context.settings.is_debug {
+        if !context.context.settings.is_transpiler_debug {
             return;
         }
 
@@ -2647,7 +2649,7 @@ pub(crate) fn infer_type_program<'input, 'allocator>(
                         }
 
                         if let Ok(binding) = &variable_define.binding {
-                            if context.context.settings.is_debug {
+                            if context.context.settings.is_transpiler_debug {
                                 type_environment.register_variable(binding);
                             }
                         }

@@ -108,8 +108,15 @@ impl TranspileContext {
 pub struct TranspileSettings {
     pub lang: String,
     pub num_threads: usize,
-    pub is_debug: bool
+    pub is_transpiler_debug: bool,
+    pub optimization: OptimizationSettings
 }
+
+
+pub struct OptimizationSettings {
+    pub lifetime_analyzer: bool
+}
+
 
 
 pub struct AutoImport {

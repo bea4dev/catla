@@ -8,7 +8,7 @@ use either::Either;
 use error::SimpleError;
 use fxhash::FxHashMap;
 use semantics::types::{
-    type_inference::infer_type_program,
+    type_inference::{infer_type_program, TypeInferenceResultContainer},
     type_info::{collect_duplicated_implementation_error, ScopeThisType, Type, WithDefineInfo},
 };
 
@@ -39,6 +39,7 @@ pub mod name_resolver;
 pub mod parse_error;
 pub mod resource;
 pub mod semantics;
+pub mod optimizer;
 
 pub struct TranspileError(Box<dyn TranspileReport + Send>, AdviceReport);
 pub struct TranspileWarning(Box<dyn TranspileReport + Send>, AdviceReport);
@@ -278,11 +279,11 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
 
     merged_implements_infos.merge(&implements_infos);
 
-    if module_context.module_name.as_str() == "test::test" {
+    if module_context.context.settings.is_transpiler_debug
+        && module_context.module_name.as_str() == "test::test" {
+        
         std::thread::sleep(std::time::Duration::from_millis(1000));
     }
-
-    let mut implicit_convert_map = FxHashMap::default();
 
     {
         // This is not implemented 'Send'.
@@ -294,6 +295,9 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
             }),
             &allocator,
         );
+
+        let mut type_inference_results = TypeInferenceResultContainer::default();
+
         infer_type_program(
             ast,
             &user_type_map,
@@ -312,7 +316,7 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
             &Vec::new(),
             false,
             &mut type_environment,
-            &mut implicit_convert_map,
+            &mut type_inference_results,
             &allocator,
             &mut errors,
             &mut warnings,
@@ -322,7 +326,7 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         merged_implements_infos.validate_super_type(&mut errors, &module_context, &allocator);
 
         type_environment.collect_info(
-            &mut implicit_convert_map,
+            &mut type_inference_results,
             &merged_implements_infos,
             &mut errors,
             &mut warnings,

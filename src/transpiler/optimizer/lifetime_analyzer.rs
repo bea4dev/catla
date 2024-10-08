@@ -4,47 +4,27 @@ pub mod lifetime_collector;
 
 
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct LifetimeStartPosition {
-    nested_position: Option<Arc<Vec<u32>>>,
+pub struct LifetimePosition {
+    nested_position: Arc<Vec<u32>>,
     index: u32
 }
 
-impl LifetimeStartPosition {
-    
-    pub const fn create_origin() -> Self {
+impl LifetimePosition {
+
+    pub fn create_origin() -> Self {
         Self {
-            nested_position: None,
+            nested_position: Arc::new(Vec::new()),
             index: 1
         }
     }
 
-    pub const fn static_position() -> Self {
-        Self {
-            nested_position: None,
-            index: 0
-        }
-    }
-
-    pub const fn is_static(&self) -> bool {
-        self.nested_position.is_none() && self.index == 0
-    }
-
-    fn get_nested_position(&self) -> &Vec<u32> {
-        static EMPTY_VEC: Vec<u32> = Vec::new();
-
-        self.nested_position.as_ref()
-            .map(|vec| { vec.as_ref() })
-            .unwrap_or(&EMPTY_VEC)
-    }
-
     pub fn create_nested(&self) -> Self {
-        let nested_position = self.get_nested_position();
-        let mut new_nested_position = Vec::with_capacity(nested_position.len() + 1);
-        new_nested_position.extend(nested_position.iter());
+        let mut new_nested_position = Vec::with_capacity(self.nested_position.len() + 1);
+        new_nested_position.extend(self.nested_position.iter());
         new_nested_position.push(self.index);
 
         Self {
-            nested_position: Some(Arc::new(new_nested_position)),
+            nested_position: Arc::new(new_nested_position),
             index: 1
         }
     }
@@ -62,28 +42,25 @@ impl LifetimeStartPosition {
 
 }
 
-
-impl Debug for LifetimeStartPosition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.is_static() {
-            return write!(f, "Lifetime 'static")
-        }
-
-        let mut nested = self.nested_position
-            .as_ref()
-            .map(|nested_position| {
-                nested_position.iter()
-                    .map(|index| { index.to_string() })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        nested.push(self.index.to_string());
-
-        write!(f, "Lifetime [ {} ]", nested.join("."))
+impl PartialOrd for LifetimePosition {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        todo!()
     }
 }
 
-impl Display for LifetimeStartPosition {
+
+impl Debug for LifetimePosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let nested = self.nested_position.iter()
+            .map(|index| { index.to_string() })
+            .collect::<Vec<_>>()
+            .join(".");
+
+        write!(f, "{}.{}", nested, self.index)
+    }
+}
+
+impl Display for LifetimePosition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         <Self as Debug>::fmt(&self, f)
     }

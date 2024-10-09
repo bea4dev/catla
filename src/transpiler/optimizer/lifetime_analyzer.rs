@@ -1,8 +1,10 @@
 use bumpalo::Bump;
+use catla_parser::parser::{Program, Spanned};
 use either::Either;
 use fxhash::FxHashMap;
+use lifetime_collector::collect_lifetime_program;
 
-use crate::transpiler::component::EntityID;
+use crate::transpiler::{component::EntityID, context::TranspileModuleContext, name_resolver::FoundDefineInfo};
 
 pub mod lifetime_collector;
 
@@ -96,3 +98,36 @@ pub struct ScoopGroup {
     group_entities: Vec<EntityID>,
     value_entity: EntityID
 }
+
+
+
+pub fn collect_lifetime(
+    ast: Program,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    allocator: &Bump,
+    context: &TranspileModuleContext
+) -> FxHashMap<EntityID, LifetimeInstance> {
+    let mut lifetime_instance_map = FxHashMap::default();
+
+    let mut lifetime_instance = LifetimeInstance::new();
+    let mut lifetime_scope = LifetimeScope::new(&mut lifetime_instance, allocator);
+
+    collect_lifetime_program(
+        ast,
+        false,
+        import_element_map,
+        name_resolved_map,
+        &mut lifetime_scope,
+        &mut lifetime_instance_map,
+        allocator,
+        context
+    );
+
+    lifetime_scope.collect();
+    lifetime_instance_map.insert(EntityID::from(ast), lifetime_instance);
+
+    lifetime_instance_map
+}
+
+

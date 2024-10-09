@@ -1,67 +1,98 @@
-use std::{fmt::{Debug, Display}, sync::Arc};
+use bumpalo::Bump;
+use either::Either;
+use fxhash::FxHashMap;
+
+use crate::transpiler::component::EntityID;
 
 pub mod lifetime_collector;
 
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct LifetimePosition {
-    nested_position: Arc<Vec<u32>>,
-    index: u32
+pub static STATIC_LIFETIME: Lifetime = Lifetime { drop_position: usize::MAX };
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Lifetime {
+    pub drop_position: usize
 }
 
-impl LifetimePosition {
 
-    pub fn create_origin() -> Self {
+impl Lifetime {
+    
+}
+
+
+
+pub struct LifetimeScope<'allocator, 'instance> {
+    entities: Vec<EntityID, &'allocator Bump>,
+    lifetime_instance: &'instance mut LifetimeInstance
+}
+
+impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
+
+    pub fn new(lifetime_instance: &'instance mut LifetimeInstance, allocator: &'allocator Bump) -> Self {
         Self {
-            nested_position: Arc::new(Vec::new()),
-            index: 1
+            entities: Vec::new_in(allocator),
+            lifetime_instance
         }
     }
 
-    pub fn create_nested(&self) -> Self {
-        let mut new_nested_position = Vec::with_capacity(self.nested_position.len() + 1);
-        new_nested_position.extend(self.nested_position.iter());
-        new_nested_position.push(self.index);
+    pub fn add(&mut self, entity_id: EntityID) {
+        self.entities.push(entity_id);
+    }
 
-        Self {
-            nested_position: Arc::new(new_nested_position),
-            index: 1
+    pub fn drop(&mut self, entity_id: EntityID) {
+        let lifetime = self.lifetime_instance.next_lifetime();
+        self.lifetime_instance.lifetime_entity_map.insert(entity_id, lifetime);
+    }
+
+    pub fn add_expected(&mut self, expected: LifetimeExpected) {
+        self.lifetime_instance.lifetime_expected.push(expected);
+    }
+
+    pub fn collect(self) {
+        for entity_id in self.entities {
+            let lifetime = self.lifetime_instance.next_lifetime();
+            self.lifetime_instance.lifetime_entity_map.insert(entity_id, lifetime);
         }
     }
 
-    pub fn next(&self) -> Self {
+}
+
+
+pub struct LifetimeInstance {
+    counter: usize,
+    lifetime_expected: Vec<LifetimeExpected>,
+    lifetime_entity_map: FxHashMap<EntityID, Lifetime>,
+    scoop_groups: Vec<ScoopGroup>
+}
+
+impl LifetimeInstance {
+
+    pub fn new() -> Self {
         Self {
-            nested_position: self.nested_position.clone(),
-            index: self.index + 1
+            counter: 0,
+            lifetime_expected: Vec::new(),
+            lifetime_entity_map: FxHashMap::default(),
+            scoop_groups: Vec::new()
         }
     }
 
-    pub fn into_next(&mut self) {
-        self.index += 1;
+    pub fn next_lifetime(&mut self) -> Lifetime {
+        let drop_position = self.counter;
+        self.counter += 1;
+        Lifetime { drop_position }
     }
 
 }
 
-impl PartialOrd for LifetimePosition {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        todo!()
-    }
+
+pub struct LifetimeExpected {
+    pub shorter: Either<EntityID, Lifetime>,
+    pub longer: Either<EntityID, Lifetime>
 }
 
 
-impl Debug for LifetimePosition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let nested = self.nested_position.iter()
-            .map(|index| { index.to_string() })
-            .collect::<Vec<_>>()
-            .join(".");
-
-        write!(f, "{}.{}", nested, self.index)
-    }
-}
-
-impl Display for LifetimePosition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <Self as Debug>::fmt(&self, f)
-    }
+pub struct ScoopGroup {
+    group_entities: Vec<EntityID>,
+    value_entity: EntityID
 }

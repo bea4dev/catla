@@ -26,14 +26,14 @@ use super::{
 };
 
 #[derive(Debug, Clone)]
-pub(crate) struct DefineWithName {
+pub struct DefineWithName {
     pub entity_id: EntityID,
     pub span: Range<usize>,
     pub define_kind: DefineKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum DefineKind {
+pub enum DefineKind {
     Import,
     Function,
     Variable,
@@ -59,7 +59,7 @@ impl DefineKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum EnvironmentSeparatorKind {
+pub enum EnvironmentSeparatorKind {
     Function,
     UserTypeDefine,
     Closure,
@@ -142,7 +142,7 @@ impl<'input, 'allocator> NameEnvironment<'input, 'allocator> {
     }
 }
 
-pub(crate) struct FoundDefineInfo {
+pub struct FoundDefineInfo {
     pub define_info: DefineWithName,
     pub separators: Vec<Spanned<EnvironmentSeparatorKind>>,
 }

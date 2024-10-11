@@ -1,5 +1,5 @@
 use bumpalo::Bump;
-use catla_parser::parser::{Expression, ExpressionEnum, Program, Spanned, StatementAST};
+use catla_parser::parser::{Expression, ExpressionEnum, OrExpression, Program, Spanned, StatementAST};
 use fxhash::FxHashMap;
 
 use crate::transpiler::{
@@ -103,4 +103,20 @@ fn collect_lifetime_expression<'allocator>(
         }
         ExpressionEnum::Closure(closure) => todo!(),
     }
+}
+
+fn collect_lifetime_or_expression<'allocator>(
+    ast: &'allocator OrExpression<'_, 'allocator>,
+    block_scoop_group: Option<&ScoopGroup>,
+    function_scoop_group: Option<&ScoopGroup>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    type_inference_result: &TypeInferenceResultContainer,
+    lifetime_scope: &mut LifetimeScope,
+    stack_lifetime_scope: &mut StackLifetimeScope,
+    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    allocator: &Bump,
+    context: &TranspileModuleContext,
+) {
+    
 }

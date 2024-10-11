@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use bumpalo::Bump;
 use catla_parser::parser::{Program, Spanned};
 use either::Either;
@@ -109,8 +111,24 @@ pub struct LifetimeExpected {
 }
 
 pub struct ScoopGroup {
-    group_entities: Vec<EntityID>,
+    group_entities: RefCell<Vec<EntityID>>,
     value_entity: EntityID,
+}
+
+impl ScoopGroup {
+
+    pub fn new(value_entity: EntityID) -> Self {
+        Self {
+            group_entities: RefCell::new(Vec::new()),
+            value_entity
+        }
+    }
+
+    pub fn add(&self, entity_id: EntityID) {
+        let mut group_entities = self.group_entities.borrow_mut();
+        group_entities.push(entity_id);
+    }
+
 }
 
 pub fn collect_lifetime(
@@ -129,6 +147,7 @@ pub fn collect_lifetime(
 
     collect_lifetime_program(
         ast,
+        None,
         None,
         import_element_map,
         name_resolved_map,

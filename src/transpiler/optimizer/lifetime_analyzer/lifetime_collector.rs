@@ -50,7 +50,7 @@ pub fn collect_lifetime_program<'allocator>(
     allocator: &Bump,
     context: &TranspileModuleContext,
 ) {
-    for statement in ast.statements.iter() {
+    for (index, statement) in ast.statements.iter().enumerate() {
         let statement = match statement {
             Ok(statement) => statement,
             Err(_) => continue,
@@ -67,7 +67,27 @@ pub fn collect_lifetime_program<'allocator>(
             StatementAST::TypeDefine(type_define) => todo!(),
             StatementAST::Implements(implements) => todo!(),
             StatementAST::DropStatement(drop_statement) => todo!(),
-            StatementAST::Expression(_) => todo!(),
+            StatementAST::Expression(expression) => {
+                let block_scoop_group = if index + 1 == ast.statements.len() {
+                    block_scoop_group
+                } else {
+                    None
+                };
+
+                collect_lifetime_expression(
+                    *expression,
+                    block_scoop_group,
+                    function_scoop_group,
+                    import_element_map,
+                    name_resolved_map,
+                    type_inference_result,
+                    lifetime_scope,
+                    stack_lifetime_scope,
+                    lifetime_instance_map,
+                    allocator,
+                    context,
+                );
+            }
         }
     }
 }

@@ -1,5 +1,8 @@
 use bumpalo::Bump;
-use catla_parser::parser::{Expression, ExpressionEnum, OrExpression, Program, Spanned, StatementAST};
+use catla_parser::parser::{
+    AndExpression, CompareExpression, Expression, ExpressionEnum, OrExpression, Program, Spanned,
+    StatementAST,
+};
 use fxhash::FxHashMap;
 
 use crate::transpiler::{
@@ -118,5 +121,96 @@ fn collect_lifetime_or_expression<'allocator>(
     allocator: &Bump,
     context: &TranspileModuleContext,
 ) {
-    
+    collect_lifetime_and_expression(
+        &ast.left_expr,
+        block_scoop_group,
+        function_scoop_group,
+        import_element_map,
+        name_resolved_map,
+        type_inference_result,
+        lifetime_scope,
+        stack_lifetime_scope,
+        lifetime_instance_map,
+        allocator,
+        context,
+    );
+
+    for (_, right_expr) in ast.right_exprs.iter() {
+        if let Ok(right_expr) = right_expr {
+            collect_lifetime_and_expression(
+                right_expr,
+                block_scoop_group,
+                function_scoop_group,
+                import_element_map,
+                name_resolved_map,
+                type_inference_result,
+                lifetime_scope,
+                stack_lifetime_scope,
+                lifetime_instance_map,
+                allocator,
+                context,
+            );
+        }
+    }
+}
+
+fn collect_lifetime_and_expression<'allocator>(
+    ast: &'allocator AndExpression<'_, 'allocator>,
+    block_scoop_group: Option<&ScoopGroup>,
+    function_scoop_group: Option<&ScoopGroup>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    type_inference_result: &TypeInferenceResultContainer,
+    lifetime_scope: &mut LifetimeScope,
+    stack_lifetime_scope: &mut StackLifetimeScope,
+    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    allocator: &Bump,
+    context: &TranspileModuleContext,
+) {
+    collect_lifetime_compare_expression(
+        &ast.left_expr,
+        block_scoop_group,
+        function_scoop_group,
+        import_element_map,
+        name_resolved_map,
+        type_inference_result,
+        lifetime_scope,
+        stack_lifetime_scope,
+        lifetime_instance_map,
+        allocator,
+        context,
+    );
+
+    for (_, right_expr) in ast.right_exprs.iter() {
+        if let Ok(right_expr) = right_expr {
+            collect_lifetime_compare_expression(
+                right_expr,
+                block_scoop_group,
+                function_scoop_group,
+                import_element_map,
+                name_resolved_map,
+                type_inference_result,
+                lifetime_scope,
+                stack_lifetime_scope,
+                lifetime_instance_map,
+                allocator,
+                context,
+            );
+        }
+    }
+}
+
+fn collect_lifetime_compare_expression<'allocator>(
+    ast: &'allocator CompareExpression<'_, 'allocator>,
+    block_scoop_group: Option<&ScoopGroup>,
+    function_scoop_group: Option<&ScoopGroup>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    type_inference_result: &TypeInferenceResultContainer,
+    lifetime_scope: &mut LifetimeScope,
+    stack_lifetime_scope: &mut StackLifetimeScope,
+    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    allocator: &Bump,
+    context: &TranspileModuleContext,
+) {
 }

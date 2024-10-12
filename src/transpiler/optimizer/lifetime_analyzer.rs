@@ -79,6 +79,14 @@ impl<'allocator> StackLifetimeScope<'allocator> {
     pub fn add(&mut self, entity_id: EntityID) {
         self.entities.push(entity_id);
     }
+
+    pub fn collect(self, lifetime_instance: &mut LifetimeInstance) {
+        let lifetime = lifetime_instance.next_lifetime();
+
+        for entity_id in self.entities {
+            lifetime_instance.lifetime_entity_map.insert(entity_id, lifetime);
+        }
+    }
 }
 
 pub struct LifetimeInstance {
@@ -160,6 +168,7 @@ pub fn collect_lifetime(
     );
 
     lifetime_scope.collect();
+    stack_lifetime_scope.collect(&mut lifetime_instance);
     lifetime_instance_map.insert(EntityID::from(ast), lifetime_instance);
 
     lifetime_instance_map

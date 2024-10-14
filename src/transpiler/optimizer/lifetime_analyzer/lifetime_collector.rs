@@ -1,7 +1,7 @@
 use bumpalo::Bump;
 use catla_parser::parser::{
-    AndExpression, CompareExpression, Expression, ExpressionEnum, OrExpression, Program, Spanned,
-    StatementAST,
+    AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, OrExpression,
+    Program, Spanned, StatementAST,
 };
 use fxhash::FxHashMap;
 
@@ -39,7 +39,8 @@ fn should_strict_drop(ty: &Type) -> bool {
 
 pub fn collect_lifetime_program<'allocator>(
     ast: Program<'_, 'allocator>,
-    block_scoop_group: Option<&ScoopGroup>,
+    expr_bound_entity: EntityID,
+    expr_scoop_group: Option<&ScoopGroup>,
     function_scoop_group: Option<&ScoopGroup>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -68,15 +69,16 @@ pub fn collect_lifetime_program<'allocator>(
             StatementAST::Implements(implements) => todo!(),
             StatementAST::DropStatement(drop_statement) => todo!(),
             StatementAST::Expression(expression) => {
-                let block_scoop_group = if index + 1 == ast.statements.len() {
-                    block_scoop_group
+                let expr_scoop_group = if index + 1 == ast.statements.len() {
+                    expr_scoop_group
                 } else {
                     None
                 };
 
                 collect_lifetime_expression(
                     *expression,
-                    block_scoop_group,
+                    expr_bound_entity,
+                    expr_scoop_group,
                     function_scoop_group,
                     import_element_map,
                     name_resolved_map,
@@ -94,7 +96,8 @@ pub fn collect_lifetime_program<'allocator>(
 
 fn collect_lifetime_expression<'allocator>(
     ast: Expression<'_, 'allocator>,
-    block_scoop_group: Option<&ScoopGroup>,
+    expr_bound_entity: EntityID,
+    expr_scoop_group: Option<&ScoopGroup>,
     function_scoop_group: Option<&ScoopGroup>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -111,6 +114,7 @@ fn collect_lifetime_expression<'allocator>(
             if let Some(expression) = return_expression.expression {
                 collect_lifetime_expression(
                     expression,
+                    expr_bound_entity,
                     function_scoop_group.clone(),
                     function_scoop_group,
                     import_element_map,
@@ -130,7 +134,8 @@ fn collect_lifetime_expression<'allocator>(
 
 fn collect_lifetime_or_expression<'allocator>(
     ast: &'allocator OrExpression<'_, 'allocator>,
-    block_scoop_group: Option<&ScoopGroup>,
+    expr_bound_entity: EntityID,
+    expr_scoop_group: Option<&ScoopGroup>,
     function_scoop_group: Option<&ScoopGroup>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -143,7 +148,8 @@ fn collect_lifetime_or_expression<'allocator>(
 ) {
     collect_lifetime_and_expression(
         &ast.left_expr,
-        block_scoop_group,
+        expr_bound_entity,
+        expr_scoop_group,
         function_scoop_group,
         import_element_map,
         name_resolved_map,
@@ -159,7 +165,8 @@ fn collect_lifetime_or_expression<'allocator>(
         if let Ok(right_expr) = right_expr {
             collect_lifetime_and_expression(
                 right_expr,
-                block_scoop_group,
+                expr_bound_entity,
+                expr_scoop_group,
                 function_scoop_group,
                 import_element_map,
                 name_resolved_map,
@@ -176,7 +183,8 @@ fn collect_lifetime_or_expression<'allocator>(
 
 fn collect_lifetime_and_expression<'allocator>(
     ast: &'allocator AndExpression<'_, 'allocator>,
-    block_scoop_group: Option<&ScoopGroup>,
+    expr_bound_entity: EntityID,
+    expr_scoop_group: Option<&ScoopGroup>,
     function_scoop_group: Option<&ScoopGroup>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -189,7 +197,8 @@ fn collect_lifetime_and_expression<'allocator>(
 ) {
     collect_lifetime_compare_expression(
         &ast.left_expr,
-        block_scoop_group,
+        expr_bound_entity,
+        expr_scoop_group,
         function_scoop_group,
         import_element_map,
         name_resolved_map,
@@ -205,7 +214,8 @@ fn collect_lifetime_and_expression<'allocator>(
         if let Ok(right_expr) = right_expr {
             collect_lifetime_compare_expression(
                 right_expr,
-                block_scoop_group,
+                expr_bound_entity,
+                expr_scoop_group,
                 function_scoop_group,
                 import_element_map,
                 name_resolved_map,
@@ -222,7 +232,42 @@ fn collect_lifetime_and_expression<'allocator>(
 
 fn collect_lifetime_compare_expression<'allocator>(
     ast: &'allocator CompareExpression<'_, 'allocator>,
-    block_scoop_group: Option<&ScoopGroup>,
+    expr_bound_entity: EntityID,
+    expr_scoop_group: Option<&ScoopGroup>,
+    function_scoop_group: Option<&ScoopGroup>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    type_inference_result: &TypeInferenceResultContainer,
+    lifetime_scope: &mut LifetimeScope,
+    stack_lifetime_scope: &mut StackLifetimeScope,
+    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    allocator: &Bump,
+    context: &TranspileModuleContext,
+) {
+    if ast.right_exprs.is_empty() {
+        collect_lifetime_add_or_sub_expression(
+            &ast.left_expr,
+            expr_bound_entity,
+            expr_scoop_group,
+            function_scoop_group,
+            import_element_map,
+            name_resolved_map,
+            type_inference_result,
+            lifetime_scope,
+            stack_lifetime_scope,
+            lifetime_instance_map,
+            allocator,
+            context,
+        );
+    } else {
+        
+    }
+}
+
+fn collect_lifetime_add_or_sub_expression<'allocator>(
+    ast: &'allocator AddOrSubExpression<'_, 'allocator>,
+    expr_bound_entity: EntityID,
+    expr_scoop_group: Option<&ScoopGroup>,
     function_scoop_group: Option<&ScoopGroup>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,

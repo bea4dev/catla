@@ -55,8 +55,6 @@ const INVALID_LOGICAL_OPERATOR_EXPR_TYPE: usize = 0076;
 const INVALID_TUPLE_LENGTH: usize = 0078;
 const INVALID_TYPE_TUPLE_BINDING: usize = 0079;
 
-
-
 pub(crate) struct TypeEnvironment<'input, 'allocator> {
     entity_type_map: HashMap<
         EntityID,
@@ -80,6 +78,7 @@ pub(crate) struct TypeEnvironment<'input, 'allocator> {
     lazy_type_reports: Vec<Box<dyn LazyTypeReport>, &'allocator Bump>,
     current_generics_id: usize,
     var_span_and_entity_ids: Vec<(Range<usize>, EntityID), &'allocator Bump>,
+    operator_function_types: Vec<(EntityID, Type), &'allocator Bump>,
 }
 
 impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
@@ -99,6 +98,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
             lazy_type_reports: Vec::new_in(allocator),
             current_generics_id: 0,
             var_span_and_entity_ids: Vec::new_in(allocator),
+            operator_function_types: Vec::new_in(allocator),
         }
     }
 
@@ -149,14 +149,13 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
         }
         let local_generics = Arc::new(local_generics);
 
-        self.lazy_generic_infer_type
-            .push(LazyGenericTypeInference {
-                origin_type: ty.clone(),
-                generics_define: generics_define.clone(),
-                local_generics: local_generics.clone(),
-                where_bound: ty.value.get_where_bounds().unwrap().clone(),
-                current_scope_implements_info_set: current_scope_implements_info_set.clone(),
-            });
+        self.lazy_generic_infer_type.push(LazyGenericTypeInference {
+            origin_type: ty.clone(),
+            generics_define: generics_define.clone(),
+            local_generics: local_generics.clone(),
+            where_bound: ty.value.get_where_bounds().unwrap().clone(),
+            current_scope_implements_info_set: current_scope_implements_info_set.clone(),
+        });
 
         let ty = match &ty.value {
             Type::UserType {
@@ -1412,17 +1411,21 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
     ) {
         self.lazy_infer_type_generics(global_implements_info_set, allocator);
 
-        type_inference_results.implicit_convert_map.extend(&self.implicit_convert_map);
+        type_inference_results
+            .implicit_convert_map
+            .extend(&self.implicit_convert_map);
 
         for (entity_id, ty) in self.entity_type_map.iter() {
             let ty = match ty {
                 Either::Left(entity_id) => self.resolve_entity_type(*entity_id).value,
-                Either::Right(ty) => ty.value.clone()
+                Either::Right(ty) => ty.value.clone(),
             };
 
             let resolved_type = self.resolve_type(&ty);
 
-            type_inference_results.entity_type_map.insert(*entity_id, resolved_type);
+            type_inference_results
+                .entity_type_map
+                .insert(*entity_id, resolved_type);
         }
 
         self.type_check_bounds(global_implements_info_set, errors);
@@ -1435,6 +1438,12 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
         }
 
         self.check_impl_interface_generics(errors);
+
+        for (entity_id, function_type) in self.operator_function_types.iter() {
+            type_inference_results
+                .operator_function_type_map
+                .insert(*entity_id, function_type.clone());
+        }
 
         self.print_var_type(context);
     }
@@ -1856,13 +1865,12 @@ pub(crate) struct LazyGenericTypeInference {
     current_scope_implements_info_set: Option<Arc<ImplementsInfoSet>>,
 }
 
-
 #[derive(Debug, Default)]
 pub struct TypeInferenceResultContainer {
     pub implicit_convert_map: FxHashMap<EntityID, ImplicitConvertKind>,
-    pub entity_type_map: FxHashMap<EntityID, Type>
+    pub entity_type_map: FxHashMap<EntityID, Type>,
+    pub operator_function_type_map: FxHashMap<EntityID, Type>,
 }
-
 
 pub(crate) fn infer_type_program<'input, 'allocator>(
     ast: Program<'input, 'allocator>,
@@ -3403,7 +3411,13 @@ fn infer_type_operator<'input, 'allocator>(
         }
     };
 
+
     let return_type = if let Some(right_entity_id) = right_entity_id {
+
+        type_environment
+            .operator_function_types
+            .push((right_entity_id.value, operator_function.value.clone()));
+
         let span = left_entity_id.span.start..right_entity_id.span.end;
 
         if let Some(argument_type) = operator_function
@@ -3422,7 +3436,7 @@ fn infer_type_operator<'input, 'allocator>(
             let result = type_environment.unify_with_implicit_convert(
                 Spanned::new(parent_temp_entity_id, right_entity_id.span.clone()),
                 right_entity_id.clone(),
-                true,
+                false,
                 current_scope_this_type,
             );
 
@@ -3446,6 +3460,11 @@ fn infer_type_operator<'input, 'allocator>(
             }
         }
     } else {
+
+        type_environment
+            .operator_function_types
+            .push((left_entity_id.value, operator_function.value.clone()));
+
         let span = operator.span.start..left_entity_id.span.end;
 
         if let Some(return_type) = operator_function
@@ -5559,7 +5578,9 @@ fn infer_type_blocks_or_expressions<'input, 'allocator>(
                             Either::Right(expression) => EntityID::from(*expression),
                         };
 
-                        type_inference_results.implicit_convert_map.insert(entity_id, ImplicitConvertKind::Ok);
+                        type_inference_results
+                            .implicit_convert_map
+                            .insert(entity_id, ImplicitConvertKind::Ok);
                     }
                     has_implicit_convert = true;
                 } else if second_type.value.is_option_or_result() {
@@ -5616,7 +5637,9 @@ fn infer_type_blocks_or_expressions<'input, 'allocator>(
                                 Either::Right(expression) => EntityID::from(*expression),
                             };
 
-                            type_inference_results.implicit_convert_map.insert(entity_id, convert_kind);
+                            type_inference_results
+                                .implicit_convert_map
+                                .insert(entity_id, convert_kind);
                         }
                         has_implicit_convert = true;
                     }

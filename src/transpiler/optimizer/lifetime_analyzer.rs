@@ -1,3 +1,4 @@
+use core::panic;
 use std::cell::RefCell;
 
 use bumpalo::Bump;
@@ -7,8 +8,10 @@ use fxhash::FxHashMap;
 use lifetime_collector::collect_lifetime_program;
 
 use crate::transpiler::{
-    component::EntityID, context::TranspileModuleContext, name_resolver::FoundDefineInfo,
-    semantics::types::type_inference::TypeInferenceResultContainer,
+    component::EntityID,
+    context::TranspileModuleContext,
+    name_resolver::FoundDefineInfo,
+    semantics::types::{type_inference::TypeInferenceResultContainer, type_info::Type},
 };
 
 pub mod lifetime_collector;
@@ -47,8 +50,7 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
     pub fn drop(&mut self, entity_id: EntityID) {
         let lifetime = self.lifetime_instance.next_lifetime();
         self.lifetime_instance
-            .lifetime_entity_map
-            .insert(entity_id, lifetime);
+            .set_entity_lifetime(entity_id, lifetime);
     }
 
     pub fn add_expected(&mut self, expected: LifetimeExpected) {
@@ -59,8 +61,7 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
         for entity_id in self.entities {
             let lifetime = self.lifetime_instance.next_lifetime();
             self.lifetime_instance
-                .lifetime_entity_map
-                .insert(entity_id, lifetime);
+                .set_entity_lifetime(entity_id, lifetime);
         }
     }
 }
@@ -84,7 +85,7 @@ impl<'allocator> StackLifetimeScope<'allocator> {
         let lifetime = lifetime_instance.next_lifetime();
 
         for entity_id in self.entities {
-            lifetime_instance.lifetime_entity_map.insert(entity_id, lifetime);
+            lifetime_instance.set_entity_lifetime(entity_id, lifetime);
         }
     }
 }
@@ -92,7 +93,8 @@ impl<'allocator> StackLifetimeScope<'allocator> {
 pub struct LifetimeInstance {
     counter: usize,
     lifetime_expected: Vec<LifetimeExpected>,
-    lifetime_entity_map: FxHashMap<EntityID, Lifetime>,
+    entity_lifetime_ref_map: FxHashMap<EntityID, LifetimeTreeRef>,
+    lifetime_tree_map: FxHashMap<LifetimeTreeRef, LifetimeTree>,
     scoop_groups: Vec<ScoopGroup>,
 }
 
@@ -101,7 +103,8 @@ impl LifetimeInstance {
         Self {
             counter: 0,
             lifetime_expected: Vec::new(),
-            lifetime_entity_map: FxHashMap::default(),
+            entity_lifetime_ref_map: FxHashMap::default(),
+            lifetime_tree_map: FxHashMap::default(),
             scoop_groups: Vec::new(),
         }
     }
@@ -111,12 +114,82 @@ impl LifetimeInstance {
         self.counter += 1;
         Lifetime { drop_position }
     }
+
+    pub fn create_lifetime_tree(
+        &mut self,
+        entity_id: EntityID,
+        type_inference_result: &TypeInferenceResultContainer,
+    ) {
+        let ty = type_inference_result
+            .entity_type_map
+            .get(&entity_id)
+            .unwrap();
+
+        let lifetime_tree = match ty {
+            Type::UserType {
+                user_type_info,
+                generics,
+                generics_span,
+            } => todo!(),
+            Type::Function {
+                function_info,
+                generics,
+            } => todo!(),
+            Type::Generic(arc) => todo!(),
+            Type::Array(arc) => todo!(),
+            Type::Tuple(arc) => todo!(),
+            Type::Option(arc) => todo!(),
+            Type::Result { value, error } => todo!(),
+            Type::LocalGeneric(_) => unreachable!(),
+            _ => LifetimeTree::default(),
+        };
+    }
+
+    pub fn get_lifetime_tree(&mut self, entity_id: EntityID) -> &mut LifetimeTree {
+        let lifetime_ref = *self.entity_lifetime_ref_map.get(&entity_id).unwrap();
+        self.lifetime_tree_map.get_mut(&lifetime_ref).unwrap()
+    }
+
+    pub fn set_entity_lifetime(&mut self, entity_id: EntityID, lifetime: Lifetime) {
+        let lifetime_tree = self.get_lifetime_tree(entity_id);
+
+        if lifetime_tree.root_lifetime.is_some() {
+            panic!("Lifetime has already set!");
+        }
+
+        lifetime_tree.root_lifetime = Some(lifetime);
+    }
+
+    pub fn add_same_bound_entity(&mut self, entity_id: EntityID, same_bound_entity: EntityID) {
+        let same_bound_entity_ref = *self
+            .entity_lifetime_ref_map
+            .get(&same_bound_entity)
+            .unwrap();
+        let lifetime_tree = self.get_lifetime_tree(entity_id);
+
+        lifetime_tree.same_bound_entity.push(same_bound_entity_ref);
+    }
 }
 
 pub struct LifetimeExpected {
-    pub shorter: Either<EntityID, Lifetime>,
-    pub longer: Either<EntityID, Lifetime>,
+    pub shorter: TypedElementAccess,
+    pub longer: TypedElementAccess,
 }
+
+pub struct TypedElementAccess {
+    pub root: EntityID,
+    pub element_path: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct LifetimeTree {
+    pub root_lifetime: Option<Lifetime>,
+    pub same_bound_entity: Vec<LifetimeTreeRef>,
+    pub children: FxHashMap<String, LifetimeTreeRef>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LifetimeTreeRef(usize);
 
 pub struct ScoopGroup {
     group_entities: RefCell<Vec<EntityID>>,
@@ -124,11 +197,10 @@ pub struct ScoopGroup {
 }
 
 impl ScoopGroup {
-
     pub fn new(value_entity: EntityID) -> Self {
         Self {
             group_entities: RefCell::new(Vec::new()),
-            value_entity
+            value_entity,
         }
     }
 
@@ -136,7 +208,6 @@ impl ScoopGroup {
         let mut group_entities = self.group_entities.borrow_mut();
         group_entities.push(entity_id);
     }
-
 }
 
 pub fn collect_lifetime(

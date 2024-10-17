@@ -1,5 +1,6 @@
 use std::{ops::Range, sync::Arc};
 
+use allocator_api2::vec::Vec;
 use ariadne::{sources, Color, Fmt, Label, Report, ReportKind};
 
 use crate::localize::localizer::LocalizedText;

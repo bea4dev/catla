@@ -10,8 +10,8 @@ members = [
 
 [dependencies]
 catla_parser = { path = "./catla_parser", version = "0.1.0" }
-bumpalo = { version = "3.13.0", features = ["collections", "boxed", "allocator_api"] }
-hashbrown = { version = "0.14.3", features = [ "nightly" ] }
+bumpalo = { version = "3.16.0", features = ["collections", "boxed", "allocator-api2"] }
+hashbrown = "0.15.0"
 fxhash = "0.2.1"
 ariadne = "0.4.0"
 resource = "0.5.0"
@@ -22,7 +22,7 @@ num_cpus = "1.16.0"
 tokio = { version = "1.36.0", features = ["full"] }
 manual_future = "0.1.1"
 async-recursion = "1.0.5"
-allocator-api2 = "0.2.16"
+allocator-api2 = "0.2.18"
 derivative = "2.2.0"
 typeid = "1.0.2"
 walkdir = "2.3"

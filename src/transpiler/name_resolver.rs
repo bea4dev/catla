@@ -1,5 +1,6 @@
 use std::{cell::RefCell, ops::Range};
 
+use allocator_api2::vec::Vec;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
 use catla_parser::{
@@ -14,7 +15,7 @@ use catla_parser::{
 };
 use either::Either::{self, Left, Right};
 use fxhash::FxHashMap;
-use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
+use hashbrown::{DefaultHashBuilder, HashMap};
 
 use crate::localize::localizer::LocalizedText;
 

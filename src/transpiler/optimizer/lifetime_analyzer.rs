@@ -1,9 +1,9 @@
 use core::panic;
 use std::cell::RefCell;
 
+use allocator_api2::vec::Vec;
 use bumpalo::Bump;
 use catla_parser::parser::{Program, Spanned};
-use either::Either;
 use fxhash::FxHashMap;
 use lifetime_collector::collect_lifetime_program;
 

@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use allocator_api2::vec::Vec;
+use allocator_api2::vec;
 use ariadne::Color;
 use async_recursion::async_recursion;
 use bumpalo::Bump;

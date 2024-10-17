@@ -5,6 +5,7 @@ use catla_parser::parser::{
     FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft,
     PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Spanned, StatementAST, UserTypeKindEnum,
 };
+use allocator_api2::vec::Vec;
 use either::Either;
 use fxhash::FxHashMap;
 

@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 
+use allocator_api2::vec::Vec;
 use fxhash::FxHashMap;
 use tokio::runtime::{Builder, Runtime};
 

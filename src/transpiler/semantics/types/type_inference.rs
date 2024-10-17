@@ -3,6 +3,8 @@ use std::{
     sync::Arc,
 };
 
+use allocator_api2::vec::Vec;
+use allocator_api2::vec;
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::{collections::CollectIn, Bump};
 use catla_parser::parser::{
@@ -14,7 +16,7 @@ use catla_parser::parser::{
 };
 use either::Either;
 use fxhash::FxHashMap;
-use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
+use hashbrown::{DefaultHashBuilder, HashMap};
 use indexmap::IndexMap;
 
 use crate::transpiler::{

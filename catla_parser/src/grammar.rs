@@ -4,13 +4,13 @@ use proc_macro_regex::regex;
 // This is an LR(1) parser generator, used for maintain quality.
 // If the specified grammar is ambiguous, compilation is aborted with conflict.
 // Usage : https://github.com/bea4dev/bnf_rules
-bnf_rules!{
+bnf_rules! {
     #[generate_code = false]
 
     source              ::= program
 
     program             ::= [ statement ] { end_of_statement [ statement ] }
-    
+
     statement           ::= assignment
                             | exchange_statement
                             | import_statement
@@ -38,12 +38,12 @@ bnf_rules!{
     user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define [ line_feed ] ]
                             [ super_type_info ] [ where_clause ] block
     super_type_info     ::= ":" [ line_feed ] type_info [ line_feed ] { "," [ type_info [ line_feed ] ] }
-    
+
     impl_interface      ::= "implements" [ generics_define ] type_info [ line_feed ] "for" [ line_feed ] type_info
                             [ line_feed ] [ where_clause ] block
 
     type_define         ::= "type" literal [ generics_define ] "=" type_info
-    
+
     generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
     generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ] { "+" [ line_feed ] type_info [ line_feed ] } ]
 
@@ -56,7 +56,7 @@ bnf_rules!{
 
     variable_define     ::= ( "let" | "var" ) variable_binding [ type_tag ] [ "=" [ line_feed ] expression ]
 
-    variable_binding    ::= literal 
+    variable_binding    ::= literal
                             | "(" [ line_feed ] variable_binding [ line_feed ]
                               { "," [ line_feed ] [ variable_binding [ line_feed ] ] } ")"
 
@@ -82,9 +82,9 @@ bnf_rules!{
                                 | loop_expression
                             )
                             [ mapping_operator ]
-    
+
     primary_right       ::= ( "." | "::" ) [ line_feed ] ( literal [ ":" generics_info ] [ function_call ] | mapping_operator )
-    
+
     simple_primary      ::= "(" [ line_feed ] expression [ line_feed ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
                             | literal
                             | "null"
@@ -92,7 +92,7 @@ bnf_rules!{
                             | "false"
                             | "this"
                             | "This"
-                            
+
     mapping_operator    ::= "?"
                             | "?" "!"
                             | "!"
@@ -117,7 +117,7 @@ bnf_rules!{
                                 [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ]
                                 { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] }
                             "}"
-    
+
     new_array_expr      ::= "new" [ "acyclic" ] "{"
                                 [ [ line_feed ] expression [ line_feed ] ]
                                 { "," [ line_feed ] [ expression [ line_feed ] ] }
@@ -149,7 +149,7 @@ fn literal_tokenizer(source: &Vec<char>, mut current_position: usize) -> usize {
     loop {
         let current_char = match source.get(current_position) {
             Some(ch) => ch.clone(),
-            _ => break
+            _ => break,
         };
         if !(current_char == '_' || current_char.is_alphanumeric()) {
             break;
@@ -157,7 +157,7 @@ fn literal_tokenizer(source: &Vec<char>, mut current_position: usize) -> usize {
         iteration_count += 1;
         current_position += 1;
     }
-    return iteration_count; 
+    return iteration_count;
 }
 
 #[allow(dead_code)]
@@ -166,9 +166,9 @@ fn line_feed_tokenizer(source: &Vec<char>, mut current_position: usize) -> usize
     loop {
         let current_char = match source.get(current_position) {
             Some(ch) => ch.clone(),
-            _ => break
+            _ => break,
         };
-        if !(current_char == '\n' || current_char == '\r' ) {
+        if !(current_char == '\n' || current_char == '\r') {
             break;
         }
         iteration_count += 1;

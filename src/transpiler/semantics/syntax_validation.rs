@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use allocator_api2::vec::Vec;
+use allocator_api2::vec;
 use ariadne::Color;
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,

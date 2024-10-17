@@ -4,6 +4,8 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
+use allocator_api2::vec::Vec;
+use allocator_api2::vec;
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
 use catla_parser::parser::{Spanned, StatementAttribute, UserTypeKindEnum};

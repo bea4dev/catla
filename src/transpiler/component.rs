@@ -2,7 +2,7 @@ use std::{any::TypeId, fmt::Debug, hash::Hash, mem::transmute, ops::{Index, Inde
 
 use bumpalo::Bump;
 use catla_parser::parser::{AST, AST_TYPE_NAME_MAP};
-use hashbrown::{HashMap, hash_map::DefaultHashBuilder};
+use hashbrown::{DefaultHashBuilder, HashMap};
 
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]

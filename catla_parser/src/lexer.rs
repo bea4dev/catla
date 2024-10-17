@@ -69,12 +69,12 @@ pub enum TokenKind {
     LineFeed,
     Whitespace,
     UnexpectedCharacter,
-    None
+    None,
 }
 
 enum Tokenizer {
     Keyword(TokenKind, &'static str),
-    Functional(TokenKind, fn(current_input: &str) -> usize)
+    Functional(TokenKind, fn(current_input: &str) -> usize),
 }
 
 impl Tokenizer {
@@ -85,26 +85,24 @@ impl Tokenizer {
                 let mut keyword_chars = keyword.chars();
                 let mut current_byte_length = 0;
                 loop {
-                    let keyword_char = match keyword_chars.next(){
+                    let keyword_char = match keyword_chars.next() {
                         Some(c) => c,
-                        _ => break
+                        _ => break,
                     };
-                    let current_char = match input_chars.next(){
+                    let current_char = match input_chars.next() {
                         Some(c) => c,
-                        _ => return (kind.clone(), 0) // reject
+                        _ => return (kind.clone(), 0), // reject
                     };
                     if current_char != keyword_char {
-                        return (kind.clone(), 0) // reject
+                        return (kind.clone(), 0); // reject
                     }
 
                     current_byte_length += current_char.len_utf8();
                 }
                 (kind.clone(), current_byte_length) // accept
-            },
-            Tokenizer::Functional(kind, tokenizer) => {
-                (kind.clone(), tokenizer(current_input))
             }
-        }
+            Tokenizer::Functional(kind, tokenizer) => (kind.clone(), tokenizer(current_input)),
+        };
     }
 }
 
@@ -175,7 +173,7 @@ static TOKENIZERS: &[Tokenizer] = &[
     Tokenizer::Keyword(TokenKind::LineFeed, "\r"),
     Tokenizer::Keyword(TokenKind::LineFeed, "\n"),
     Tokenizer::Keyword(TokenKind::LineFeed, "\r\n"),
-    Tokenizer::Functional(TokenKind::Whitespace, whitespace_tokenizer)
+    Tokenizer::Functional(TokenKind::Whitespace, whitespace_tokenizer),
 ];
 
 fn literal_tokenizer(current_input: &str) -> usize {
@@ -185,7 +183,7 @@ fn literal_tokenizer(current_input: &str) -> usize {
     loop {
         let current_char = match input_chars.next() {
             Some(c) => c,
-            _ => break
+            _ => break,
         };
 
         if !(current_char == '_' || current_char.is_alphanumeric()) {
@@ -200,8 +198,8 @@ fn literal_tokenizer(current_input: &str) -> usize {
                         } else {
                             break;
                         }
-                    },
-                    _ => break
+                    }
+                    _ => break,
                 }
             } else {
                 break;
@@ -224,7 +222,7 @@ fn whitespace_tokenizer(current_input: &str) -> usize {
     loop {
         let current_char = match input_chars.next() {
             Some(c) => c,
-            _ => break
+            _ => break,
         };
         if !(current_char != '\n' && current_char != '\r' && current_char.is_whitespace()) {
             break;
@@ -244,15 +242,15 @@ pub struct Token<'input> {
 
 pub struct Lexer<'input> {
     source: &'input str,
-    current_byte_position: usize
+    current_byte_position: usize,
 }
 
 impl<'input> Lexer<'input> {
     pub fn new(source: &'input str) -> Lexer<'input> {
         return Self {
             source,
-            current_byte_position: 0
-        }
+            current_byte_position: 0,
+        };
     }
 }
 
@@ -273,7 +271,7 @@ impl<'input> Iterator for Lexer<'input> {
                 let result = tokenizer.tokenize(current_input);
                 let token_kind = result.0;
                 let byte_length = result.1;
-                
+
                 if byte_length > current_max_length {
                     current_max_length = byte_length;
                     current_token_kind = token_kind;
@@ -304,8 +302,9 @@ impl<'input> Iterator for Lexer<'input> {
                     span: start_position..end_position,
                 }
             };
-            
+
             return Some(token);
         }
     }
 }
+

@@ -1,15 +1,20 @@
 use std::ops::Range;
 
+use allocator_api2::vec::Vec;
 use ariadne::{Color, Label, Report, ReportKind, Source};
-use catla_parser::parser::{Spanned, ASTParseError};
+use catla_parser::parser::{ASTParseError, Spanned};
 
-use crate::transpiler::{advice::Advice, context::TranspileModuleContext, error::{TranspileReport, ErrorMessageKey, ErrorMessageType}, TranspileError};
-
+use crate::transpiler::{
+    advice::Advice,
+    context::TranspileModuleContext,
+    error::{ErrorMessageKey, ErrorMessageType, TranspileReport},
+    TranspileError,
+};
 
 pub(crate) struct UnexpectedTokens {
     pub span: Range<usize>,
     pub error_code: usize,
-    pub expected: Expected
+    pub expected: Expected,
 }
 
 impl TranspileReport for UnexpectedTokens {
@@ -21,32 +26,32 @@ impl TranspileReport for UnexpectedTokens {
 
         let label_massage = key.get_massage(text, ErrorMessageType::Label(0))
             + text.get_text(self.expected.get_expected_key()).as_str();
-        
+
         let mut builder = Report::build(ReportKind::Error, module_name, self.span.start)
             .with_code(self.error_code)
             .with_message(key.get_massage(text, ErrorMessageType::Message))
             .with_label(
                 Label::new((module_name, self.span.clone()))
                     .with_message(label_massage)
-                    .with_color(Color::Red)
+                    .with_color(Color::Red),
             );
-        
+
         if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
             builder.set_note(note);
         }
         if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
             builder.set_help(help);
         }
-        builder.finish()
+        builder
+            .finish()
             .print((module_name, Source::from(context.source_code.code.as_str())))
             .unwrap();
     }
 }
 
-
 pub(crate) struct UnexpectedEOF {
     error_code: usize,
-    expected: Expected
+    expected: Expected,
 }
 
 impl TranspileReport for UnexpectedEOF {
@@ -67,16 +72,17 @@ impl TranspileReport for UnexpectedEOF {
             .with_label(
                 Label::new((module_name, code_length..code_length))
                     .with_message(label_message)
-                    .with_color(Color::Red)
+                    .with_color(Color::Red),
             );
-        
+
         if let Some(note) = key.get_massage_optional(text, ErrorMessageType::Note) {
             builder.set_note(note);
         }
         if let Some(help) = key.get_massage_optional(text, ErrorMessageType::Help) {
             builder.set_help(help);
         }
-        builder.finish()
+        builder
+            .finish()
             .print((module_name, Source::from(context.source_code.code.as_str())))
             .unwrap();
     }
@@ -110,44 +116,52 @@ pub(crate) enum Expected {
     GreaterThan,
     FieldAssign,
     This,
-    Semicolon
+    Semicolon,
 }
 
 impl Expected {
     pub(crate) fn get_expected_key(&self) -> String {
-        return format!("expected.{}", match self {
-            Expected::Unnecessary => "unnecessary",
-            Expected::Statement => "statement",
-            Expected::Expression => "expression",
-            Expected::ImportElements => "import_elements",
-            Expected::ParenthesisLeft => "parenthesis_left",
-            Expected::ParenthesisRight => "parenthesis_right",
-            Expected::BraceLeft => "brace_left",
-            Expected::BraceRight => "brace_right",
-            Expected::VariableName => "variable_name",
-            Expected::FunctionName => "function_name",
-            Expected::FunctionArgument => "function_argument",
-            Expected::Block => "block",
-            Expected::UserTypeName => "user_type_name",
-            Expected::SuperTypeInfo => "super_type_info",
-            Expected::ClosureArgument => "closure_argument",
-            Expected::VerticalBarRight => "vertical_bar_right",
-            Expected::FatArrow => "fat_arrow",
-            Expected::FatArrowAndBlock => "fat_arrow_and_block",
-            Expected::ExpressionOrBlock => "expression_or_block",
-            Expected::Generics => "generics",
-            Expected::ArgumentExpression => "argument_expression",
-            Expected::IfStatementOrBlock => "if_statement_or_block",
-            Expected::TypeInfo => "type_info",
-            Expected::GreaterThan => "greater_than",
-            Expected::FieldAssign => "field_assign",
-            Expected::This => "this",
-            Expected::Semicolon => "semicolon"
-        });
+        return format!(
+            "expected.{}",
+            match self {
+                Expected::Unnecessary => "unnecessary",
+                Expected::Statement => "statement",
+                Expected::Expression => "expression",
+                Expected::ImportElements => "import_elements",
+                Expected::ParenthesisLeft => "parenthesis_left",
+                Expected::ParenthesisRight => "parenthesis_right",
+                Expected::BraceLeft => "brace_left",
+                Expected::BraceRight => "brace_right",
+                Expected::VariableName => "variable_name",
+                Expected::FunctionName => "function_name",
+                Expected::FunctionArgument => "function_argument",
+                Expected::Block => "block",
+                Expected::UserTypeName => "user_type_name",
+                Expected::SuperTypeInfo => "super_type_info",
+                Expected::ClosureArgument => "closure_argument",
+                Expected::VerticalBarRight => "vertical_bar_right",
+                Expected::FatArrow => "fat_arrow",
+                Expected::FatArrowAndBlock => "fat_arrow_and_block",
+                Expected::ExpressionOrBlock => "expression_or_block",
+                Expected::Generics => "generics",
+                Expected::ArgumentExpression => "argument_expression",
+                Expected::IfStatementOrBlock => "if_statement_or_block",
+                Expected::TypeInfo => "type_info",
+                Expected::GreaterThan => "greater_than",
+                Expected::FieldAssign => "field_assign",
+                Expected::This => "this",
+                Expected::Semicolon => "semicolon",
+            }
+        );
     }
 }
 
-pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected: Expected, error_code: usize, context: &TranspileModuleContext) -> Vec<TranspileError> {
+pub(crate) fn unexpected_token_error(
+    ast_errors: &Vec<&ASTParseError>,
+    expected: Expected,
+    error_code: usize,
+    context: &TranspileModuleContext,
+) -> Vec<TranspileError> {
     let mut transpile_errors = Vec::new();
     let mut unexpected_tokens = Vec::new();
 
@@ -188,21 +202,37 @@ pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected:
         Expected::GreaterThan => Some(">"),
         Expected::FieldAssign => None,
         Expected::This => Some("this"),
-        Expected::Semicolon => Some(";")
+        Expected::Semicolon => Some(";"),
     };
 
     if !unexpected_tokens.is_empty() {
-        let tokens: Vec<Spanned<String>> = unexpected_tokens.iter().map(|token| { Spanned::new(token.text.to_string(), token.span.clone()) }).collect();
+        let tokens: Vec<Spanned<String>> = unexpected_tokens
+            .iter()
+            .map(|token| Spanned::new(token.text.to_string(), token.span.clone()))
+            .collect();
         let span_start = tokens.first().unwrap().span.start;
         let span_end = tokens.last().unwrap().span.end;
 
-        let mut error = TranspileError::new(UnexpectedTokens { span: span_start..span_end, error_code, expected });
+        let mut error = TranspileError::new(UnexpectedTokens {
+            span: span_start..span_end,
+            error_code,
+            expected,
+        });
 
         if expected == Expected::Unnecessary {
-            error.add_advice(context.module_name.clone(), Advice::Remove { span: span_start..span_end })
+            error.add_advice(
+                context.module_name.clone(),
+                Advice::Remove {
+                    span: span_start..span_end,
+                },
+            )
         } else {
             if let Some(add) = advice_add {
-                let advice = Advice::Add { add: add.to_string(), position: span_start, message_override: None };
+                let advice = Advice::Add {
+                    add: add.to_string(),
+                    position: span_start,
+                    message_override: None,
+                };
                 error.add_advice(context.module_name.clone(), advice)
             }
         };
@@ -211,10 +241,17 @@ pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected:
     }
 
     if has_eof_error {
-        let mut error = TranspileError::new(UnexpectedEOF { error_code, expected });
+        let mut error = TranspileError::new(UnexpectedEOF {
+            error_code,
+            expected,
+        });
 
         if let Some(add) = advice_add {
-            let advice = Advice::Add { add: add.to_string(), position: context.source_code.code.len(), message_override: None };
+            let advice = Advice::Add {
+                add: add.to_string(),
+                position: context.source_code.code.len(),
+                message_override: None,
+            };
             error.add_advice(context.module_name.clone(), advice);
         }
 
@@ -223,3 +260,4 @@ pub(crate) fn unexpected_token_error(ast_errors: &Vec<&ASTParseError>, expected:
 
     return transpile_errors;
 }
+

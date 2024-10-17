@@ -1,5 +1,3 @@
-#![feature(allocator_api)]
-
 use std::path::Path;
 
 use transpiler::{context::{AutoImport, OptimizationSettings}, resource::DefaultSourceCodeProvider};

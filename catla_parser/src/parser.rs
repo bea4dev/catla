@@ -1,30 +1,29 @@
-pub mod statement;
 pub mod expression;
+pub mod statement;
 pub mod types;
 
-use std::{alloc::Allocator, ops::Range};
+use crate::lexer::{Lexer, Token, TokenKind};
+use allocator_api2::{alloc::Allocator, vec, vec::Vec};
 use either::Either;
-use crate::{lexer::{Token, Lexer, TokenKind}, util::parser_utils::{bump_vec, impl_ast}};
+use std::ops::Range;
 
 use bumpalo::Bump;
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Spanned<T> {
     pub value: T,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 impl<T> Spanned<T> {
     pub fn new(value: T, span: Range<usize>) -> Self {
-        Self {
-            value,
-            span
-        }
+        Self { value, span }
     }
 
     pub fn map<U, F>(self, function: F) -> Spanned<U>
-    where F: FnOnce(T) -> U {
+    where
+        F: FnOnce(T) -> U,
+    {
         let value = function(self.value);
         Spanned::new(value, self.span)
     }
@@ -33,7 +32,7 @@ impl<T> Spanned<T> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recovered<'allocator, 'input, T> {
     pub result: ParseResult<'allocator, 'input, ()>,
-    pub value: Option<T>
+    pub value: Option<T>,
 }
 
 pub struct StringToken(pub usize, pub String);
@@ -41,15 +40,27 @@ pub struct StringToken(pub usize, pub String);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ASTParseError<'input, 'allocator> {
     UnexpectedToken(Vec<Token<'input>, &'allocator Bump>),
-    UnexpectedEOF
+    UnexpectedEOF,
 }
 
 pub type ParseResult<'allocator, 'input, T> = Result<T, ASTParseError<'input, 'allocator>>;
-pub type ErrorTokens<'input, 'allocator> = Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>;
+pub type ErrorTokens<'input, 'allocator> =
+    Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>;
 
+macro_rules! impl_ast {
+    ($($x:ty),*) => (
+        $(impl AST for $x {})*
+        pub static AST_TYPE_NAME_MAP: std::sync::LazyLock<std::collections::HashMap<std::any::TypeId, &'static str>>
+            = std::sync::LazyLock::new(|| {
+                let mut map = std::collections::HashMap::new();
+                $(map.insert(typeid::of::<$x>(), std::any::type_name::<$x>());)*
+                map
+        });
+    );
+}
 
 pub trait AST {}
-impl_ast!{
+impl_ast! {
     ProgramAST<'_, '_>,
     StatementAST<'_, '_>,
     FunctionDefine<'_, '_>,
@@ -107,12 +118,13 @@ pub type Program<'input, 'allocator> = &'allocator ProgramAST<'input, 'allocator
 pub struct ProgramAST<'input, 'allocator> {
     pub statements: Vec<Statement<'input, 'allocator>, &'allocator Bump>,
     pub not_separated_stmts: Vec<Token<'input>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 unsafe impl Send for ProgramAST<'_, '_> {}
 unsafe impl Sync for ProgramAST<'_, '_> {}
 
-pub type Statement<'input, 'allocator> = ParseResult<'allocator, 'input, StatementAST<'input, 'allocator>>;
+pub type Statement<'input, 'allocator> =
+    ParseResult<'allocator, 'input, StatementAST<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StatementAST<'input, 'allocator> {
@@ -126,7 +138,7 @@ pub enum StatementAST<'input, 'allocator> {
     TypeDefine(TypeDefine<'input, 'allocator>),
     Implements(Implements<'input, 'allocator>),
     DropStatement(DropStatement<'input, 'allocator>),
-    Expression(Expression<'input, 'allocator>)
+    Expression(Expression<'input, 'allocator>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,8 +149,9 @@ pub struct FunctionDefine<'input, 'allocator> {
     pub args: FunctionArguments<'input, 'allocator>,
     pub type_tag: Option<TypeTag<'input, 'allocator>>,
     pub where_clause: Option<WhereClause<'input, 'allocator>>,
-    pub block_or_semicolon: Recovered<'allocator, 'input, Either<Range<usize>, Block<'input, 'allocator>>>,
-    pub span: Range<usize>
+    pub block_or_semicolon:
+        Recovered<'allocator, 'input, Either<Range<usize>, Block<'input, 'allocator>>>,
+    pub span: Range<usize>,
 }
 
 pub type StatementAttribute = Spanned<StatementAttributeKind>;
@@ -151,17 +164,18 @@ pub enum StatementAttributeKind {
     Native,
     Acyclic,
     Open,
-    Override
+    Override,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionArgument<'input, 'allocator> {
     pub binding: VariableBinding<'input, 'allocator>,
     pub type_tag: TypeTag<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
-pub type FunctionArgumentResult<'input, 'allocator> = ParseResult<'allocator, 'input, FunctionArgument<'input, 'allocator>>;
+pub type FunctionArgumentResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, FunctionArgument<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionArguments<'input, 'allocator> {
@@ -170,13 +184,13 @@ pub struct FunctionArguments<'input, 'allocator> {
     pub arguments: Vec<FunctionArgument<'input, 'allocator>, &'allocator Bump>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub paren_right: ParseResult<'allocator, 'input, ()>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThisMutability<'input, 'allocator> {
     pub is_var: Spanned<bool>,
-    pub this_span: ParseResult<'allocator, 'input, Range<usize>>
+    pub this_span: ParseResult<'allocator, 'input, Range<usize>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,14 +198,14 @@ pub struct GenericsDefine<'input, 'allocator> {
     pub elements: Vec<GenericsElement<'input, 'allocator>, &'allocator Bump>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub greater_than: ParseResult<'allocator, 'input, ()>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenericsElement<'input, 'allocator> {
     pub name: Literal<'input>,
     pub bounds: Vec<TypeInfo<'input, 'allocator>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,7 +218,7 @@ pub struct UserTypeDefine<'input, 'allocator> {
     pub where_clause: Option<WhereClause<'input, 'allocator>>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub block: BlockRecovered<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 pub type UserTypeKind = Spanned<UserTypeKindEnum>;
@@ -213,14 +227,14 @@ pub type UserTypeKind = Spanned<UserTypeKindEnum>;
 pub enum UserTypeKindEnum {
     Class,
     Struct,
-    Interface
+    Interface,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuperTypeInfo<'input, 'allocator> {
     pub type_infos: Vec<TypeInfo<'input, 'allocator>, &'allocator Bump>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,7 +244,7 @@ pub struct Implements<'input, 'allocator> {
     pub target_user_type: TypeInfoResult<'input, 'allocator>,
     pub where_clause: Option<WhereClause<'input, 'allocator>>,
     pub block: BlockRecovered<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,7 +253,7 @@ pub struct TypeDefine<'input, 'allocator> {
     pub generics_define: Option<GenericsDefine<'input, 'allocator>>,
     pub type_info: TypeInfoResult<'input, 'allocator>,
     pub error_tokens: ErrorTokens<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -247,46 +261,48 @@ pub struct WhereClause<'input, 'allocator> {
     pub elements: Vec<WhereElement<'input, 'allocator>, &'allocator Bump>,
     pub error_tokens: ErrorTokens<'input, 'allocator>,
     pub next_expected_token: ParseResult<'allocator, 'input, ()>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhereElement<'input, 'allocator> {
     pub target_type: TypeInfo<'input, 'allocator>,
     pub bounds: Vec<TypeInfo<'input, 'allocator>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Import<'input, 'allocator> {
     pub import_path: Vec<Literal<'input>, &'allocator Bump>,
     pub elements: ImportElements<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportElements<'input, 'allocator> {
     pub elements: Vec<Literal<'input>, &'allocator Bump>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
-    pub brace_right: ParseResult<'allocator, 'input, ()>
+    pub brace_right: ParseResult<'allocator, 'input, ()>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DropStatement<'input, 'allocator> {
     pub acyclic_keyword_span: Option<Range<usize>>,
     pub expression: ExpressionResult<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block<'input, 'allocator> {
     pub program: Program<'input, 'allocator>,
     pub brace_right: ParseResult<'allocator, 'input, ()>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
-pub type BlockResult<'input, 'allocator> = ParseResult<'allocator, 'input, Block<'input, 'allocator>>;
-pub type BlockRecovered<'input, 'allocator> = Recovered<'allocator, 'input, Block<'input, 'allocator>>;
+pub type BlockResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, Block<'input, 'allocator>>;
+pub type BlockRecovered<'input, 'allocator> =
+    Recovered<'allocator, 'input, Block<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariableDefine<'input, 'allocator> {
@@ -294,47 +310,50 @@ pub struct VariableDefine<'input, 'allocator> {
     pub binding: VariableBindingResult<'input, 'allocator>,
     pub type_tag: Option<TypeTag<'input, 'allocator>>,
     pub expression: Option<ExpressionResult<'input, 'allocator>>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariableAttributes<'allocator> {
     pub statement_attributes: Vec<StatementAttribute, &'allocator Bump>,
     pub is_var: bool,
-    pub var_let_span: Range<usize>
+    pub var_let_span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariableBinding<'input, 'allocator> {
-    pub binding: Either<Literal<'input>, Vec<VariableBinding<'input, 'allocator>, &'allocator Bump>>,
+    pub binding:
+        Either<Literal<'input>, Vec<VariableBinding<'input, 'allocator>, &'allocator Bump>>,
     pub error_tokens: Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
-pub type VariableBindingResult<'input, 'allocator> = ParseResult<'allocator, 'input, VariableBinding<'input, 'allocator>>;
+pub type VariableBindingResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, VariableBinding<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Assignment<'input, 'allocator> {
     pub left_expr: Expression<'input, 'allocator>,
     pub right_expr: ParseResult<'allocator, 'input, Expression<'input, 'allocator>>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Exchange<'input, 'allocator> {
     pub left_expr: Expression<'input, 'allocator>,
     pub right_expr: ParseResult<'allocator, 'input, Expression<'input, 'allocator>>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 pub type Expression<'input, 'allocator> = &'allocator ExpressionEnum<'input, 'allocator>;
-pub type ExpressionResult<'input, 'allocator> = ParseResult<'allocator, 'input, Expression<'input, 'allocator>>;
+pub type ExpressionResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, Expression<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExpressionEnum<'input, 'allocator> {
     OrExpression(OrExpression<'input, 'allocator>),
     ReturnExpression(ReturnExpression<'input, 'allocator>),
-    Closure(Closure<'input, 'allocator>)
+    Closure(Closure<'input, 'allocator>),
 }
 
 impl ExpressionEnum<'_, '_> {
@@ -350,8 +369,9 @@ impl ExpressionEnum<'_, '_> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrExpression<'input, 'allocator> {
     pub left_expr: AndExpression<'input, 'allocator>,
-    pub right_exprs: Vec<(OrOperatorSpan, AndExpressionResult<'input, 'allocator>), &'allocator Bump>,
-    pub span: Range<usize>
+    pub right_exprs:
+        Vec<(OrOperatorSpan, AndExpressionResult<'input, 'allocator>), &'allocator Bump>,
+    pub span: Range<usize>,
 }
 
 pub type OrOperatorSpan = Range<usize>;
@@ -359,22 +379,26 @@ pub type OrOperatorSpan = Range<usize>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AndExpression<'input, 'allocator> {
     pub left_expr: CompareExpression<'input, 'allocator>,
-    pub right_exprs: Vec<(AndOperatorSpan, CompareExpressionResult<'input, 'allocator>), &'allocator Bump>,
-    pub span: Range<usize>
+    pub right_exprs:
+        Vec<(AndOperatorSpan, CompareExpressionResult<'input, 'allocator>), &'allocator Bump>,
+    pub span: Range<usize>,
 }
 
 pub type AndOperatorSpan = Range<usize>;
-pub type AndExpressionResult<'input, 'allocator> = ParseResult<'allocator, 'input, AndExpression<'input, 'allocator>>;
+pub type AndExpressionResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, AndExpression<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompareExpression<'input, 'allocator> {
     pub left_expr: AddOrSubExpression<'input, 'allocator>,
-    pub right_exprs: Vec<(CompareOp, AddOrSubExpressionResult<'input, 'allocator>), &'allocator Bump>,
-    pub span: Range<usize>
+    pub right_exprs:
+        Vec<(CompareOp, AddOrSubExpressionResult<'input, 'allocator>), &'allocator Bump>,
+    pub span: Range<usize>,
 }
 
 pub type CompareOp = Spanned<CompareOpKind>;
-pub type CompareExpressionResult<'input, 'allocator> = ParseResult<'allocator, 'input, CompareExpression<'input, 'allocator>>;
+pub type CompareExpressionResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, CompareExpression<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompareOpKind {
@@ -383,18 +407,18 @@ pub enum CompareOpKind {
     LessThan,
     LessOrEqual,
     Equal,
-    NotEqual
+    NotEqual,
 }
 
 impl CompareOpKind {
     pub fn as_str(&self) -> &'static str {
         match self {
-            CompareOpKind::GreaterThan    => ">",
+            CompareOpKind::GreaterThan => ">",
             CompareOpKind::GreaterOrEqual => ">=",
-            CompareOpKind::LessThan       => "<",
-            CompareOpKind::LessOrEqual    => "<=",
-            CompareOpKind::Equal          => "==",
-            CompareOpKind::NotEqual       => "!="
+            CompareOpKind::LessThan => "<",
+            CompareOpKind::LessOrEqual => "<=",
+            CompareOpKind::Equal => "==",
+            CompareOpKind::NotEqual => "!=",
         }
     }
 }
@@ -402,24 +426,26 @@ impl CompareOpKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddOrSubExpression<'input, 'allocator> {
     pub left_expr: MulOrDivExpression<'input, 'allocator>,
-    pub right_exprs: Vec<(AddOrSubOp, MulOrDivExpressionResult<'input, 'allocator>), &'allocator Bump>,
-    pub span: Range<usize>
+    pub right_exprs:
+        Vec<(AddOrSubOp, MulOrDivExpressionResult<'input, 'allocator>), &'allocator Bump>,
+    pub span: Range<usize>,
 }
 
 pub type AddOrSubOp = Spanned<AddOrSubOpKind>;
-pub type AddOrSubExpressionResult<'input, 'allocator> = ParseResult<'allocator, 'input, AddOrSubExpression<'input, 'allocator>>;
+pub type AddOrSubExpressionResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, AddOrSubExpression<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddOrSubOpKind {
     Add,
-    Sub
+    Sub,
 }
 
 impl AddOrSubOpKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             AddOrSubOpKind::Add => "+",
-            AddOrSubOpKind::Sub => "-"
+            AddOrSubOpKind::Sub => "-",
         }
     }
 }
@@ -428,23 +454,24 @@ impl AddOrSubOpKind {
 pub struct MulOrDivExpression<'input, 'allocator> {
     pub left_expr: Factor<'input, 'allocator>,
     pub right_exprs: Vec<(MulOrDivOp, FactorResult<'input, 'allocator>), &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 pub type MulOrDivOp = Spanned<MulOrDivOpKind>;
-pub type MulOrDivExpressionResult<'input, 'allocator> = ParseResult<'allocator, 'input, MulOrDivExpression<'input, 'allocator>>;
+pub type MulOrDivExpressionResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, MulOrDivExpression<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MulOrDivOpKind {
     Mul,
-    Div
+    Div,
 }
 
 impl MulOrDivOpKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             MulOrDivOpKind::Mul => "*",
-            MulOrDivOpKind::Div => "/"
+            MulOrDivOpKind::Div => "/",
         }
     }
 }
@@ -454,36 +481,44 @@ impl MulOrDivOpKind {
 pub struct Factor<'input, 'allocator> {
     pub negative_keyword_span: Option<Range<usize>>,
     pub primary: PrimaryResult<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
-pub type FactorResult<'input, 'allocator> = ParseResult<'allocator, 'input, Factor<'input, 'allocator>>;
+pub type FactorResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, Factor<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Primary<'input, 'allocator> {
     pub left: PrimaryLeft<'input, 'allocator>,
     pub chain: Vec<PrimaryRight<'input, 'allocator>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
-pub type PrimaryResult<'input, 'allocator> = ParseResult<'allocator, 'input, Primary<'input, 'allocator>>;
+pub type PrimaryResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, Primary<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub struct PrimaryLeft<'input, 'allocator> {
     pub first_expr: PrimaryLeftExpr<'input, 'allocator>,
     pub mapping_operator: Option<MappingOperator<'input, 'allocator>>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrimaryLeftExpr<'input, 'allocator> {
-    Simple((SimplePrimary<'input, 'allocator>, Option<GenericsResult<'input, 'allocator>>, Option<FunctionCall<'input, 'allocator>>)),
+    Simple(
+        (
+            SimplePrimary<'input, 'allocator>,
+            Option<GenericsResult<'input, 'allocator>>,
+            Option<FunctionCall<'input, 'allocator>>,
+        ),
+    ),
     NewArrayInitExpression(NewArrayInitExpression<'input, 'allocator>),
     NewArrayExpression(NewArrayExpression<'input, 'allocator>),
     NewExpression(NewExpression<'input, 'allocator>),
     IfExpression(IfExpression<'input, 'allocator>),
-    LoopExpression(LoopExpression<'input, 'allocator>)
+    LoopExpression(LoopExpression<'input, 'allocator>),
 }
 
 impl PrimaryLeftExpr<'_, '_> {
@@ -507,12 +542,16 @@ impl PrimaryLeftExpr<'_, '_> {
                         simple_primary.get_span()
                     }
                 }
-            },
-            PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => new_array_init_expression.span.clone(),
-            PrimaryLeftExpr::NewArrayExpression(new_array_expression) => new_array_expression.span.clone(),
+            }
+            PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
+                new_array_init_expression.span.clone()
+            }
+            PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {
+                new_array_expression.span.clone()
+            }
             PrimaryLeftExpr::NewExpression(new_expression) => new_expression.span.clone(),
             PrimaryLeftExpr::IfExpression(if_expression) => if_expression.span.clone(),
-            PrimaryLeftExpr::LoopExpression(loop_expression) => loop_expression.span.clone()
+            PrimaryLeftExpr::LoopExpression(loop_expression) => loop_expression.span.clone(),
         }
     }
 }
@@ -520,14 +559,14 @@ impl PrimaryLeftExpr<'_, '_> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopExpression<'input, 'allocator> {
     pub block: BlockResult<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IfExpression<'input, 'allocator> {
     pub if_statement: IfStatement<'input, 'allocator>,
     pub chain: Vec<ElseIfOrElse<'input, 'allocator>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -535,15 +574,19 @@ pub struct IfStatement<'input, 'allocator> {
     pub if_keyword_span: Range<usize>,
     pub condition: ExpressionResult<'input, 'allocator>,
     pub block: BlockRecovered<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrimaryRight<'input, 'allocator> {
     pub separator: PrimarySeparator,
-    pub second_expr: Option<(Literal<'input>, Option<GenericsResult<'input, 'allocator>>, Option<FunctionCall<'input, 'allocator>>)>,
+    pub second_expr: Option<(
+        Literal<'input>,
+        Option<GenericsResult<'input, 'allocator>>,
+        Option<FunctionCall<'input, 'allocator>>,
+    )>,
     pub mapping_operator: Option<MappingOperator<'input, 'allocator>>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 pub type PrimarySeparator = Spanned<PrimarySeparatorKind>;
@@ -551,36 +594,38 @@ pub type PrimarySeparator = Spanned<PrimarySeparatorKind>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrimarySeparatorKind {
     Dot,
-    DoubleColon
+    DoubleColon,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimplePrimary<'input, 'allocator> {
-    Expressions{
+    Expressions {
         expressions: Vec<Expression<'input, 'allocator>, &'allocator Bump>,
         error_tokens: Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>,
-        span: Range<usize>
+        span: Range<usize>,
     },
     Identifier(Literal<'input>),
     NullKeyword(Range<usize>),
     TrueKeyword(Range<usize>),
     FalseKeyword(Range<usize>),
     ThisKeyword(Literal<'input>),
-    LargeThisKeyword(Literal<'input>)
+    LargeThisKeyword(Literal<'input>),
 }
 
 impl SimplePrimary<'_, '_> {
     pub fn get_span(&self) -> Range<usize> {
         match self {
-            SimplePrimary::Expressions { expressions: _, error_tokens: _, span } => {
-                span.clone()
-            },
+            SimplePrimary::Expressions {
+                expressions: _,
+                error_tokens: _,
+                span,
+            } => span.clone(),
             SimplePrimary::Identifier(literal) => literal.span.clone(),
             SimplePrimary::NullKeyword(span) => span.clone(),
             SimplePrimary::TrueKeyword(span) => span.clone(),
             SimplePrimary::FalseKeyword(span) => span.clone(),
             SimplePrimary::ThisKeyword(literal) => literal.span.clone(),
-            SimplePrimary::LargeThisKeyword(literal) => literal.span.clone()
+            SimplePrimary::LargeThisKeyword(literal) => literal.span.clone(),
         }
     }
 }
@@ -594,18 +639,20 @@ pub enum MappingOperatorKind<'input, 'allocator> {
     NullElvisBlock(BlockRecovered<'input, 'allocator>),
     ResultPropagation,
     ResultUnwrap,
-    ResultElvisBlock(BlockRecovered<'input, 'allocator>)
+    ResultElvisBlock(BlockRecovered<'input, 'allocator>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionCall<'input, 'allocator> {
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub arg_exprs: CallArgumentsResult<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
-pub type FunctionCallResult<'input, 'allocator> = ParseResult<'allocator, 'input, FunctionCall<'input, 'allocator>>;
-pub type CallArgumentsResult<'input, 'allocator> = ParseResult<'allocator, 'input, Vec<Expression<'input, 'allocator>, &'allocator Bump>>;
+pub type FunctionCallResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, FunctionCall<'input, 'allocator>>;
+pub type CallArgumentsResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, Vec<Expression<'input, 'allocator>, &'allocator Bump>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewExpression<'input, 'allocator> {
@@ -614,15 +661,16 @@ pub struct NewExpression<'input, 'allocator> {
     pub path: Vec<Literal<'input>, &'allocator Bump>,
     pub field_assigns: FieldAssignsResult<'input, 'allocator>,
     pub error_tokens: Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
-pub type FieldAssignsResult<'input, 'allocator> = ParseResult<'allocator, 'input, Vec<FieldAssign<'input, 'allocator>, &'allocator Bump>>;
+pub type FieldAssignsResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, Vec<FieldAssign<'input, 'allocator>, &'allocator Bump>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldAssign<'input, 'allocator> {
     pub name: Literal<'input>,
-    pub expression: ExpressionResult<'input, 'allocator>
+    pub expression: ExpressionResult<'input, 'allocator>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -635,7 +683,7 @@ pub struct NewArrayInitExpression<'input, 'allocator> {
     pub length_expression: ParseResult<'allocator, 'input, Expression<'input, 'allocator>>,
     pub bracket_right: ParseResult<'allocator, 'input, ()>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -644,21 +692,25 @@ pub struct NewArrayExpression<'input, 'allocator> {
     pub acyclic_keyword_span: Option<Range<usize>>,
     pub value_expressions: Vec<ExpressionResult<'input, 'allocator>, &'allocator Bump>,
     pub error_tokens: Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElseIfOrElse<'input, 'allocator> {
     pub else_keyword_span: Range<usize>,
-    pub else_if_or_else: Recovered<'allocator, 'input, Either<IfStatement<'input, 'allocator>, Block<'input, 'allocator>>>,
-    pub span: Range<usize>
+    pub else_if_or_else: Recovered<
+        'allocator,
+        'input,
+        Either<IfStatement<'input, 'allocator>, Block<'input, 'allocator>>,
+    >,
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReturnExpression<'input, 'allocator> {
     pub return_keyword_span: Range<usize>,
     pub expression: Option<Expression<'input, 'allocator>>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -666,23 +718,30 @@ pub struct Closure<'input, 'allocator> {
     pub arguments: ClosureArguments<'input, 'allocator>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub fat_arrow_span: Result<Range<usize>, ()>,
-    pub expression_or_block: Recovered<'allocator, 'input, Either<Expression<'input, 'allocator>, Block<'input, 'allocator>>>,
-    pub span: Range<usize>
+    pub expression_or_block: Recovered<
+        'allocator,
+        'input,
+        Either<Expression<'input, 'allocator>, Block<'input, 'allocator>>,
+    >,
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClosureArguments<'input, 'allocator> {
-    pub arguments: Either<Literal<'input>, Vec<Either<FunctionArgument<'input, 'allocator>, Literal<'input>>, &'allocator Bump>>,
+    pub arguments: Either<
+        Literal<'input>,
+        Vec<Either<FunctionArgument<'input, 'allocator>, Literal<'input>>, &'allocator Bump>,
+    >,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub vertical_bar_right: ParseResult<'allocator, 'input, ()>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeTag<'input, 'allocator> {
     pub tag_kind: TypeTagKind,
     pub type_info: TypeInfoResult<'input, 'allocator>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 pub type TypeTagKind = Spanned<TypeTagKindEnum>;
@@ -690,14 +749,14 @@ pub type TypeTagKind = Spanned<TypeTagKindEnum>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeTagKindEnum {
     Normal,
-    ReturnType
+    ReturnType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeInfo<'input, 'allocator> {
     BaseType(BaseTypeInfo<'input, 'allocator>),
     ArrayType(ArrayTypeInfo<'input, 'allocator>),
-    TupleType(TupleTypeInfo<'input, 'allocator>)
+    TupleType(TupleTypeInfo<'input, 'allocator>),
 }
 
 impl TypeInfo<'_, '_> {
@@ -705,7 +764,7 @@ impl TypeInfo<'_, '_> {
         match self {
             TypeInfo::BaseType(base_type_info) => base_type_info.span.clone(),
             TypeInfo::ArrayType(array_type_info) => array_type_info.span.clone(),
-            TypeInfo::TupleType(tuple_type_info) => tuple_type_info.span.clone()
+            TypeInfo::TupleType(tuple_type_info) => tuple_type_info.span.clone(),
         }
     }
 }
@@ -714,7 +773,7 @@ impl TypeInfo<'_, '_> {
 pub struct TupleTypeInfo<'input, 'allocator> {
     pub types: Vec<TypeInfo<'input, 'allocator>, &'allocator Bump>,
     pub error_tokens: Vec<Vec<Token<'input>, &'allocator Bump>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -722,7 +781,7 @@ pub struct ArrayTypeInfo<'input, 'allocator> {
     pub type_info: ParseResult<'allocator, 'input, &'allocator TypeInfo<'input, 'allocator>>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
     pub bracket_right: ParseResult<'allocator, 'input, ()>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -730,27 +789,29 @@ pub struct BaseTypeInfo<'input, 'allocator> {
     pub path: Vec<Literal<'input>, &'allocator Bump>,
     pub generics: Option<Generics<'input, 'allocator>>,
     pub type_attributes: Vec<TypeAttribute<'input, 'allocator>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
-pub type TypeInfoResult<'input, 'allocator> = ParseResult<'allocator, 'input, TypeInfo<'input, 'allocator>>;
+pub type TypeInfoResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, TypeInfo<'input, 'allocator>>;
 
 pub type TypeAttribute<'input, 'allocator> = Spanned<TypeAttributeEnum<'input, 'allocator>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeAttributeEnum<'input, 'allocator> {
     Optional,
-    Result(Option<Generics<'input, 'allocator>>)
+    Result(Option<Generics<'input, 'allocator>>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Generics<'input, 'allocator> {
     pub elements: Vec<TypeInfo<'input, 'allocator>, &'allocator Bump>,
     pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
-    pub span: Range<usize>
+    pub span: Range<usize>,
 }
 
-pub type GenericsResult<'input, 'allocator> = ParseResult<'allocator, 'input, Generics<'input, 'allocator>>;
+pub type GenericsResult<'input, 'allocator> =
+    ParseResult<'allocator, 'input, Generics<'input, 'allocator>>;
 
 pub type Literal<'input> = Spanned<&'input str>;
 pub type LiteralResult<'input, 'allocator> = ParseResult<'allocator, 'input, Literal<'input>>;
@@ -758,11 +819,10 @@ pub type LiteralResult<'input, 'allocator> = ParseResult<'allocator, 'input, Lit
 pub struct TokenCursor<'input, 'allocator> {
     tokens: Vec<Token<'input>, &'allocator Bump>,
     current_position: usize,
-    allocator: &'allocator Bump
+    allocator: &'allocator Bump,
 }
 
 impl<'input, 'allocator> TokenCursor<'input, 'allocator> {
-    
     fn new(allocator: &'allocator Bump, lexer: Lexer<'input>) -> TokenCursor<'input, 'allocator> {
         let mut tokens = Vec::new_in(allocator);
         for token in lexer {
@@ -771,8 +831,8 @@ impl<'input, 'allocator> TokenCursor<'input, 'allocator> {
         return Self {
             tokens,
             current_position: 0,
-            allocator
-        }
+            allocator,
+        };
     }
 
     fn current(&self) -> Option<&Token<'input>> {
@@ -801,35 +861,40 @@ impl<'input, 'allocator> TokenCursor<'input, 'allocator> {
     fn peek_prev(&self) -> Option<&Token<'input>> {
         return self.tokens.get(self.current_position.overflowing_sub(1).0);
     }
-
 }
 
 pub struct Span {
-    start_position: usize
+    start_position: usize,
 }
 
 impl Span {
     pub fn start<'input, 'allocator>(cursor: &TokenCursor<'input, 'allocator>) -> Span {
         return Self {
-            start_position: cursor.current().map_or(0, |token| { token.span.start })
-        }
+            start_position: cursor.current().map_or(0, |token| token.span.start),
+        };
     }
 
-    pub fn elapsed<'input, 'allocator>(&self, cursor: &TokenCursor<'input, 'allocator>) -> Range<usize> {
-        return self.start_position..cursor.peek_prev().map_or(0, |prev| { prev.span.end });
+    pub fn elapsed<'input, 'allocator>(
+        &self,
+        cursor: &TokenCursor<'input, 'allocator>,
+    ) -> Range<usize> {
+        return self.start_position..cursor.peek_prev().map_or(0, |prev| prev.span.end);
     }
 }
 
-
-
-
-pub fn parse_source<'input, 'allocator>(source: &'input str, allocator: &'allocator Bump) -> Program<'input, 'allocator> {
+pub fn parse_source<'input, 'allocator>(
+    source: &'input str,
+    allocator: &'allocator Bump,
+) -> Program<'input, 'allocator> {
     let lexer = Lexer::new(source);
     let mut cursor = TokenCursor::new(allocator, lexer);
     return parse_program(&mut cursor, &[TokenKind::None]);
 }
 
-fn parse_program<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>, end: &[TokenKind]) -> Program<'input, 'allocator> {
+fn parse_program<'input, 'allocator>(
+    cursor: &mut TokenCursor<'input, 'allocator>,
+    end: &[TokenKind],
+) -> Program<'input, 'allocator> {
     let span = Span::start(cursor);
 
     let mut statements = Vec::new_in(cursor.allocator);
@@ -839,7 +904,7 @@ fn parse_program<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator
         if end.contains(&cursor.current().get_kind()) {
             break;
         }
-        
+
         let mut not_separated = if statements.len() != 0 && skipped_tokens == 0 {
             Some(cursor.current().unwrap().clone())
         } else {
@@ -857,10 +922,17 @@ fn parse_program<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator
         }
     }
 
-    return cursor.allocator.alloc(ProgramAST { statements, not_separated_stmts, span: span.elapsed(cursor) })
+    return cursor.allocator.alloc(ProgramAST {
+        statements,
+        not_separated_stmts,
+        span: span.elapsed(cursor),
+    });
 }
 
-fn skip<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>, skip_kinds: &[TokenKind]) -> usize {
+fn skip<'input, 'allocator>(
+    cursor: &mut TokenCursor<'input, 'allocator>,
+    skip_kinds: &[TokenKind],
+) -> usize {
     let mut iteration_count = 0;
     loop {
         let next = cursor.current().get_kind();
@@ -873,7 +945,9 @@ fn skip<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>, skip_k
     return iteration_count;
 }
 
-fn parse_literal<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Literal<'input>> {
+fn parse_literal<'input, 'allocator>(
+    cursor: &mut TokenCursor<'input, 'allocator>,
+) -> Option<Literal<'input>> {
     return match cursor.next() {
         Some(next) => {
             if next.kind == TokenKind::Literal {
@@ -882,19 +956,23 @@ fn parse_literal<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator
                 cursor.prev();
                 None
             }
-        },
-        _ => None
-    }
+        }
+        _ => None,
+    };
 }
 
-fn parse_as_literal<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> Option<Literal<'input>> {
+fn parse_as_literal<'input, 'allocator>(
+    cursor: &mut TokenCursor<'input, 'allocator>,
+) -> Option<Literal<'input>> {
     return match cursor.next() {
         Some(next) => Some(Spanned::new(next.text, next.span.clone())),
-        _ => None
-    }
+        _ => None,
+    };
 }
 
-fn parse_literal_result<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>) -> LiteralResult<'input, 'allocator> {
+fn parse_literal_result<'input, 'allocator>(
+    cursor: &mut TokenCursor<'input, 'allocator>,
+) -> LiteralResult<'input, 'allocator> {
     return match cursor.next().cloned() {
         Some(next) => {
             if next.kind == TokenKind::Literal {
@@ -905,17 +983,20 @@ fn parse_literal_result<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'al
                 tokens.push(next.clone());
                 Err(ASTParseError::UnexpectedToken(tokens))
             }
-        },
-        _ => Err(ASTParseError::UnexpectedEOF)
-    }
+        }
+        _ => Err(ASTParseError::UnexpectedEOF),
+    };
 }
 
-fn read_until_token_found<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>, until: &[TokenKind]) -> Vec<Token<'input>, &'allocator Bump> {
+fn read_until_token_found<'input, 'allocator>(
+    cursor: &mut TokenCursor<'input, 'allocator>,
+    until: &[TokenKind],
+) -> Vec<Token<'input>, &'allocator Bump> {
     let mut dropped_tokens = Vec::new_in(cursor.allocator);
     loop {
         let drop = match cursor.next() {
             Some(drop) => drop,
-            _ => break
+            _ => break,
         };
         if until.contains(&drop.kind) {
             break;
@@ -925,27 +1006,35 @@ fn read_until_token_found<'input, 'allocator>(cursor: &mut TokenCursor<'input, '
     return dropped_tokens;
 }
 
-fn recover_until_token_found<'input, 'allocator>(cursor: &mut TokenCursor<'input, 'allocator>, until: &[TokenKind]) -> Vec<Token<'input>, &'allocator Bump> {
+fn recover_until_token_found<'input, 'allocator>(
+    cursor: &mut TokenCursor<'input, 'allocator>,
+    until: &[TokenKind],
+) -> Vec<Token<'input>, &'allocator Bump> {
     let dropped_tokens = read_until_token_found(cursor, until);
     cursor.prev();
     return dropped_tokens;
 }
 
-fn unexpected_token_error<'input, 'allocator>(allocator: &'allocator Bump, token: Option<&Token<'input>>) -> ASTParseError<'input, 'allocator> {
+fn unexpected_token_error<'input, 'allocator>(
+    allocator: &'allocator Bump,
+    token: Option<&Token<'input>>,
+) -> ASTParseError<'input, 'allocator> {
     return match token {
-        Some(next) => ASTParseError::UnexpectedToken(bump_vec![allocator, next.clone()]),
-        _ => ASTParseError::UnexpectedEOF
-    }
+        Some(next) => ASTParseError::UnexpectedToken(vec![in allocator; next.clone(); 1]),
+        _ => ASTParseError::UnexpectedEOF,
+    };
 }
 
 fn parse_with_recover<'allocator, 'input, T>(
     cursor: &mut TokenCursor<'input, 'allocator>,
     parser: fn(&mut TokenCursor<'input, 'allocator>) -> Option<T>,
-    recover_until: &[TokenKind]
+    recover_until: &[TokenKind],
 ) -> Recovered<'allocator, 'input, T> {
-
     return match parser(cursor) {
-        Some(ast) => Recovered { result: Ok(()), value: Some(ast) },
+        Some(ast) => Recovered {
+            result: Ok(()),
+            value: Some(ast),
+        },
         _ => {
             let mut error_tokens = recover_until_token_found(cursor, recover_until);
             let ast = parser(cursor);
@@ -959,11 +1048,13 @@ fn parse_with_recover<'allocator, 'input, T>(
             } else {
                 ASTParseError::UnexpectedToken(error_tokens)
             };
-            Recovered { result: Err(error), value: ast }
+            Recovered {
+                result: Err(error),
+                value: ast,
+            }
         }
-    }
+    };
 }
-
 
 trait GetTokenKind {
     fn get_kind(&self) -> TokenKind;
@@ -971,10 +1062,9 @@ trait GetTokenKind {
 
 impl<'input> GetTokenKind for Option<&Token<'input>> {
     fn get_kind(&self) -> TokenKind {
-        return self.map_or(TokenKind::None, |token| { token.kind });
+        return self.map_or(TokenKind::None, |token| token.kind);
     }
 }
-
 
 trait MergedExtend {
     fn merged_extend(&mut self, other: Self);
@@ -998,22 +1088,19 @@ impl<'input, 'allocator> MergedExtend for Vec<Token<'input>, &'allocator Bump> {
     }
 }
 
-
 pub trait StatementAttributes {
     fn contains_kind(&self, kind: StatementAttributeKind) -> bool;
     fn get_span(&self, kind: StatementAttributeKind) -> Option<Range<usize>>;
 }
 
 impl<A: Allocator> StatementAttributes for Vec<StatementAttribute, A> {
-    
     fn contains_kind(&self, kind: StatementAttributeKind) -> bool {
-        self.iter().any(|attribute| { attribute.value == kind })
+        self.iter().any(|attribute| attribute.value == kind)
     }
 
     fn get_span(&self, kind: StatementAttributeKind) -> Option<Range<usize>> {
         self.iter()
-            .find(|attribute| { attribute.value == kind })
-            .map(|attribute| { attribute.span.clone() })
+            .find(|attribute| attribute.value == kind)
+            .map(|attribute| attribute.span.clone())
     }
-
 }

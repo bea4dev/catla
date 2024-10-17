@@ -4,6 +4,8 @@ use std::{
     sync::Arc,
 };
 
+use allocator_api2::vec::Vec;
+use allocator_api2::vec;
 use ariadne::Color;
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, Expression,

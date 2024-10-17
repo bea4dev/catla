@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use allocator_api2::vec::Vec;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, Expression,

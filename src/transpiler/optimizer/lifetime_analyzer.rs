@@ -29,7 +29,7 @@ impl Lifetime {}
 
 pub struct LifetimeScope<'allocator, 'instance> {
     entities: Vec<EntityID, &'allocator Bump>,
-    lifetime_instance: &'instance mut LifetimeInstance,
+    instance: &'instance mut LifetimeInstance,
 }
 
 impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
@@ -39,7 +39,7 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
     ) -> Self {
         Self {
             entities: Vec::new_in(allocator),
-            lifetime_instance,
+            instance: lifetime_instance,
         }
     }
 
@@ -48,19 +48,19 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
     }
 
     pub fn drop(&mut self, entity_id: EntityID) {
-        let lifetime = self.lifetime_instance.next_lifetime();
-        self.lifetime_instance
+        let lifetime = self.instance.next_lifetime();
+        self.instance
             .set_entity_lifetime(entity_id, lifetime);
     }
 
     pub fn add_expected(&mut self, expected: LifetimeExpected) {
-        self.lifetime_instance.lifetime_expected.push(expected);
+        self.instance.lifetime_expected.push(expected);
     }
 
     pub fn collect(self) {
         for entity_id in self.entities {
-            let lifetime = self.lifetime_instance.next_lifetime();
-            self.lifetime_instance
+            let lifetime = self.instance.next_lifetime();
+            self.instance
                 .set_entity_lifetime(entity_id, lifetime);
         }
     }
@@ -91,7 +91,8 @@ impl<'allocator> StackLifetimeScope<'allocator> {
 }
 
 pub struct LifetimeInstance {
-    counter: usize,
+    lifetime_counter: usize,
+    tree_ref_counter: usize,
     lifetime_expected: Vec<LifetimeExpected>,
     entity_lifetime_ref_map: FxHashMap<EntityID, LifetimeTreeRef>,
     lifetime_tree_map: FxHashMap<LifetimeTreeRef, LifetimeTree>,
@@ -101,7 +102,8 @@ pub struct LifetimeInstance {
 impl LifetimeInstance {
     pub fn new() -> Self {
         Self {
-            counter: 0,
+            lifetime_counter: 0,
+            tree_ref_counter: 0,
             lifetime_expected: Vec::new(),
             entity_lifetime_ref_map: FxHashMap::default(),
             lifetime_tree_map: FxHashMap::default(),
@@ -110,39 +112,22 @@ impl LifetimeInstance {
     }
 
     pub fn next_lifetime(&mut self) -> Lifetime {
-        let drop_position = self.counter;
-        self.counter += 1;
+        let drop_position = self.lifetime_counter;
+        self.lifetime_counter += 1;
         Lifetime { drop_position }
     }
 
-    pub fn create_lifetime_tree(
-        &mut self,
-        entity_id: EntityID,
-        type_inference_result: &TypeInferenceResultContainer,
-    ) {
-        let ty = type_inference_result
-            .entity_type_map
-            .get(&entity_id)
-            .unwrap();
+    pub fn create_lifetime_tree(&mut self, entity_id: EntityID) {
+        let lifetime_tree = LifetimeTree::default();
+        let lifetime_tree_ref = self.new_lifetime_tree_ref();
+        self.entity_lifetime_ref_map.insert(entity_id, lifetime_tree_ref);
+        self.lifetime_tree_map.insert(lifetime_tree_ref, lifetime_tree);
+    }
 
-        let lifetime_tree = match ty {
-            Type::UserType {
-                user_type_info,
-                generics,
-                generics_span,
-            } => todo!(),
-            Type::Function {
-                function_info,
-                generics,
-            } => todo!(),
-            Type::Generic(arc) => todo!(),
-            Type::Array(arc) => todo!(),
-            Type::Tuple(arc) => todo!(),
-            Type::Option(arc) => todo!(),
-            Type::Result { value, error } => todo!(),
-            Type::LocalGeneric(_) => unreachable!(),
-            _ => LifetimeTree::default(),
-        };
+    pub fn new_lifetime_tree_ref(&mut self) -> LifetimeTreeRef {
+        let count_old = self.tree_ref_counter;
+        self.tree_ref_counter += 1;
+        LifetimeTreeRef(count_old)
     }
 
     pub fn get_lifetime_tree(&mut self, entity_id: EntityID) -> &mut LifetimeTree {

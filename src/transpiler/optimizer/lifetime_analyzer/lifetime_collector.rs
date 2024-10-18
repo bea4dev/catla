@@ -1,3 +1,4 @@
+use allocator_api2::vec;
 use bumpalo::Bump;
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, OrExpression,
@@ -12,7 +13,10 @@ use crate::transpiler::{
     semantics::types::{type_inference::TypeInferenceResultContainer, type_info::Type},
 };
 
-use super::{LifetimeInstance, LifetimeScope, ScoopGroup, StackLifetimeScope};
+use super::{
+    FunctionCallLifetime, LifetimeInstance, LifetimeScope, LifetimeTreeRef, ScoopGroup,
+    StackLifetimeScope,
+};
 
 fn add_entity_to_scope(
     entity_id: EntityID,
@@ -244,23 +248,28 @@ fn collect_lifetime_compare_expression<'allocator>(
     allocator: &Bump,
     context: &TranspileModuleContext,
 ) {
+    collect_lifetime_add_or_sub_expression(
+        &ast.left_expr,
+        expr_bound_entity,
+        expr_scoop_group,
+        function_scoop_group,
+        import_element_map,
+        name_resolved_map,
+        type_inference_result,
+        lifetime_scope,
+        stack_lifetime_scope,
+        lifetime_instance_map,
+        allocator,
+        context,
+    );
+
+    let mut prev_lifetime_ref = lifetime_scope.instance
+        .get_entity_lifetime_tree_ref(EntityID::from(&ast.left_expr));
+
     if ast.right_exprs.is_empty() {
-        collect_lifetime_add_or_sub_expression(
-            &ast.left_expr,
-            expr_bound_entity,
-            expr_scoop_group,
-            function_scoop_group,
-            import_element_map,
-            name_resolved_map,
-            type_inference_result,
-            lifetime_scope,
-            stack_lifetime_scope,
-            lifetime_instance_map,
-            allocator,
-            context,
-        );
-    } else {
         
+    } else {
+
     }
 }
 
@@ -278,4 +287,37 @@ fn collect_lifetime_add_or_sub_expression<'allocator>(
     allocator: &Bump,
     context: &TranspileModuleContext,
 ) {
+}
+
+fn collect_lifetime_operator<'allocator>(
+    prev_entity_ref: LifetimeTreeRef,
+    right_expr: EntityID,
+    type_inference_result: &TypeInferenceResultContainer,
+    lifetime_scope: &mut LifetimeScope,
+) -> LifetimeTreeRef {
+    let function_type = match type_inference_result
+        .operator_function_type_map
+        .get(&right_expr)
+        .unwrap()
+    {
+        Type::Function {
+            function_info,
+            generics: _,
+        } => function_info.clone(),
+        _ => unreachable!(),
+    };
+
+    let return_value_ref = lifetime_scope.instance.create_lifetime_tree();
+    let right_expr_tree_ref = lifetime_scope
+        .instance
+        .get_entity_lifetime_tree_ref(right_expr);
+
+    let function_call = FunctionCallLifetime {
+        arguments: vec![prev_entity_ref, right_expr_tree_ref],
+        return_value: return_value_ref,
+        function: function_type,
+    };
+    lifetime_scope.instance.add_function_call(function_call);
+
+    return_value_ref
 }

@@ -1,5 +1,5 @@
 use core::panic;
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::Arc};
 
 use allocator_api2::vec::Vec;
 use bumpalo::Bump;
@@ -11,7 +11,7 @@ use crate::transpiler::{
     component::EntityID,
     context::TranspileModuleContext,
     name_resolver::FoundDefineInfo,
-    semantics::types::{type_inference::TypeInferenceResultContainer, type_info::Type},
+    semantics::types::{type_inference::TypeInferenceResultContainer, type_info::FunctionType},
 };
 
 pub mod lifetime_collector;
@@ -29,7 +29,7 @@ impl Lifetime {}
 
 pub struct LifetimeScope<'allocator, 'instance> {
     entities: Vec<EntityID, &'allocator Bump>,
-    instance: &'instance mut LifetimeInstance,
+    pub(crate) instance: &'instance mut LifetimeInstance,
 }
 
 impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
@@ -49,8 +49,7 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
 
     pub fn drop(&mut self, entity_id: EntityID) {
         let lifetime = self.instance.next_lifetime();
-        self.instance
-            .set_entity_lifetime(entity_id, lifetime);
+        self.instance.set_entity_lifetime(entity_id, lifetime);
     }
 
     pub fn add_expected(&mut self, expected: LifetimeExpected) {
@@ -60,8 +59,7 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
     pub fn collect(self) {
         for entity_id in self.entities {
             let lifetime = self.instance.next_lifetime();
-            self.instance
-                .set_entity_lifetime(entity_id, lifetime);
+            self.instance.set_entity_lifetime(entity_id, lifetime);
         }
     }
 }
@@ -94,6 +92,7 @@ pub struct LifetimeInstance {
     lifetime_counter: usize,
     tree_ref_counter: usize,
     lifetime_expected: Vec<LifetimeExpected>,
+    function_calls: Vec<FunctionCallLifetime>,
     entity_lifetime_ref_map: FxHashMap<EntityID, LifetimeTreeRef>,
     lifetime_tree_map: FxHashMap<LifetimeTreeRef, LifetimeTree>,
     scoop_groups: Vec<ScoopGroup>,
@@ -105,6 +104,7 @@ impl LifetimeInstance {
             lifetime_counter: 0,
             tree_ref_counter: 0,
             lifetime_expected: Vec::new(),
+            function_calls: Vec::new(),
             entity_lifetime_ref_map: FxHashMap::default(),
             lifetime_tree_map: FxHashMap::default(),
             scoop_groups: Vec::new(),
@@ -117,11 +117,20 @@ impl LifetimeInstance {
         Lifetime { drop_position }
     }
 
-    pub fn create_lifetime_tree(&mut self, entity_id: EntityID) {
+    pub fn create_entity_lifetime_tree(&mut self, entity_id: EntityID) {
         let lifetime_tree = LifetimeTree::default();
         let lifetime_tree_ref = self.new_lifetime_tree_ref();
-        self.entity_lifetime_ref_map.insert(entity_id, lifetime_tree_ref);
+        self.entity_lifetime_ref_map
+            .insert(entity_id, lifetime_tree_ref);
+        self.lifetime_tree_map
+            .insert(lifetime_tree_ref, lifetime_tree);
+    }
+
+    pub fn create_lifetime_tree(&mut self) -> LifetimeTreeRef {
+        let lifetime_tree = LifetimeTree::default();
+        let lifetime_tree_ref = self.new_lifetime_tree_ref();
         self.lifetime_tree_map.insert(lifetime_tree_ref, lifetime_tree);
+        lifetime_tree_ref
     }
 
     pub fn new_lifetime_tree_ref(&mut self) -> LifetimeTreeRef {
@@ -130,8 +139,12 @@ impl LifetimeInstance {
         LifetimeTreeRef(count_old)
     }
 
+    pub fn get_entity_lifetime_tree_ref(&self, entity_id: EntityID) -> LifetimeTreeRef {
+        *self.entity_lifetime_ref_map.get(&entity_id).unwrap()
+    }
+
     pub fn get_lifetime_tree(&mut self, entity_id: EntityID) -> &mut LifetimeTree {
-        let lifetime_ref = *self.entity_lifetime_ref_map.get(&entity_id).unwrap();
+        let lifetime_ref = self.get_entity_lifetime_tree_ref(entity_id);
         self.lifetime_tree_map.get_mut(&lifetime_ref).unwrap()
     }
 
@@ -154,6 +167,10 @@ impl LifetimeInstance {
 
         lifetime_tree.same_bound_entity.push(same_bound_entity_ref);
     }
+
+    pub fn add_function_call(&mut self, function_call: FunctionCallLifetime) {
+        self.function_calls.push(function_call);
+    }
 }
 
 pub struct LifetimeExpected {
@@ -175,6 +192,12 @@ pub struct LifetimeTree {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LifetimeTreeRef(usize);
+
+pub struct FunctionCallLifetime {
+    pub arguments: Vec<LifetimeTreeRef>,
+    pub return_value: LifetimeTreeRef,
+    pub function: Arc<FunctionType>,
+}
 
 pub struct ScoopGroup {
     group_entities: RefCell<Vec<EntityID>>,

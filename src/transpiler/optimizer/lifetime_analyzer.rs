@@ -234,7 +234,7 @@ pub fn collect_lifetime(
 
     collect_lifetime_program(
         ast,
-        EntityID::from(ast),
+        None,
         None,
         None,
         import_element_map,

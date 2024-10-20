@@ -57,9 +57,9 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
     }
 
     pub fn collect(self) {
-        for lifetime_tree_ref in self.lifetime_trees {
+        for lifetime_tree_ref in self.lifetime_trees.iter().rev() {
             let lifetime = self.instance.next_lifetime();
-            self.instance.set_lifetime(lifetime_tree_ref, lifetime);
+            self.instance.set_lifetime(*lifetime_tree_ref, lifetime);
         }
     }
 }
@@ -117,13 +117,16 @@ impl LifetimeInstance {
         Lifetime { drop_position }
     }
 
-    pub fn create_entity_lifetime_tree(&mut self, entity_id: EntityID) {
+    pub fn create_entity_lifetime_tree(&mut self, entity_id: EntityID) -> LifetimeTreeRef {
         let lifetime_tree = LifetimeTree::default();
         let lifetime_tree_ref = self.new_lifetime_tree_ref();
+
         self.entity_lifetime_ref_map
             .insert(entity_id, lifetime_tree_ref);
         self.lifetime_tree_map
             .insert(lifetime_tree_ref, lifetime_tree);
+
+        lifetime_tree_ref
     }
 
     pub fn create_lifetime_tree(&mut self) -> LifetimeTreeRef {

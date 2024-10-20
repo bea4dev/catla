@@ -39,7 +39,7 @@ fn should_strict_drop(ty: &Type) -> bool {
 
 pub fn collect_lifetime_program<'allocator>(
     ast: Program<'_, 'allocator>,
-    expr_bound_entity: Option<EntityID>,
+    expr_bound_tree_ref: Option<LifetimeTreeRef>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     type_inference_result: &TypeInferenceResultContainer,
@@ -67,15 +67,15 @@ pub fn collect_lifetime_program<'allocator>(
             StatementAST::Implements(implements) => todo!(),
             StatementAST::DropStatement(drop_statement) => todo!(),
             StatementAST::Expression(expression) => {
-                let expr_bound_entity = if index + 1 == ast.statements.len() {
-                    expr_bound_entity
+                let expr_bound_tree_ref = if index + 1 == ast.statements.len() {
+                    expr_bound_tree_ref
                 } else {
                     None
                 };
 
                 collect_lifetime_expression(
                     *expression,
-                    expr_bound_entity,
+                    expr_bound_tree_ref,
                     import_element_map,
                     name_resolved_map,
                     type_inference_result,
@@ -92,7 +92,7 @@ pub fn collect_lifetime_program<'allocator>(
 
 fn collect_lifetime_expression<'allocator>(
     ast: Expression<'_, 'allocator>,
-    expr_bound_entity: Option<EntityID>,
+    expr_bound_tree_ref: Option<LifetimeTreeRef>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     type_inference_result: &TypeInferenceResultContainer,
@@ -108,7 +108,7 @@ fn collect_lifetime_expression<'allocator>(
             if let Some(expression) = return_expression.expression {
                 collect_lifetime_expression(
                     expression,
-                    expr_bound_entity,
+                    expr_bound_tree_ref,
                     import_element_map,
                     name_resolved_map,
                     type_inference_result,
@@ -126,7 +126,7 @@ fn collect_lifetime_expression<'allocator>(
 
 fn collect_lifetime_or_expression<'allocator>(
     ast: &'allocator OrExpression<'_, 'allocator>,
-    expr_bound_entity: Option<EntityID>,
+    expr_bound_tree_ref: Option<LifetimeTreeRef>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     type_inference_result: &TypeInferenceResultContainer,
@@ -138,7 +138,7 @@ fn collect_lifetime_or_expression<'allocator>(
 ) {
     collect_lifetime_and_expression(
         &ast.left_expr,
-        expr_bound_entity,
+        expr_bound_tree_ref,
         import_element_map,
         name_resolved_map,
         type_inference_result,
@@ -153,7 +153,7 @@ fn collect_lifetime_or_expression<'allocator>(
         if let Ok(right_expr) = right_expr {
             collect_lifetime_and_expression(
                 right_expr,
-                expr_bound_entity,
+                expr_bound_tree_ref,
                 import_element_map,
                 name_resolved_map,
                 type_inference_result,
@@ -169,7 +169,7 @@ fn collect_lifetime_or_expression<'allocator>(
 
 fn collect_lifetime_and_expression<'allocator>(
     ast: &'allocator AndExpression<'_, 'allocator>,
-    expr_bound_entity: Option<EntityID>,
+    expr_bound_tree_ref: Option<LifetimeTreeRef>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     type_inference_result: &TypeInferenceResultContainer,
@@ -181,7 +181,7 @@ fn collect_lifetime_and_expression<'allocator>(
 ) {
     collect_lifetime_compare_expression(
         &ast.left_expr,
-        expr_bound_entity,
+        expr_bound_tree_ref,
         import_element_map,
         name_resolved_map,
         type_inference_result,
@@ -196,7 +196,7 @@ fn collect_lifetime_and_expression<'allocator>(
         if let Ok(right_expr) = right_expr {
             collect_lifetime_compare_expression(
                 right_expr,
-                expr_bound_entity,
+                expr_bound_tree_ref,
                 import_element_map,
                 name_resolved_map,
                 type_inference_result,
@@ -212,7 +212,7 @@ fn collect_lifetime_and_expression<'allocator>(
 
 fn collect_lifetime_compare_expression<'allocator>(
     ast: &'allocator CompareExpression<'_, 'allocator>,
-    expr_bound_entity: Option<EntityID>,
+    expr_bound_tree_ref: Option<LifetimeTreeRef>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     type_inference_result: &TypeInferenceResultContainer,
@@ -225,7 +225,7 @@ fn collect_lifetime_compare_expression<'allocator>(
     if ast.right_exprs.is_empty() {
         collect_lifetime_add_or_sub_expression(
             &ast.left_expr,
-            expr_bound_entity,
+            expr_bound_tree_ref,
             import_element_map,
             name_resolved_map,
             type_inference_result,
@@ -236,48 +236,16 @@ fn collect_lifetime_compare_expression<'allocator>(
             context,
         );
     } else {
-        let lifetime_instance = &mut lifetime_scope.instance;
-        let mut lifetime_scope = LifetimeScope::new(lifetime_instance, allocator);
+        {
+            let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
 
-        lifetime_scope.instance.create_entity_lifetime_tree(EntityID::from(&ast.left_expr));
-
-        collect_lifetime_add_or_sub_expression(
-            &ast.left_expr,
-            Some(EntityID::from(&ast.left_expr)),
-            import_element_map,
-            name_resolved_map,
-            type_inference_result,
-            &mut lifetime_scope,
-            stack_lifetime_scope,
-            lifetime_instance_map,
-            allocator,
-            context,
-        );
-
-        lifetime_scope.collect();
-
-        let mut prev_lifetime_ref = lifetime_instance.get_entity_lifetime_tree_ref(EntityID::from(&ast.left_expr));
-        let mut prev_type = type_inference_result.get_entity_type(EntityID::from(&ast.left_expr)).clone();
-
-        for (_, right_expr) in ast.right_exprs.iter() {
-            let right_expr = match right_expr {
-                Ok(expr) => expr,
-                Err(_) => continue
-            };
-
-            let mut lifetime_scope = LifetimeScope::new(lifetime_instance, allocator);
-
-            add_lifetime_tree_to_scope(prev_lifetime_ref, &prev_type, &mut lifetime_scope, stack_lifetime_scope);
-
-            lifetime_scope.instance.create_entity_lifetime_tree(EntityID::from(right_expr));
-            let right_lifetime_tree_ref = lifetime_scope.instance.get_entity_lifetime_tree_ref(EntityID::from(right_expr));
-            let right_type = type_inference_result.get_entity_type(EntityID::from(right_expr));
-
-            add_lifetime_tree_to_scope(right_lifetime_tree_ref, right_type, &mut lifetime_scope, stack_lifetime_scope);
+            let lifetime_tree_ref = lifetime_scope
+                .instance
+                .create_entity_lifetime_tree(EntityID::from(&ast.left_expr));
 
             collect_lifetime_add_or_sub_expression(
-                right_expr,
-                Some(EntityID::from(right_expr)),
+                &ast.left_expr,
+                Some(lifetime_tree_ref),
                 import_element_map,
                 name_resolved_map,
                 type_inference_result,
@@ -288,18 +256,95 @@ fn collect_lifetime_compare_expression<'allocator>(
                 context,
             );
 
-            let (return_value_ref, return_type) = collect_lifetime_operator(prev_lifetime_ref, EntityID::from(right_expr), type_inference_result, &mut lifetime_scope);
+            lifetime_scope.collect();
+        }
+
+        let mut prev_lifetime_ref = lifetime_scope
+            .instance
+            .get_entity_lifetime_tree_ref(EntityID::from(&ast.left_expr));
+        let mut prev_type = type_inference_result
+            .get_entity_type(EntityID::from(&ast.left_expr))
+            .clone();
+
+        for (_, right_expr) in ast.right_exprs.iter() {
+            let right_expr = match right_expr {
+                Ok(expr) => expr,
+                Err(_) => continue,
+            };
+
+            let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+            add_lifetime_tree_to_scope(
+                prev_lifetime_ref,
+                &prev_type,
+                &mut lifetime_scope,
+                stack_lifetime_scope,
+            );
+
+            let right_lifetime_tree_ref = lifetime_scope
+                .instance
+                .create_entity_lifetime_tree(EntityID::from(right_expr));
+            let right_type = type_inference_result.get_entity_type(EntityID::from(right_expr));
+
+            add_lifetime_tree_to_scope(
+                right_lifetime_tree_ref,
+                right_type,
+                &mut lifetime_scope,
+                stack_lifetime_scope,
+            );
+
+            {
+                let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                collect_lifetime_add_or_sub_expression(
+                    right_expr,
+                    Some(right_lifetime_tree_ref),
+                    import_element_map,
+                    name_resolved_map,
+                    type_inference_result,
+                    &mut lifetime_scope,
+                    stack_lifetime_scope,
+                    lifetime_instance_map,
+                    allocator,
+                    context,
+                );
+
+                lifetime_scope.collect();
+            }
+
+            let (return_value_ref, return_type) = collect_lifetime_operator(
+                prev_lifetime_ref,
+                EntityID::from(right_expr),
+                type_inference_result,
+                &mut lifetime_scope,
+            );
             prev_lifetime_ref = return_value_ref;
             prev_type = return_type;
 
             lifetime_scope.collect();
+        }
+
+        if let Some(expr_bound_tree_ref) = expr_bound_tree_ref {
+            let bound_lifetime_tree = lifetime_scope
+                .instance
+                .get_lifetime_tree(expr_bound_tree_ref);
+            bound_lifetime_tree
+                .same_bound_entity
+                .push(prev_lifetime_ref);
+        } else {
+            add_lifetime_tree_to_scope(
+                prev_lifetime_ref,
+                &prev_type,
+                lifetime_scope,
+                stack_lifetime_scope,
+            );
         }
     }
 }
 
 fn collect_lifetime_add_or_sub_expression<'allocator>(
     ast: &'allocator AddOrSubExpression<'_, 'allocator>,
-    expr_bound_entity: Option<EntityID>,
+    expr_bound_tree_ref: Option<LifetimeTreeRef>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     type_inference_result: &TypeInferenceResultContainer,
@@ -341,5 +386,8 @@ fn collect_lifetime_operator<'allocator>(
     };
     lifetime_scope.instance.add_function_call(function_call);
 
-    (return_value_ref, type_inference_result.get_entity_type(right_expr).clone())
+    (
+        return_value_ref,
+        type_inference_result.get_entity_type(right_expr).clone(),
+    )
 }

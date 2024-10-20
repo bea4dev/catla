@@ -1874,6 +1874,12 @@ pub struct TypeInferenceResultContainer {
     pub operator_function_type_map: FxHashMap<EntityID, Type>,
 }
 
+impl TypeInferenceResultContainer {
+    pub fn get_entity_type(&self, entity_id: EntityID) -> &Type {
+        self.entity_type_map.get(&entity_id).unwrap()
+    }
+}
+
 pub(crate) fn infer_type_program<'input, 'allocator>(
     ast: Program<'input, 'allocator>,
     user_type_map: &FxHashMap<String, Type>,

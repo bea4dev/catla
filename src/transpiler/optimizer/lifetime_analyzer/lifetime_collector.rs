@@ -18,22 +18,18 @@ use super::{
     StackLifetimeScope,
 };
 
-fn add_entity_to_scope(
-    entity_id: EntityID,
-    type_inference_result: &TypeInferenceResultContainer,
+fn add_lifetime_tree_to_scope(
+    lifetime_tree_ref: LifetimeTreeRef,
+    ty: &Type,
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
 ) {
-    let ty = type_inference_result
-        .entity_type_map
-        .get(&entity_id)
-        .unwrap();
     let strict_drop = should_strict_drop(&ty);
 
     if strict_drop {
-        lifetime_scope.add(entity_id);
+        lifetime_scope.add(lifetime_tree_ref);
     } else {
-        stack_lifetime_scope.add(entity_id);
+        stack_lifetime_scope.add(lifetime_tree_ref);
     }
 }
 
@@ -240,14 +236,10 @@ fn collect_lifetime_compare_expression<'allocator>(
             context,
         );
     } else {
-        let lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+        let lifetime_instance = &mut lifetime_scope.instance;
+        let mut lifetime_scope = LifetimeScope::new(lifetime_instance, allocator);
 
-        add_entity_to_scope(
-            EntityID::from(&ast.left_expr),
-            type_inference_result,
-            &mut lifetime_scope,
-            stack_lifetime_scope,
-        );
+        lifetime_scope.instance.create_entity_lifetime_tree(EntityID::from(&ast.left_expr));
 
         collect_lifetime_add_or_sub_expression(
             &ast.left_expr,
@@ -262,23 +254,45 @@ fn collect_lifetime_compare_expression<'allocator>(
             context,
         );
 
-        let mut prev_lifetime_ref = lifetime_scope
-            .instance
-            .get_entity_lifetime_tree_ref(EntityID::from(&ast.left_expr));
+        lifetime_scope.collect();
 
-        for right_expr in ast.right_exprs.iter() {
+        let mut prev_lifetime_ref = lifetime_instance.get_entity_lifetime_tree_ref(EntityID::from(&ast.left_expr));
+        let mut prev_type = type_inference_result.get_entity_type(EntityID::from(&ast.left_expr)).clone();
+
+        for (_, right_expr) in ast.right_exprs.iter() {
+            let right_expr = match right_expr {
+                Ok(expr) => expr,
+                Err(_) => continue
+            };
+
+            let mut lifetime_scope = LifetimeScope::new(lifetime_instance, allocator);
+
+            add_lifetime_tree_to_scope(prev_lifetime_ref, &prev_type, &mut lifetime_scope, stack_lifetime_scope);
+
+            lifetime_scope.instance.create_entity_lifetime_tree(EntityID::from(right_expr));
+            let right_lifetime_tree_ref = lifetime_scope.instance.get_entity_lifetime_tree_ref(EntityID::from(right_expr));
+            let right_type = type_inference_result.get_entity_type(EntityID::from(right_expr));
+
+            add_lifetime_tree_to_scope(right_lifetime_tree_ref, right_type, &mut lifetime_scope, stack_lifetime_scope);
+
             collect_lifetime_add_or_sub_expression(
-                &ast.left_expr,
-                expr_bound_entity,
+                right_expr,
+                Some(EntityID::from(right_expr)),
                 import_element_map,
                 name_resolved_map,
                 type_inference_result,
-                lifetime_scope,
+                &mut lifetime_scope,
                 stack_lifetime_scope,
                 lifetime_instance_map,
                 allocator,
                 context,
             );
+
+            let (return_value_ref, return_type) = collect_lifetime_operator(prev_lifetime_ref, EntityID::from(right_expr), type_inference_result, &mut lifetime_scope);
+            prev_lifetime_ref = return_value_ref;
+            prev_type = return_type;
+
+            lifetime_scope.collect();
         }
     }
 }
@@ -302,7 +316,7 @@ fn collect_lifetime_operator<'allocator>(
     right_expr: EntityID,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
-) -> LifetimeTreeRef {
+) -> (LifetimeTreeRef, Type) {
     let function_type = match type_inference_result
         .operator_function_type_map
         .get(&right_expr)
@@ -327,5 +341,5 @@ fn collect_lifetime_operator<'allocator>(
     };
     lifetime_scope.instance.add_function_call(function_call);
 
-    return_value_ref
+    (return_value_ref, type_inference_result.get_entity_type(right_expr).clone())
 }

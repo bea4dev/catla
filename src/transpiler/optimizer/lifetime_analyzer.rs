@@ -28,7 +28,7 @@ pub struct Lifetime {
 impl Lifetime {}
 
 pub struct LifetimeScope<'allocator, 'instance> {
-    entities: Vec<EntityID, &'allocator Bump>,
+    lifetime_trees: Vec<LifetimeTreeRef, &'allocator Bump>,
     pub(crate) instance: &'instance mut LifetimeInstance,
 }
 
@@ -38,18 +38,18 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
         allocator: &'allocator Bump,
     ) -> Self {
         Self {
-            entities: Vec::new_in(allocator),
+            lifetime_trees: Vec::new_in(allocator),
             instance: lifetime_instance,
         }
     }
 
-    pub fn add(&mut self, entity_id: EntityID) {
-        self.entities.push(entity_id);
+    pub fn add(&mut self, lifetime_tree_ref: LifetimeTreeRef) {
+        self.lifetime_trees.push(lifetime_tree_ref);
     }
 
-    pub fn drop(&mut self, entity_id: EntityID) {
+    pub fn drop(&mut self, lifetime_tree_ref: LifetimeTreeRef) {
         let lifetime = self.instance.next_lifetime();
-        self.instance.set_entity_lifetime(entity_id, lifetime);
+        self.instance.set_lifetime(lifetime_tree_ref, lifetime);
     }
 
     pub fn add_expected(&mut self, expected: LifetimeExpected) {
@@ -57,33 +57,33 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
     }
 
     pub fn collect(self) {
-        for entity_id in self.entities {
+        for lifetime_tree_ref in self.lifetime_trees {
             let lifetime = self.instance.next_lifetime();
-            self.instance.set_entity_lifetime(entity_id, lifetime);
+            self.instance.set_lifetime(lifetime_tree_ref, lifetime);
         }
     }
 }
 
 pub struct StackLifetimeScope<'allocator> {
-    entities: Vec<EntityID, &'allocator Bump>,
+    lifetime_trees: Vec<LifetimeTreeRef, &'allocator Bump>,
 }
 
 impl<'allocator> StackLifetimeScope<'allocator> {
     pub fn new(allocator: &'allocator Bump) -> Self {
         Self {
-            entities: Vec::new_in(allocator),
+            lifetime_trees: Vec::new_in(allocator),
         }
     }
 
-    pub fn add(&mut self, entity_id: EntityID) {
-        self.entities.push(entity_id);
+    pub fn add(&mut self, lifetime_tree_ref: LifetimeTreeRef) {
+        self.lifetime_trees.push(lifetime_tree_ref);
     }
 
     pub fn collect(self, lifetime_instance: &mut LifetimeInstance) {
         let lifetime = lifetime_instance.next_lifetime();
 
-        for entity_id in self.entities {
-            lifetime_instance.set_entity_lifetime(entity_id, lifetime);
+        for lifetime_tree_ref in self.lifetime_trees {
+            lifetime_instance.set_lifetime(lifetime_tree_ref, lifetime);
         }
     }
 }
@@ -143,13 +143,17 @@ impl LifetimeInstance {
         *self.entity_lifetime_ref_map.get(&entity_id).unwrap()
     }
 
-    pub fn get_lifetime_tree(&mut self, entity_id: EntityID) -> &mut LifetimeTree {
+    pub fn get_entity_lifetime_tree(&mut self, entity_id: EntityID) -> &mut LifetimeTree {
         let lifetime_ref = self.get_entity_lifetime_tree_ref(entity_id);
         self.lifetime_tree_map.get_mut(&lifetime_ref).unwrap()
     }
 
-    pub fn set_entity_lifetime(&mut self, entity_id: EntityID, lifetime: Lifetime) {
-        let lifetime_tree = self.get_lifetime_tree(entity_id);
+    pub fn get_lifetime_tree(&mut self, lifetime_tree_ref: LifetimeTreeRef) -> &mut LifetimeTree {
+        self.lifetime_tree_map.get_mut(&lifetime_tree_ref).unwrap()
+    }
+
+    pub fn set_lifetime(&mut self, lifetime_tree_ref: LifetimeTreeRef, lifetime: Lifetime) {
+        let lifetime_tree = self.get_lifetime_tree(lifetime_tree_ref);
 
         if lifetime_tree.root_lifetime.is_some() {
             panic!("Lifetime has already set!");
@@ -163,7 +167,7 @@ impl LifetimeInstance {
             .entity_lifetime_ref_map
             .get(&same_bound_entity)
             .unwrap();
-        let lifetime_tree = self.get_lifetime_tree(entity_id);
+        let lifetime_tree = self.get_entity_lifetime_tree(entity_id);
 
         lifetime_tree.same_bound_entity.push(same_bound_entity_ref);
     }
@@ -234,8 +238,6 @@ pub fn collect_lifetime(
 
     collect_lifetime_program(
         ast,
-        None,
-        None,
         None,
         import_element_map,
         name_resolved_map,

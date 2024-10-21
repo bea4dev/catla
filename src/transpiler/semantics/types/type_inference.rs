@@ -3,8 +3,8 @@ use std::{
     sync::Arc,
 };
 
-use allocator_api2::vec::Vec;
 use allocator_api2::vec;
+use allocator_api2::vec::Vec;
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::{collections::CollectIn, Bump};
 use catla_parser::parser::{
@@ -81,6 +81,7 @@ pub(crate) struct TypeEnvironment<'input, 'allocator> {
     current_generics_id: usize,
     var_span_and_entity_ids: Vec<(Range<usize>, EntityID), &'allocator Bump>,
     operator_function_types: Vec<(EntityID, Type), &'allocator Bump>,
+    operator_return_types: Vec<(EntityID, Type), &'allocator Bump>,
 }
 
 impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
@@ -101,6 +102,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
             current_generics_id: 0,
             var_span_and_entity_ids: Vec::new_in(allocator),
             operator_function_types: Vec::new_in(allocator),
+            operator_return_types: Vec::new_in(allocator),
         }
     }
 
@@ -1447,6 +1449,12 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
                 .insert(*entity_id, function_type.clone());
         }
 
+        for (entity_id, return_type) in self.operator_return_types.iter() {
+            type_inference_results
+                .operator_return_type_map
+                .insert(*entity_id, return_type.clone());
+        }
+
         self.print_var_type(context);
     }
 
@@ -1872,6 +1880,7 @@ pub struct TypeInferenceResultContainer {
     pub implicit_convert_map: FxHashMap<EntityID, ImplicitConvertKind>,
     pub entity_type_map: FxHashMap<EntityID, Type>,
     pub operator_function_type_map: FxHashMap<EntityID, Type>,
+    pub operator_return_type_map: FxHashMap<EntityID, Type>,
 }
 
 impl TypeInferenceResultContainer {
@@ -3419,9 +3428,7 @@ fn infer_type_operator<'input, 'allocator>(
         }
     };
 
-
-    let return_type = if let Some(right_entity_id) = right_entity_id {
-
+    let return_type = if let Some(right_entity_id) = &right_entity_id {
         type_environment
             .operator_function_types
             .push((right_entity_id.value, operator_function.value.clone()));
@@ -3468,7 +3475,6 @@ fn infer_type_operator<'input, 'allocator>(
             }
         }
     } else {
-
         type_environment
             .operator_function_types
             .push((left_entity_id.value, operator_function.value.clone()));
@@ -3492,6 +3498,16 @@ fn infer_type_operator<'input, 'allocator>(
             }
         }
     };
+
+    if let Some(right_entity_id) = right_entity_id {
+        type_environment
+            .operator_return_types
+            .push((right_entity_id.value, return_type.value.clone()));
+    } else {
+        type_environment
+            .operator_return_types
+            .push((left_entity_id.value, return_type.value.clone()));
+    }
 
     type_environment.set_entity_type(parent_temp_entity_id, return_type);
 }

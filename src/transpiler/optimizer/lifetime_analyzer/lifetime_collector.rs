@@ -1,8 +1,8 @@
 use allocator_api2::vec;
 use bumpalo::Bump;
 use catla_parser::parser::{
-    AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, OrExpression,
-    Program, Spanned, StatementAST, AST,
+    AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
+    MulOrDivExpression, OrExpression, Primary, Program, Spanned, StatementAST, AST,
 };
 use fxhash::FxHashMap;
 
@@ -210,8 +210,164 @@ fn collect_lifetime_and_expression<'allocator>(
     }
 }
 
-fn collect_lifetime_compare_expression<'allocator>(
-    ast: &'allocator CompareExpression<'_, 'allocator>,
+macro_rules! collect_lifetime_for_op2 {
+    ($function_name:ident, $ast_type:ident, $next_layer_function_name:ident) => {
+        fn $function_name<'allocator>(
+            ast: &'allocator $ast_type<'_, 'allocator>,
+            expr_bound_tree_ref: Option<LifetimeTreeRef>,
+            import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+            name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+            type_inference_result: &TypeInferenceResultContainer,
+            lifetime_scope: &mut LifetimeScope,
+            stack_lifetime_scope: &mut StackLifetimeScope,
+            lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+            allocator: &Bump,
+            context: &TranspileModuleContext,
+        ) {
+            if ast.right_exprs.is_empty() {
+                $next_layer_function_name(
+                    &ast.left_expr,
+                    expr_bound_tree_ref,
+                    import_element_map,
+                    name_resolved_map,
+                    type_inference_result,
+                    lifetime_scope,
+                    stack_lifetime_scope,
+                    lifetime_instance_map,
+                    allocator,
+                    context,
+                );
+            } else {
+                {
+                    let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                    let lifetime_tree_ref = lifetime_scope
+                        .instance
+                        .create_entity_lifetime_tree(EntityID::from(&ast.left_expr));
+
+                    $next_layer_function_name(
+                        &ast.left_expr,
+                        Some(lifetime_tree_ref),
+                        import_element_map,
+                        name_resolved_map,
+                        type_inference_result,
+                        &mut lifetime_scope,
+                        stack_lifetime_scope,
+                        lifetime_instance_map,
+                        allocator,
+                        context,
+                    );
+
+                    lifetime_scope.collect();
+                }
+
+                let mut prev_lifetime_ref = lifetime_scope
+                    .instance
+                    .get_entity_lifetime_tree_ref(EntityID::from(&ast.left_expr));
+                let mut prev_type = type_inference_result
+                    .get_entity_type(EntityID::from(&ast.left_expr))
+                    .clone();
+
+                for (_, right_expr) in ast.right_exprs.iter() {
+                    let right_expr = match right_expr {
+                        Ok(expr) => expr,
+                        Err(_) => continue,
+                    };
+
+                    let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                    add_lifetime_tree_to_scope(
+                        prev_lifetime_ref,
+                        &prev_type,
+                        &mut lifetime_scope,
+                        stack_lifetime_scope,
+                    );
+
+                    let right_lifetime_tree_ref = lifetime_scope
+                        .instance
+                        .create_entity_lifetime_tree(EntityID::from(right_expr));
+                    let right_type =
+                        type_inference_result.get_entity_type(EntityID::from(right_expr));
+
+                    add_lifetime_tree_to_scope(
+                        right_lifetime_tree_ref,
+                        right_type,
+                        &mut lifetime_scope,
+                        stack_lifetime_scope,
+                    );
+
+                    {
+                        let mut lifetime_scope =
+                            LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                        $next_layer_function_name(
+                            right_expr,
+                            Some(right_lifetime_tree_ref),
+                            import_element_map,
+                            name_resolved_map,
+                            type_inference_result,
+                            &mut lifetime_scope,
+                            stack_lifetime_scope,
+                            lifetime_instance_map,
+                            allocator,
+                            context,
+                        );
+
+                        lifetime_scope.collect();
+                    }
+
+                    let (return_value_ref, return_type) = collect_lifetime_operator(
+                        prev_lifetime_ref,
+                        EntityID::from(right_expr),
+                        type_inference_result,
+                        &mut lifetime_scope,
+                    );
+                    prev_lifetime_ref = return_value_ref;
+                    prev_type = return_type;
+
+                    lifetime_scope.collect();
+                }
+
+                if let Some(expr_bound_tree_ref) = expr_bound_tree_ref {
+                    let bound_lifetime_tree = lifetime_scope
+                        .instance
+                        .get_lifetime_tree(expr_bound_tree_ref);
+                    bound_lifetime_tree
+                        .same_bound_entity
+                        .push(prev_lifetime_ref);
+                } else {
+                    add_lifetime_tree_to_scope(
+                        prev_lifetime_ref,
+                        &prev_type,
+                        lifetime_scope,
+                        stack_lifetime_scope,
+                    );
+                }
+            }
+        }
+    };
+}
+
+collect_lifetime_for_op2!(
+    collect_lifetime_compare_expression,
+    CompareExpression,
+    collect_lifetime_add_or_sub_expression
+);
+
+collect_lifetime_for_op2!(
+    collect_lifetime_add_or_sub_expression,
+    AddOrSubExpression,
+    collect_lifetime_mul_or_div_expression
+);
+
+collect_lifetime_for_op2!(
+    collect_lifetime_mul_or_div_expression,
+    MulOrDivExpression,
+    collect_lifetime_factor
+);
+
+fn collect_lifetime_factor<'allocator>(
+    ast: &'allocator Factor<'_, 'allocator>,
     expr_bound_tree_ref: Option<LifetimeTreeRef>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -222,30 +378,32 @@ fn collect_lifetime_compare_expression<'allocator>(
     allocator: &Bump,
     context: &TranspileModuleContext,
 ) {
-    if ast.right_exprs.is_empty() {
-        collect_lifetime_add_or_sub_expression(
-            &ast.left_expr,
-            expr_bound_tree_ref,
-            import_element_map,
-            name_resolved_map,
-            type_inference_result,
-            lifetime_scope,
-            stack_lifetime_scope,
-            lifetime_instance_map,
-            allocator,
-            context,
-        );
+    if ast.negative_keyword_span.is_none() {
+        if let Ok(primary) = &ast.primary {
+            collect_lifetime_primary(
+                primary,
+                expr_bound_tree_ref,
+                import_element_map,
+                name_resolved_map,
+                type_inference_result,
+                lifetime_scope,
+                stack_lifetime_scope,
+                lifetime_instance_map,
+                allocator,
+                context,
+            );
+        }
     } else {
-        {
-            let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+        let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
 
-            let lifetime_tree_ref = lifetime_scope
+        if let Ok(primary) = &ast.primary {
+            let primary_lifetime_tree_ref = lifetime_scope
                 .instance
-                .create_entity_lifetime_tree(EntityID::from(&ast.left_expr));
+                .create_entity_lifetime_tree(EntityID::from(primary));
 
-            collect_lifetime_add_or_sub_expression(
-                &ast.left_expr,
-                Some(lifetime_tree_ref),
+            collect_lifetime_primary(
+                primary,
+                Some(primary_lifetime_tree_ref),
                 import_element_map,
                 name_resolved_map,
                 type_inference_result,
@@ -256,94 +414,57 @@ fn collect_lifetime_compare_expression<'allocator>(
                 context,
             );
 
-            lifetime_scope.collect();
-        }
+            let primary_type = type_inference_result.get_entity_type(EntityID::from(primary));
 
-        let mut prev_lifetime_ref = lifetime_scope
-            .instance
-            .get_entity_lifetime_tree_ref(EntityID::from(&ast.left_expr));
-        let mut prev_type = type_inference_result
-            .get_entity_type(EntityID::from(&ast.left_expr))
-            .clone();
+            add_lifetime_tree_to_scope(
+                primary_lifetime_tree_ref,
+                &primary_type,
+                &mut lifetime_scope,
+                stack_lifetime_scope,
+            );
 
-        for (_, right_expr) in ast.right_exprs.iter() {
-            let right_expr = match right_expr {
-                Ok(expr) => expr,
-                Err(_) => continue,
+            let function_type = match type_inference_result
+                .operator_function_type_map
+                .get(&EntityID::from(primary))
+                .unwrap()
+            {
+                Type::Function {
+                    function_info,
+                    generics: _,
+                } => function_info.clone(),
+                _ => unreachable!(),
             };
 
-            let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+            let return_value_ref = lifetime_scope.instance.create_lifetime_tree();
 
-            add_lifetime_tree_to_scope(
-                prev_lifetime_ref,
-                &prev_type,
-                &mut lifetime_scope,
-                stack_lifetime_scope,
-            );
+            let function_call = FunctionCallLifetime {
+                arguments: vec![primary_lifetime_tree_ref],
+                return_value: return_value_ref,
+                function: function_type,
+            };
+            lifetime_scope.instance.add_function_call(function_call);
 
-            let right_lifetime_tree_ref = lifetime_scope
-                .instance
-                .create_entity_lifetime_tree(EntityID::from(right_expr));
-            let right_type = type_inference_result.get_entity_type(EntityID::from(right_expr));
+            if let Some(expr_bound_tree_ref) = expr_bound_tree_ref {
+                let bound_lifetime_tree = lifetime_scope
+                    .instance
+                    .get_lifetime_tree(expr_bound_tree_ref);
+                bound_lifetime_tree.same_bound_entity.push(return_value_ref);
+            } else {
+                let return_type = type_inference_result.operator_return_type_map.get(&EntityID::from(primary)).unwrap();
 
-            add_lifetime_tree_to_scope(
-                right_lifetime_tree_ref,
-                right_type,
-                &mut lifetime_scope,
-                stack_lifetime_scope,
-            );
-
-            {
-                let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
-
-                collect_lifetime_add_or_sub_expression(
-                    right_expr,
-                    Some(right_lifetime_tree_ref),
-                    import_element_map,
-                    name_resolved_map,
-                    type_inference_result,
+                add_lifetime_tree_to_scope(
+                    return_value_ref,
+                    &return_type,
                     &mut lifetime_scope,
                     stack_lifetime_scope,
-                    lifetime_instance_map,
-                    allocator,
-                    context,
                 );
-
-                lifetime_scope.collect();
             }
-
-            let (return_value_ref, return_type) = collect_lifetime_operator(
-                prev_lifetime_ref,
-                EntityID::from(right_expr),
-                type_inference_result,
-                &mut lifetime_scope,
-            );
-            prev_lifetime_ref = return_value_ref;
-            prev_type = return_type;
-
-            lifetime_scope.collect();
-        }
-
-        if let Some(expr_bound_tree_ref) = expr_bound_tree_ref {
-            let bound_lifetime_tree = lifetime_scope
-                .instance
-                .get_lifetime_tree(expr_bound_tree_ref);
-            bound_lifetime_tree
-                .same_bound_entity
-                .push(prev_lifetime_ref);
-        } else {
-            add_lifetime_tree_to_scope(
-                prev_lifetime_ref,
-                &prev_type,
-                lifetime_scope,
-                stack_lifetime_scope,
-            );
         }
     }
 }
 
-fn collect_lifetime_add_or_sub_expression<'allocator>(
-    ast: &'allocator AddOrSubExpression<'_, 'allocator>,
+fn collect_lifetime_primary<'allocator>(
+    ast: &'allocator Primary<'_, 'allocator>,
     expr_bound_tree_ref: Option<LifetimeTreeRef>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -388,6 +509,10 @@ fn collect_lifetime_operator<'allocator>(
 
     (
         return_value_ref,
-        type_inference_result.get_entity_type(right_expr).clone(),
+        type_inference_result
+            .operator_return_type_map
+            .get(&right_expr)
+            .unwrap()
+            .clone(),
     )
 }

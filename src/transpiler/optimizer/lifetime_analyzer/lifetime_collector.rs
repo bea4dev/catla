@@ -397,7 +397,9 @@ fn collect_lifetime_factor<'allocator>(
         let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
 
         if let Ok(primary) = &ast.primary {
-            let primary_lifetime_tree_ref = lifetime_scope
+            let mut primary_lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+            let primary_lifetime_tree_ref = primary_lifetime_scope
                 .instance
                 .create_entity_lifetime_tree(EntityID::from(primary));
 
@@ -407,7 +409,7 @@ fn collect_lifetime_factor<'allocator>(
                 import_element_map,
                 name_resolved_map,
                 type_inference_result,
-                &mut lifetime_scope,
+                &mut primary_lifetime_scope,
                 stack_lifetime_scope,
                 lifetime_instance_map,
                 allocator,
@@ -419,7 +421,7 @@ fn collect_lifetime_factor<'allocator>(
             add_lifetime_tree_to_scope(
                 primary_lifetime_tree_ref,
                 &primary_type,
-                &mut lifetime_scope,
+                &mut primary_lifetime_scope,
                 stack_lifetime_scope,
             );
 
@@ -435,14 +437,16 @@ fn collect_lifetime_factor<'allocator>(
                 _ => unreachable!(),
             };
 
-            let return_value_ref = lifetime_scope.instance.create_lifetime_tree();
+            let return_value_ref = primary_lifetime_scope.instance.create_lifetime_tree();
 
             let function_call = FunctionCallLifetime {
                 arguments: vec![primary_lifetime_tree_ref],
                 return_value: return_value_ref,
                 function: function_type,
             };
-            lifetime_scope.instance.add_function_call(function_call);
+            primary_lifetime_scope.instance.add_function_call(function_call);
+
+            primary_lifetime_scope.collect();
 
             if let Some(expr_bound_tree_ref) = expr_bound_tree_ref {
                 let bound_lifetime_tree = lifetime_scope
@@ -460,6 +464,8 @@ fn collect_lifetime_factor<'allocator>(
                 );
             }
         }
+
+        lifetime_scope.collect();
     }
 }
 

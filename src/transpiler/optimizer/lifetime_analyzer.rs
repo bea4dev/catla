@@ -11,7 +11,7 @@ use crate::transpiler::{
     component::EntityID,
     context::TranspileModuleContext,
     name_resolver::FoundDefineInfo,
-    semantics::types::{type_inference::TypeInferenceResultContainer, type_info::FunctionType},
+    semantics::types::{type_inference::TypeInferenceResultContainer, type_info::{FunctionType, Type}},
 };
 
 pub mod lifetime_collector;
@@ -229,6 +229,8 @@ pub fn collect_lifetime(
     ast: Program,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     type_inference_result: &TypeInferenceResultContainer,
     allocator: &Bump,
     context: &TranspileModuleContext,
@@ -244,6 +246,8 @@ pub fn collect_lifetime(
         None,
         import_element_map,
         name_resolved_map,
+        module_user_type_map,
+        module_element_type_maps,
         type_inference_result,
         &mut lifetime_scope,
         &mut stack_lifetime_scope,

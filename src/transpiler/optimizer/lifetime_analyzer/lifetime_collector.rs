@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use allocator_api2::vec;
+use allocator_api2::vec::Vec;
 use bumpalo::Bump;
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
-    MulOrDivExpression, OrExpression, Primary, Program, Spanned, StatementAST, AST,
+    FunctionCall, MulOrDivExpression, OrExpression, Primary, Program, Spanned, StatementAST, AST,
 };
 use fxhash::FxHashMap;
 
@@ -20,7 +21,7 @@ use crate::transpiler::{
 
 use super::{
     FunctionCallLifetime, LifetimeInstance, LifetimeScope, LifetimeTreeRef, ScoopGroup,
-    StackLifetimeScope,
+    StackLifetimeScope, STATIC_LIFETIME,
 };
 
 fn add_lifetime_tree_to_scope(
@@ -53,7 +54,7 @@ pub fn collect_lifetime_program<'allocator>(
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
     lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
-    allocator: &Bump,
+    allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
     for (index, statement) in ast.statements.iter().enumerate() {
@@ -112,7 +113,7 @@ fn collect_lifetime_expression<'allocator>(
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
     lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
-    allocator: &Bump,
+    allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
     match ast {
@@ -152,7 +153,7 @@ fn collect_lifetime_or_expression<'allocator>(
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
     lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
-    allocator: &Bump,
+    allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
     collect_lifetime_and_expression(
@@ -204,7 +205,7 @@ fn collect_lifetime_and_expression<'allocator>(
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
     lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
-    allocator: &Bump,
+    allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
     collect_lifetime_compare_expression(
@@ -258,7 +259,7 @@ macro_rules! collect_lifetime_for_op2 {
             lifetime_scope: &mut LifetimeScope,
             stack_lifetime_scope: &mut StackLifetimeScope,
             lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
-            allocator: &Bump,
+            allocator: &'allocator Bump,
             context: &TranspileModuleContext,
         ) {
             if ast.right_exprs.is_empty() {
@@ -424,7 +425,7 @@ fn collect_lifetime_factor<'allocator>(
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
     lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
-    allocator: &Bump,
+    allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
     if ast.negative_keyword_span.is_none() {
@@ -541,7 +542,7 @@ fn collect_lifetime_primary<'allocator>(
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
     lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
-    allocator: &Bump,
+    allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
     let module_name =
@@ -566,10 +567,99 @@ fn collect_lifetime_primary<'allocator>(
                 false
             };
 
-            
+            let lifetime_tree_ref = lifetime_scope
+                .instance
+                .create_entity_lifetime_tree(EntityID::from(next_primary));
+            lifetime_scope
+                .instance
+                .set_lifetime(lifetime_tree_ref, STATIC_LIFETIME);
+
+
         }
     } else {
     }
+}
+
+fn collect_lifetime_function_call<'allocator>(
+    ast: &'allocator FunctionCall<'_, 'allocator>,
+    prev_entity_id: EntityID,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    type_inference_result: &TypeInferenceResultContainer,
+    lifetime_scope: &mut LifetimeScope,
+    stack_lifetime_scope: &mut StackLifetimeScope,
+    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    allocator: &'allocator Bump,
+    context: &TranspileModuleContext,
+) -> LifetimeTreeRef {
+    let ty = type_inference_result.get_entity_type(prev_entity_id);
+
+    let return_value = lifetime_scope.instance.create_lifetime_tree();
+
+    if let Type::Function {
+        function_info,
+        generics: _,
+    } = ty
+    {
+        let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+        let mut arguments = Vec::new();
+
+        if let Ok(arg_exprs) = &ast.arg_exprs {
+            for argument in arg_exprs.iter() {
+                let argument_lifetime_ref = lifetime_scope
+                    .instance
+                    .create_entity_lifetime_tree(EntityID::from(*argument));
+
+                {
+                    let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                    collect_lifetime_expression(
+                        argument,
+                        false,
+                        Some(argument_lifetime_ref),
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_maps,
+                        type_inference_result,
+                        &mut lifetime_scope,
+                        stack_lifetime_scope,
+                        lifetime_instance_map,
+                        allocator,
+                        context,
+                    );
+
+                    lifetime_scope.collect();
+                }
+
+                let argument_type =
+                    type_inference_result.get_entity_type(EntityID::from(*argument));
+
+                add_lifetime_tree_to_scope(
+                    argument_lifetime_ref,
+                    &argument_type,
+                    &mut lifetime_scope,
+                    stack_lifetime_scope,
+                );
+
+                arguments.push(argument_lifetime_ref);
+            }
+        }
+
+        let function_call = FunctionCallLifetime {
+            arguments,
+            return_value,
+            function: function_info.clone(),
+        };
+
+        lifetime_scope.instance.add_function_call(function_call);
+
+        lifetime_scope.collect();
+    }
+
+    return_value
 }
 
 fn collect_lifetime_operator<'allocator>(

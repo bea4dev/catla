@@ -4,8 +4,7 @@ use allocator_api2::vec;
 use allocator_api2::vec::Vec;
 use bumpalo::Bump;
 use catla_parser::parser::{
-    AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
-    FunctionCall, MulOrDivExpression, OrExpression, Primary, Program, Spanned, StatementAST, AST,
+    AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression, OrExpression, Primary, PrimaryLeftExpr, Program, Spanned, StatementAST, AST
 };
 use fxhash::FxHashMap;
 
@@ -49,6 +48,7 @@ pub fn collect_lifetime_program<'allocator>(
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
@@ -88,6 +88,7 @@ pub fn collect_lifetime_program<'allocator>(
                     import_element_map,
                     name_resolved_map,
                     module_user_type_map,
+                    module_element_type_map,
                     module_element_type_maps,
                     type_inference_result,
                     lifetime_scope,
@@ -108,6 +109,7 @@ fn collect_lifetime_expression<'allocator>(
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
@@ -127,6 +129,7 @@ fn collect_lifetime_expression<'allocator>(
                     import_element_map,
                     name_resolved_map,
                     module_user_type_map,
+                    module_element_type_map,
                     module_element_type_maps,
                     type_inference_result,
                     lifetime_scope,
@@ -148,6 +151,7 @@ fn collect_lifetime_or_expression<'allocator>(
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
@@ -163,6 +167,7 @@ fn collect_lifetime_or_expression<'allocator>(
         import_element_map,
         name_resolved_map,
         module_user_type_map,
+        module_element_type_map,
         module_element_type_maps,
         type_inference_result,
         lifetime_scope,
@@ -181,6 +186,7 @@ fn collect_lifetime_or_expression<'allocator>(
                 import_element_map,
                 name_resolved_map,
                 module_user_type_map,
+                module_element_type_map,
                 module_element_type_maps,
                 type_inference_result,
                 lifetime_scope,
@@ -200,6 +206,7 @@ fn collect_lifetime_and_expression<'allocator>(
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
@@ -215,6 +222,7 @@ fn collect_lifetime_and_expression<'allocator>(
         import_element_map,
         name_resolved_map,
         module_user_type_map,
+        module_element_type_map,
         module_element_type_maps,
         type_inference_result,
         lifetime_scope,
@@ -233,6 +241,7 @@ fn collect_lifetime_and_expression<'allocator>(
                 import_element_map,
                 name_resolved_map,
                 module_user_type_map,
+                module_element_type_map,
                 module_element_type_maps,
                 type_inference_result,
                 lifetime_scope,
@@ -254,6 +263,7 @@ macro_rules! collect_lifetime_for_op2 {
             import_element_map: &FxHashMap<EntityID, Spanned<String>>,
             name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
             module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+            module_element_type_map: &FxHashMap<String, Type>,
             module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
             type_inference_result: &TypeInferenceResultContainer,
             lifetime_scope: &mut LifetimeScope,
@@ -270,6 +280,7 @@ macro_rules! collect_lifetime_for_op2 {
                     import_element_map,
                     name_resolved_map,
                     module_user_type_map,
+                    module_element_type_map,
                     module_element_type_maps,
                     type_inference_result,
                     lifetime_scope,
@@ -293,6 +304,7 @@ macro_rules! collect_lifetime_for_op2 {
                         import_element_map,
                         name_resolved_map,
                         module_user_type_map,
+                        module_element_type_map,
                         module_element_type_maps,
                         type_inference_result,
                         &mut lifetime_scope,
@@ -351,6 +363,7 @@ macro_rules! collect_lifetime_for_op2 {
                             import_element_map,
                             name_resolved_map,
                             module_user_type_map,
+                            module_element_type_map,
                             module_element_type_maps,
                             type_inference_result,
                             &mut lifetime_scope,
@@ -420,6 +433,7 @@ fn collect_lifetime_factor<'allocator>(
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
@@ -437,6 +451,7 @@ fn collect_lifetime_factor<'allocator>(
                 import_element_map,
                 name_resolved_map,
                 module_user_type_map,
+                module_element_type_map,
                 module_element_type_maps,
                 type_inference_result,
                 lifetime_scope,
@@ -463,6 +478,7 @@ fn collect_lifetime_factor<'allocator>(
                 import_element_map,
                 name_resolved_map,
                 module_user_type_map,
+                module_element_type_map,
                 module_element_type_maps,
                 type_inference_result,
                 &mut primary_lifetime_scope,
@@ -537,6 +553,7 @@ fn collect_lifetime_primary<'allocator>(
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
@@ -548,44 +565,93 @@ fn collect_lifetime_primary<'allocator>(
     let module_name =
         get_module_name_from_primary(ast, name_resolved_map, import_element_map, context);
 
+    let mut prev_lifetime_tree_ref = None;
+    let mut current_chain = 0;
+
     if let Some((module_name, count)) = module_name {
         if ast.chain.is_empty() {
             return;
         }
 
-        let module_user_type_map = module_user_type_map.get(&module_name).unwrap();
-        let module_element_type_map = module_element_type_maps.get(&module_name).unwrap();
+        let user_type_map = module_user_type_map.get(&module_name).unwrap();
+        let element_type_map = module_element_type_maps.get(&module_name).unwrap();
 
         let next_primary = &ast.chain[count];
 
         if let Some((literal, _, function_call)) = &next_primary.second_expr {
-            let is_static_element = if module_user_type_map.contains_key(literal.value) {
+            let is_static_element = if user_type_map.contains_key(literal.value) {
                 false
-            } else if module_element_type_map.contains_key(literal.value) {
+            } else if element_type_map.contains_key(literal.value) {
                 true
             } else {
                 false
             };
 
-            let lifetime_tree_ref = lifetime_scope
+            let literal_lifetime_tree_ref = lifetime_scope
                 .instance
                 .create_entity_lifetime_tree(EntityID::from(next_primary));
-            lifetime_scope
-                .instance
-                .set_lifetime(lifetime_tree_ref, STATIC_LIFETIME);
 
+            if is_static_element {
+                lifetime_scope
+                    .instance
+                    .set_lifetime(literal_lifetime_tree_ref, STATIC_LIFETIME);
+            } else {
+                let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
 
+                add_lifetime_tree_to_scope(
+                    literal_lifetime_tree_ref,
+                    type_inference_result.get_entity_type(EntityID::from(literal)),
+                    &mut lifetime_scope,
+                    stack_lifetime_scope,
+                );
+
+                lifetime_scope.collect();
+            }
+
+            if let Some(function_call) = function_call {
+                let return_value = collect_lifetime_function_call(
+                    function_call,
+                    EntityID::from(literal),
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    type_inference_result,
+                    lifetime_scope,
+                    stack_lifetime_scope,
+                    lifetime_instance_map,
+                    allocator,
+                    context,
+                );
+
+                prev_lifetime_tree_ref = Some(return_value);
+            } else {
+                prev_lifetime_tree_ref = Some(literal_lifetime_tree_ref);
+            }
+
+            current_chain = count + 1;
         }
     } else {
+        let left_lifetime_tree_ref = lifetime_scope.instance.create_entity_lifetime_tree(EntityID::from(&ast.left));
+
+        if as_assign_left && ast.chain.is_empty() {
+            if let PrimaryLeftExpr::Simple((simple_primary, _, _)) = &ast.left.first_expr {
+                
+            }
+        }
     }
+
+    loop {}
 }
 
 fn collect_lifetime_function_call<'allocator>(
     ast: &'allocator FunctionCall<'_, 'allocator>,
-    prev_entity_id: EntityID,
+    call_target_entity_id: EntityID,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
     module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
@@ -594,7 +660,7 @@ fn collect_lifetime_function_call<'allocator>(
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) -> LifetimeTreeRef {
-    let ty = type_inference_result.get_entity_type(prev_entity_id);
+    let ty = type_inference_result.get_entity_type(call_target_entity_id);
 
     let return_value = lifetime_scope.instance.create_lifetime_tree();
 
@@ -622,6 +688,7 @@ fn collect_lifetime_function_call<'allocator>(
                         import_element_map,
                         name_resolved_map,
                         module_user_type_map,
+                        module_element_type_map,
                         module_element_type_maps,
                         type_inference_result,
                         &mut lifetime_scope,

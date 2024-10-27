@@ -13,7 +13,7 @@ use fxhash::FxHashMap;
 use crate::transpiler::{
     component::EntityID,
     context::TranspileModuleContext,
-    name_resolver::FoundDefineInfo,
+    name_resolver::{DefineKind, FoundDefineInfo},
     semantics::types::{
         import_module_collector::get_module_name_from_primary,
         type_inference::TypeInferenceResultContainer, type_info::Type,
@@ -682,6 +682,8 @@ fn collect_lifetime_simple_primary<'allocator>(
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) -> LifetimeTreeRef {
+    // DO NOT SET LIFETIME at this layer.
+    // This lifetime is set at the parent layer.
     let ast_lifetime_ref = lifetime_scope
         .instance
         .create_entity_lifetime_tree(EntityID::from(ast));
@@ -717,19 +719,67 @@ fn collect_lifetime_simple_primary<'allocator>(
                 );
 
                 let ast_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
-                ast_lifetime_tree.same_bound_entity.push(expression_lifetime_ref);
+                ast_lifetime_tree
+                    .same_bound_entity
+                    .push(expression_lifetime_ref);
 
                 lifetime_scope.collect();
             }
         }
         SimplePrimary::Identifier(literal) => {
-            
-        },
-        SimplePrimary::NullKeyword(range) => todo!(),
-        SimplePrimary::TrueKeyword(range) => todo!(),
-        SimplePrimary::FalseKeyword(range) => todo!(),
-        SimplePrimary::ThisKeyword(spanned) => todo!(),
-        SimplePrimary::LargeThisKeyword(spanned) => todo!(),
+            let is_local_variable =
+                if let Some(resolved) = name_resolved_map.get(&EntityID::from(literal)) {
+                    let kind = resolved.define_info.define_kind;
+
+                    if kind == DefineKind::Variable || kind == DefineKind::FunctionArgument {
+                        let variable_entity_id = resolved.define_info.entity_id;
+                        let variable_lifetime_ref = lifetime_scope
+                            .instance
+                            .get_entity_lifetime_tree_ref(variable_entity_id);
+                        let ast_lifetime_ref =
+                            lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
+
+                        ast_lifetime_ref
+                            .same_bound_entity
+                            .push(variable_lifetime_ref);
+
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+            if !is_local_variable {
+                let literal_lifetime_ref = lifetime_scope
+                    .instance
+                    .create_entity_lifetime_tree(EntityID::from(literal));
+                let literal_lifetime_tree = lifetime_scope
+                    .instance
+                    .get_lifetime_tree(literal_lifetime_ref);
+
+                literal_lifetime_tree.root_lifetime = Some(STATIC_LIFETIME);
+
+                let ast_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
+
+                ast_lifetime_tree
+                    .same_bound_entity
+                    .push(literal_lifetime_ref);
+            }
+        }
+        SimplePrimary::ThisKeyword(_) => {
+            if let Some(this_argument_lifetime_ref) =
+                lifetime_scope.instance.this_argument_lifetime_ref
+            {
+                let ast_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
+
+                ast_lifetime_tree
+                    .same_bound_entity
+                    .push(this_argument_lifetime_ref);
+            }
+        }
+        _ => {}
     }
 
     ast_lifetime_ref

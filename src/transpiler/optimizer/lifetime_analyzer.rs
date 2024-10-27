@@ -11,7 +11,10 @@ use crate::transpiler::{
     component::EntityID,
     context::TranspileModuleContext,
     name_resolver::FoundDefineInfo,
-    semantics::types::{type_inference::TypeInferenceResultContainer, type_info::{FunctionType, Type}},
+    semantics::types::{
+        type_inference::TypeInferenceResultContainer,
+        type_info::{FunctionType, Type},
+    },
 };
 
 pub mod lifetime_collector;
@@ -95,7 +98,8 @@ pub struct LifetimeInstance {
     function_calls: Vec<FunctionCallLifetime>,
     entity_lifetime_ref_map: FxHashMap<EntityID, LifetimeTreeRef>,
     lifetime_tree_map: FxHashMap<LifetimeTreeRef, LifetimeTree>,
-    scoop_groups: Vec<ScoopGroup>,
+    this_argument_lifetime_ref: Option<LifetimeTreeRef>,
+    argument_lifetime_ref: FxHashMap<EntityID, LifetimeTreeRef>,
 }
 
 impl LifetimeInstance {
@@ -107,7 +111,25 @@ impl LifetimeInstance {
             function_calls: Vec::new(),
             entity_lifetime_ref_map: FxHashMap::default(),
             lifetime_tree_map: FxHashMap::default(),
-            scoop_groups: Vec::new(),
+            this_argument_lifetime_ref: None,
+            argument_lifetime_ref: FxHashMap::default(),
+        }
+    }
+
+    pub fn init_function_argument(
+        &mut self,
+        arguments: impl Iterator<Item = EntityID>,
+        has_this_argument: bool,
+    ) {
+        if has_this_argument {
+            let this_lifetime_ref = self.create_lifetime_tree();
+            self.this_argument_lifetime_ref = Some(this_lifetime_ref);
+        }
+
+        self.argument_lifetime_ref.clear();
+
+        for argument in arguments {
+            self.create_entity_lifetime_tree(argument);
         }
     }
 
@@ -132,7 +154,10 @@ impl LifetimeInstance {
     pub fn create_lifetime_tree(&mut self) -> LifetimeTreeRef {
         let lifetime_tree = LifetimeTree::default();
         let lifetime_tree_ref = self.new_lifetime_tree_ref();
-        self.lifetime_tree_map.insert(lifetime_tree_ref, lifetime_tree);
+
+        self.lifetime_tree_map
+            .insert(lifetime_tree_ref, lifetime_tree);
+
         lifetime_tree_ref
     }
 

@@ -4,7 +4,9 @@ use allocator_api2::vec;
 use allocator_api2::vec::Vec;
 use bumpalo::Bump;
 use catla_parser::parser::{
-    AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression, OrExpression, Primary, PrimaryLeftExpr, Program, Spanned, StatementAST, AST
+    AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
+    FunctionCall, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, Program,
+    SimplePrimary, Spanned, StatementAST, AST,
 };
 use fxhash::FxHashMap;
 
@@ -633,16 +635,104 @@ fn collect_lifetime_primary<'allocator>(
             current_chain = count + 1;
         }
     } else {
-        let left_lifetime_tree_ref = lifetime_scope.instance.create_entity_lifetime_tree(EntityID::from(&ast.left));
-
-        if as_assign_left && ast.chain.is_empty() {
-            if let PrimaryLeftExpr::Simple((simple_primary, _, _)) = &ast.left.first_expr {
-                
-            }
-        }
+        let left_lifetime_tree_ref = lifetime_scope
+            .instance
+            .create_entity_lifetime_tree(EntityID::from(&ast.left));
     }
 
     loop {}
+}
+
+fn collect_lifetime_primary_left<'allocator>(
+    ast: &'allocator PrimaryLeft<'_, 'allocator>,
+    expr_bound_tree_ref: Option<LifetimeTreeRef>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
+    module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    type_inference_result: &TypeInferenceResultContainer,
+    lifetime_scope: &mut LifetimeScope,
+    stack_lifetime_scope: &mut StackLifetimeScope,
+    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    allocator: &'allocator Bump,
+    context: &TranspileModuleContext,
+) {
+    let lifetime_tree_ref = match &ast.first_expr {
+        PrimaryLeftExpr::Simple((simple_primary, _, function_call)) => {}
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => todo!(),
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => todo!(),
+        PrimaryLeftExpr::NewExpression(new_expression) => todo!(),
+        PrimaryLeftExpr::IfExpression(if_expression) => todo!(),
+        PrimaryLeftExpr::LoopExpression(loop_expression) => todo!(),
+    };
+}
+
+fn collect_lifetime_simple_primary<'allocator>(
+    ast: &'allocator SimplePrimary<'_, 'allocator>,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    module_element_type_map: &FxHashMap<String, Type>,
+    module_element_type_maps: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
+    type_inference_result: &TypeInferenceResultContainer,
+    lifetime_scope: &mut LifetimeScope,
+    stack_lifetime_scope: &mut StackLifetimeScope,
+    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    allocator: &'allocator Bump,
+    context: &TranspileModuleContext,
+) -> LifetimeTreeRef {
+    let ast_lifetime_ref = lifetime_scope
+        .instance
+        .create_entity_lifetime_tree(EntityID::from(ast));
+
+    match ast {
+        SimplePrimary::Expressions {
+            expressions,
+            error_tokens: _,
+            span: _,
+        } => {
+            for expression in expressions.iter() {
+                let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                let expression_lifetime_ref = lifetime_scope
+                    .instance
+                    .create_entity_lifetime_tree(EntityID::from(*expression));
+
+                collect_lifetime_expression(
+                    *expression,
+                    false,
+                    Some(expression_lifetime_ref),
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    type_inference_result,
+                    &mut lifetime_scope,
+                    stack_lifetime_scope,
+                    lifetime_instance_map,
+                    allocator,
+                    context,
+                );
+
+                let ast_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
+                ast_lifetime_tree.same_bound_entity.push(expression_lifetime_ref);
+
+                lifetime_scope.collect();
+            }
+        }
+        SimplePrimary::Identifier(literal) => {
+            
+        },
+        SimplePrimary::NullKeyword(range) => todo!(),
+        SimplePrimary::TrueKeyword(range) => todo!(),
+        SimplePrimary::FalseKeyword(range) => todo!(),
+        SimplePrimary::ThisKeyword(spanned) => todo!(),
+        SimplePrimary::LargeThisKeyword(spanned) => todo!(),
+    }
+
+    ast_lifetime_ref
 }
 
 fn collect_lifetime_function_call<'allocator>(

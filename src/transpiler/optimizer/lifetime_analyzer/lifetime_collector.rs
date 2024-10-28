@@ -635,9 +635,20 @@ fn collect_lifetime_primary<'allocator>(
             current_chain = count + 1;
         }
     } else {
-        let left_lifetime_tree_ref = lifetime_scope
-            .instance
-            .create_entity_lifetime_tree(EntityID::from(&ast.left));
+        let primary_left_lifetime_ref = collect_lifetime_primary_left(
+            &ast.left,
+            import_element_map,
+            name_resolved_map,
+            module_user_type_map,
+            module_element_type_map,
+            module_element_type_maps,
+            type_inference_result,
+            lifetime_scope,
+            stack_lifetime_scope,
+            lifetime_instance_map,
+            allocator,
+            context,
+        );
     }
 
     loop {}
@@ -645,7 +656,6 @@ fn collect_lifetime_primary<'allocator>(
 
 fn collect_lifetime_primary_left<'allocator>(
     ast: &'allocator PrimaryLeft<'_, 'allocator>,
-    expr_bound_tree_ref: Option<LifetimeTreeRef>,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
@@ -658,8 +668,66 @@ fn collect_lifetime_primary_left<'allocator>(
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
-    let lifetime_tree_ref = match &ast.first_expr {
-        PrimaryLeftExpr::Simple((simple_primary, _, function_call)) => {}
+    // DO NOT SET LIFETIME at this layer.
+    // This lifetime is set at the parent layer.
+    let ast_lifetime_ref = lifetime_scope
+        .instance
+        .create_entity_lifetime_tree(EntityID::from(ast));
+
+    match &ast.first_expr {
+        PrimaryLeftExpr::Simple((simple_primary, _, function_call)) => {
+            let simple_primary_lifetime_ref = collect_lifetime_simple_primary(
+                simple_primary,
+                import_element_map,
+                name_resolved_map,
+                module_user_type_map,
+                module_element_type_map,
+                module_element_type_maps,
+                type_inference_result,
+                lifetime_scope,
+                stack_lifetime_scope,
+                lifetime_instance_map,
+                allocator,
+                context,
+            );
+
+            let last_lifetime_ref = if let Some(function_call) = function_call {
+                let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                add_lifetime_tree_to_scope(
+                    simple_primary_lifetime_ref,
+                    &type_inference_result.get_entity_type(EntityID::from(simple_primary)),
+                    &mut lifetime_scope,
+                    stack_lifetime_scope,
+                );
+
+                let return_value = collect_lifetime_function_call(
+                    function_call,
+                    EntityID::from(simple_primary),
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    type_inference_result,
+                    &mut lifetime_scope,
+                    stack_lifetime_scope,
+                    lifetime_instance_map,
+                    allocator,
+                    context,
+                );
+
+                lifetime_scope.collect();
+
+                return_value
+            } else {
+                simple_primary_lifetime_ref
+            };
+
+            let ast_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
+
+            ast_lifetime_tree.same_bound_entity.push(last_lifetime_ref);
+        }
         PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => todo!(),
         PrimaryLeftExpr::NewArrayExpression(new_array_expression) => todo!(),
         PrimaryLeftExpr::NewExpression(new_expression) => todo!(),

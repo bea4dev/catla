@@ -567,7 +567,8 @@ fn collect_lifetime_primary<'allocator>(
     let module_name =
         get_module_name_from_primary(ast, name_resolved_map, import_element_map, context);
 
-    let mut prev_lifetime_tree_ref = None;
+    let mut prev_lifetime_tree_ref = lifetime_scope.instance.create_lifetime_tree();
+    let mut prev_type = Type::Unknown;
     let mut current_chain = 0;
 
     if let Some((module_name, count)) = module_name {
@@ -627,9 +628,9 @@ fn collect_lifetime_primary<'allocator>(
                     context,
                 );
 
-                prev_lifetime_tree_ref = Some(return_value);
+                prev_lifetime_tree_ref = return_value;
             } else {
-                prev_lifetime_tree_ref = Some(literal_lifetime_tree_ref);
+                prev_lifetime_tree_ref = literal_lifetime_tree_ref;
             }
 
             current_chain = count + 1;
@@ -649,9 +650,34 @@ fn collect_lifetime_primary<'allocator>(
             allocator,
             context,
         );
+
+        prev_lifetime_tree_ref = primary_left_lifetime_ref;
     }
 
-    loop {}
+    loop {
+        if current_chain >= ast.chain.len() {
+            break;
+        }
+
+        let right_primary = &ast.chain[current_chain];
+
+        let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+        add_lifetime_tree_to_scope(
+            prev_lifetime_tree_ref,
+            &prev_type,
+            &mut lifetime_scope,
+            stack_lifetime_scope,
+        );
+
+        let last_lifetime_ref = if let Some((literal, _, function_call)) = &right_primary.second_expr {
+            let literal_lifetime_ref = lifetime_scope.instance.create_entity_lifetime_tree(EntityID::from(literal));
+        } else {
+            
+        };
+
+        current_chain += 1;
+    }
 }
 
 fn collect_lifetime_primary_left<'allocator>(
@@ -667,7 +693,7 @@ fn collect_lifetime_primary_left<'allocator>(
     lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
-) {
+) -> LifetimeTreeRef {
     // DO NOT SET LIFETIME at this layer.
     // This lifetime is set at the parent layer.
     let ast_lifetime_ref = lifetime_scope
@@ -734,6 +760,8 @@ fn collect_lifetime_primary_left<'allocator>(
         PrimaryLeftExpr::IfExpression(if_expression) => todo!(),
         PrimaryLeftExpr::LoopExpression(loop_expression) => todo!(),
     };
+
+    ast_lifetime_ref
 }
 
 fn collect_lifetime_simple_primary<'allocator>(

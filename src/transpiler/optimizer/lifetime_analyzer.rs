@@ -1,4 +1,3 @@
-use core::panic;
 use std::{cell::RefCell, sync::Arc};
 
 use allocator_api2::vec::Vec;
@@ -52,7 +51,8 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
 
     pub fn drop(&mut self, lifetime_tree_ref: LifetimeTreeRef) {
         let lifetime = self.instance.next_lifetime();
-        self.instance.set_lifetime(lifetime_tree_ref, lifetime);
+        let lifetime_tree = self.instance.get_lifetime_tree(lifetime_tree_ref);
+        lifetime_tree.lifetimes.push(lifetime);
     }
 
     pub fn add_expected(&mut self, expected: LifetimeExpected) {
@@ -62,7 +62,8 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
     pub fn collect(self) {
         for lifetime_tree_ref in self.lifetime_trees.iter().rev() {
             let lifetime = self.instance.next_lifetime();
-            self.instance.set_lifetime(*lifetime_tree_ref, lifetime);
+            let lifetime_tree = self.instance.get_lifetime_tree(*lifetime_tree_ref);
+            lifetime_tree.lifetimes.push(lifetime);
         }
     }
 }
@@ -86,7 +87,8 @@ impl<'allocator> StackLifetimeScope<'allocator> {
         let lifetime = lifetime_instance.next_lifetime();
 
         for lifetime_tree_ref in self.lifetime_trees {
-            lifetime_instance.set_lifetime(lifetime_tree_ref, lifetime);
+            let lifetime_tree = lifetime_instance.get_lifetime_tree(lifetime_tree_ref);
+            lifetime_tree.lifetimes.push(lifetime);
         }
     }
 }
@@ -98,6 +100,7 @@ pub struct LifetimeInstance {
     function_calls: Vec<FunctionCallLifetime>,
     entity_lifetime_ref_map: FxHashMap<EntityID, LifetimeTreeRef>,
     lifetime_tree_map: FxHashMap<LifetimeTreeRef, LifetimeTree>,
+    lifetime_ref_reference_map: FxHashMap<LifetimeTreeRef, LifetimeTreeRef>,
     this_argument_lifetime_ref: Option<LifetimeTreeRef>,
     argument_lifetime_ref: FxHashMap<EntityID, LifetimeTreeRef>,
 }
@@ -111,6 +114,7 @@ impl LifetimeInstance {
             function_calls: Vec::new(),
             entity_lifetime_ref_map: FxHashMap::default(),
             lifetime_tree_map: FxHashMap::default(),
+            lifetime_ref_reference_map: FxHashMap::default(),
             this_argument_lifetime_ref: None,
             argument_lifetime_ref: FxHashMap::default(),
         }
@@ -171,33 +175,24 @@ impl LifetimeInstance {
         *self.entity_lifetime_ref_map.get(&entity_id).unwrap()
     }
 
+    pub fn resolve_lifetime_ref(&self, mut lifetime_tree_ref: LifetimeTreeRef) -> LifetimeTreeRef {
+        loop {
+            match self.lifetime_ref_reference_map.get(&lifetime_tree_ref) {
+                Some(resolved_ref) => lifetime_tree_ref = *resolved_ref,
+                None => return lifetime_tree_ref,
+            }
+        }
+    }
+
     pub fn get_entity_lifetime_tree(&mut self, entity_id: EntityID) -> &mut LifetimeTree {
         let lifetime_ref = self.get_entity_lifetime_tree_ref(entity_id);
+        let lifetime_ref = self.resolve_lifetime_ref(lifetime_ref);
         self.lifetime_tree_map.get_mut(&lifetime_ref).unwrap()
     }
 
     pub fn get_lifetime_tree(&mut self, lifetime_tree_ref: LifetimeTreeRef) -> &mut LifetimeTree {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
         self.lifetime_tree_map.get_mut(&lifetime_tree_ref).unwrap()
-    }
-
-    pub fn set_lifetime(&mut self, lifetime_tree_ref: LifetimeTreeRef, lifetime: Lifetime) {
-        let lifetime_tree = self.get_lifetime_tree(lifetime_tree_ref);
-
-        if lifetime_tree.root_lifetime.is_some() {
-            panic!("Lifetime has already set!");
-        }
-
-        lifetime_tree.root_lifetime = Some(lifetime);
-    }
-
-    pub fn add_same_bound_entity(&mut self, entity_id: EntityID, same_bound_entity: EntityID) {
-        let same_bound_entity_ref = *self
-            .entity_lifetime_ref_map
-            .get(&same_bound_entity)
-            .unwrap();
-        let lifetime_tree = self.get_entity_lifetime_tree(entity_id);
-
-        lifetime_tree.same_bound_entity.push(same_bound_entity_ref);
     }
 
     pub fn add_function_call(&mut self, function_call: FunctionCallLifetime) {
@@ -217,8 +212,7 @@ pub struct TypedElementAccess {
 
 #[derive(Debug, Default)]
 pub struct LifetimeTree {
-    pub root_lifetime: Option<Lifetime>,
-    pub same_bound_entity: Vec<LifetimeTreeRef>,
+    lifetimes: Vec<Lifetime>,
     pub children: FxHashMap<String, LifetimeTreeRef>,
 }
 

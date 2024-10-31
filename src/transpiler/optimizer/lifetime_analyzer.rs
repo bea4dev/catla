@@ -199,28 +199,35 @@ impl LifetimeInstance {
         self.function_calls.push(function_call);
     }
 
-    fn take_lifetime_tree_ownership(&mut self, lifetime_tree_ref: LifetimeTreeRef) -> Option<LifetimeTree> {
-        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
-        self.lifetime_tree_map.remove(&lifetime_tree_ref)
-    }
-
     pub fn merge(&mut self, lifetime_ref_left: LifetimeTreeRef, lifetime_ref_right: LifetimeTreeRef) {
-        let left_lifetime_tree = self.take_lifetime_tree_ownership(lifetime_ref_left);
-        let right_lifetime_tree = self.take_lifetime_tree_ownership(lifetime_ref_right);
+        let left_resolved_ref = self.resolve_lifetime_ref(lifetime_ref_left);
+        let right_resolved_ref = self.resolve_lifetime_ref(lifetime_ref_right);
 
-        match (left_lifetime_tree, right_lifetime_tree) {
-            (Some(left_lifetime_tree), Some(right_lifetime_tree)) => {
+        if left_resolved_ref == right_resolved_ref {
+            return;
+        }
+
+        let left_lifetime_tree = self.lifetime_tree_map.remove(&left_resolved_ref);
+        let right_lifetime_tree = self.lifetime_tree_map.remove(&right_resolved_ref);
+
+        let merged_tree = match (left_lifetime_tree, right_lifetime_tree) {
+            (Some(mut left_lifetime_tree), Some(mut right_lifetime_tree)) => {
                 for (left_child_name, left_child_ref) in left_lifetime_tree.children.iter() {
-                    if let Some(right_child_ref) = right_lifetime_tree.children.get(left_child_name) {
-                        self.merge(*left_child_ref, *right_child_ref);
+                    if let Some(right_child_ref) = right_lifetime_tree.children.remove(left_child_name) {
+                        self.merge(*left_child_ref, right_child_ref);
                     }
                 }
-            },
-            (Some(left_lifetime_tree), None) => {
-                
+
+                left_lifetime_tree.children.extend(right_lifetime_tree.children);
+                left_lifetime_tree.lifetimes.extend(right_lifetime_tree.lifetimes);
+
+                left_lifetime_tree
             },
             _ => unreachable!()
-        }
+        };
+
+        self.lifetime_ref_reference_map.insert(right_resolved_ref, left_resolved_ref);
+        self.lifetime_tree_map.insert(left_resolved_ref, merged_tree);
     }
 }
 
@@ -237,7 +244,13 @@ pub struct TypedElementAccess {
 #[derive(Debug, Default)]
 pub struct LifetimeTree {
     lifetimes: Vec<Lifetime>,
-    pub children: FxHashMap<String, LifetimeTreeRef>,
+    children: FxHashMap<String, LifetimeTreeRef>,
+}
+
+impl LifetimeTree {
+    pub fn set_child(&mut self, name: String, lifetime_ref: LifetimeTreeRef) {
+        self.children.insert(name, lifetime_ref);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

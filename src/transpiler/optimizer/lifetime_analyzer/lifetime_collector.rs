@@ -162,41 +162,60 @@ fn collect_lifetime_or_expression<'allocator>(
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
-    collect_lifetime_and_expression(
-        &ast.left_expr,
-        as_assign_left,
-        expr_bound_tree_ref,
-        import_element_map,
-        name_resolved_map,
-        module_user_type_map,
-        module_element_type_map,
-        module_element_type_maps,
-        type_inference_result,
-        lifetime_scope,
-        stack_lifetime_scope,
-        lifetime_instance_map,
-        allocator,
-        context,
-    );
+    if ast.right_exprs.is_empty() {
+        collect_lifetime_and_expression(
+            &ast.left_expr,
+            as_assign_left,
+            expr_bound_tree_ref,
+            import_element_map,
+            name_resolved_map,
+            module_user_type_map,
+            module_element_type_map,
+            module_element_type_maps,
+            type_inference_result,
+            lifetime_scope,
+            stack_lifetime_scope,
+            lifetime_instance_map,
+            allocator,
+            context,
+        );
+    } else {
+        collect_lifetime_and_expression(
+            &ast.left_expr,
+            as_assign_left,
+            None,
+            import_element_map,
+            name_resolved_map,
+            module_user_type_map,
+            module_element_type_map,
+            module_element_type_maps,
+            type_inference_result,
+            lifetime_scope,
+            stack_lifetime_scope,
+            lifetime_instance_map,
+            allocator,
+            context,
+        );
 
-    for (_, right_expr) in ast.right_exprs.iter() {
-        if let Ok(right_expr) = right_expr {
-            collect_lifetime_and_expression(
-                right_expr,
-                as_assign_left,
-                expr_bound_tree_ref,
-                import_element_map,
-                name_resolved_map,
-                module_user_type_map,
-                module_element_type_map,
-                module_element_type_maps,
-                type_inference_result,
-                lifetime_scope,
-                stack_lifetime_scope,
-                lifetime_instance_map,
-                allocator,
-                context,
-            );
+        for (_, right_expr) in ast.right_exprs.iter() {
+            if let Ok(right_expr) = right_expr {
+                collect_lifetime_and_expression(
+                    right_expr,
+                    as_assign_left,
+                    None,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    type_inference_result,
+                    lifetime_scope,
+                    stack_lifetime_scope,
+                    lifetime_instance_map,
+                    allocator,
+                    context,
+                );
+            }
         }
     }
 }
@@ -217,41 +236,60 @@ fn collect_lifetime_and_expression<'allocator>(
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
-    collect_lifetime_compare_expression(
-        &ast.left_expr,
-        as_assign_left,
-        expr_bound_tree_ref,
-        import_element_map,
-        name_resolved_map,
-        module_user_type_map,
-        module_element_type_map,
-        module_element_type_maps,
-        type_inference_result,
-        lifetime_scope,
-        stack_lifetime_scope,
-        lifetime_instance_map,
-        allocator,
-        context,
-    );
+    if ast.right_exprs.is_empty() {
+        collect_lifetime_compare_expression(
+            &ast.left_expr,
+            as_assign_left,
+            expr_bound_tree_ref,
+            import_element_map,
+            name_resolved_map,
+            module_user_type_map,
+            module_element_type_map,
+            module_element_type_maps,
+            type_inference_result,
+            lifetime_scope,
+            stack_lifetime_scope,
+            lifetime_instance_map,
+            allocator,
+            context,
+        );
+    } else {
+        collect_lifetime_compare_expression(
+            &ast.left_expr,
+            as_assign_left,
+            None,
+            import_element_map,
+            name_resolved_map,
+            module_user_type_map,
+            module_element_type_map,
+            module_element_type_maps,
+            type_inference_result,
+            lifetime_scope,
+            stack_lifetime_scope,
+            lifetime_instance_map,
+            allocator,
+            context,
+        );
 
-    for (_, right_expr) in ast.right_exprs.iter() {
-        if let Ok(right_expr) = right_expr {
-            collect_lifetime_compare_expression(
-                right_expr,
-                as_assign_left,
-                expr_bound_tree_ref,
-                import_element_map,
-                name_resolved_map,
-                module_user_type_map,
-                module_element_type_map,
-                module_element_type_maps,
-                type_inference_result,
-                lifetime_scope,
-                stack_lifetime_scope,
-                lifetime_instance_map,
-                allocator,
-                context,
-            );
+        for (_, right_expr) in ast.right_exprs.iter() {
+            if let Ok(right_expr) = right_expr {
+                collect_lifetime_compare_expression(
+                    right_expr,
+                    as_assign_left,
+                    None,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    type_inference_result,
+                    lifetime_scope,
+                    stack_lifetime_scope,
+                    lifetime_instance_map,
+                    allocator,
+                    context,
+                );
+            }
         }
     }
 }
@@ -391,12 +429,9 @@ macro_rules! collect_lifetime_for_op2 {
                 }
 
                 if let Some(expr_bound_tree_ref) = expr_bound_tree_ref {
-                    let bound_lifetime_tree = lifetime_scope
+                    lifetime_scope
                         .instance
-                        .get_lifetime_tree(expr_bound_tree_ref);
-                    bound_lifetime_tree
-                        .same_bound_entity
-                        .push(prev_lifetime_ref);
+                        .merge(expr_bound_tree_ref, prev_lifetime_ref);
                 } else {
                     add_lifetime_tree_to_scope(
                         prev_lifetime_ref,
@@ -525,10 +560,9 @@ fn collect_lifetime_factor<'allocator>(
             primary_lifetime_scope.collect();
 
             if let Some(expr_bound_tree_ref) = expr_bound_tree_ref {
-                let bound_lifetime_tree = lifetime_scope
+                lifetime_scope
                     .instance
-                    .get_lifetime_tree(expr_bound_tree_ref);
-                bound_lifetime_tree.same_bound_entity.push(return_value_ref);
+                    .merge(expr_bound_tree_ref, return_value_ref);
             } else {
                 let return_type = type_inference_result
                     .operator_return_type_map
@@ -595,9 +629,10 @@ fn collect_lifetime_primary<'allocator>(
                 .create_entity_lifetime_tree(EntityID::from(next_primary));
 
             if is_static_element {
-                lifetime_scope
+                let literal_lifetime_tree = lifetime_scope
                     .instance
-                    .set_lifetime(literal_lifetime_tree_ref, STATIC_LIFETIME);
+                    .get_lifetime_tree(literal_lifetime_tree_ref);
+                literal_lifetime_tree.lifetimes.push(STATIC_LIFETIME);
             } else {
                 let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
 
@@ -670,11 +705,13 @@ fn collect_lifetime_primary<'allocator>(
             stack_lifetime_scope,
         );
 
-        let last_lifetime_ref = if let Some((literal, _, function_call)) = &right_primary.second_expr {
-            let literal_lifetime_ref = lifetime_scope.instance.create_entity_lifetime_tree(EntityID::from(literal));
-        } else {
-            
-        };
+        let last_lifetime_ref =
+            if let Some((literal, _, function_call)) = &right_primary.second_expr {
+                let literal_lifetime_ref = lifetime_scope
+                    .instance
+                    .create_entity_lifetime_tree(EntityID::from(literal));
+            } else {
+            };
 
         current_chain += 1;
     }
@@ -694,8 +731,6 @@ fn collect_lifetime_primary_left<'allocator>(
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) -> LifetimeTreeRef {
-    // DO NOT SET LIFETIME at this layer.
-    // This lifetime is set at the parent layer.
     let ast_lifetime_ref = lifetime_scope
         .instance
         .create_entity_lifetime_tree(EntityID::from(ast));
@@ -750,9 +785,9 @@ fn collect_lifetime_primary_left<'allocator>(
                 simple_primary_lifetime_ref
             };
 
-            let ast_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
-
-            ast_lifetime_tree.same_bound_entity.push(last_lifetime_ref);
+            lifetime_scope
+                .instance
+                .merge(ast_lifetime_ref, last_lifetime_ref);
         }
         PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => todo!(),
         PrimaryLeftExpr::NewArrayExpression(new_array_expression) => todo!(),
@@ -778,8 +813,6 @@ fn collect_lifetime_simple_primary<'allocator>(
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) -> LifetimeTreeRef {
-    // DO NOT SET LIFETIME at this layer.
-    // This lifetime is set at the parent layer.
     let ast_lifetime_ref = lifetime_scope
         .instance
         .create_entity_lifetime_tree(EntityID::from(ast));
@@ -814,10 +847,9 @@ fn collect_lifetime_simple_primary<'allocator>(
                     context,
                 );
 
-                let ast_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
-                ast_lifetime_tree
-                    .same_bound_entity
-                    .push(expression_lifetime_ref);
+                lifetime_scope
+                    .instance
+                    .merge(ast_lifetime_ref, expression_lifetime_ref);
 
                 lifetime_scope.collect();
             }
@@ -832,12 +864,10 @@ fn collect_lifetime_simple_primary<'allocator>(
                         let variable_lifetime_ref = lifetime_scope
                             .instance
                             .get_entity_lifetime_tree_ref(variable_entity_id);
-                        let ast_lifetime_ref =
-                            lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
 
-                        ast_lifetime_ref
-                            .same_bound_entity
-                            .push(variable_lifetime_ref);
+                        lifetime_scope
+                            .instance
+                            .merge(ast_lifetime_ref, variable_lifetime_ref);
 
                         true
                     } else {
@@ -855,24 +885,20 @@ fn collect_lifetime_simple_primary<'allocator>(
                     .instance
                     .get_lifetime_tree(literal_lifetime_ref);
 
-                literal_lifetime_tree.root_lifetime = Some(STATIC_LIFETIME);
+                literal_lifetime_tree.lifetimes.push(STATIC_LIFETIME);
 
-                let ast_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
-
-                ast_lifetime_tree
-                    .same_bound_entity
-                    .push(literal_lifetime_ref);
+                lifetime_scope
+                    .instance
+                    .merge(ast_lifetime_ref, literal_lifetime_ref);
             }
         }
         SimplePrimary::ThisKeyword(_) => {
             if let Some(this_argument_lifetime_ref) =
                 lifetime_scope.instance.this_argument_lifetime_ref
             {
-                let ast_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
-
-                ast_lifetime_tree
-                    .same_bound_entity
-                    .push(this_argument_lifetime_ref);
+                lifetime_scope
+                    .instance
+                    .merge(ast_lifetime_ref, this_argument_lifetime_ref);
             }
         }
         _ => {}

@@ -243,14 +243,8 @@ pub struct TypedElementAccess {
 
 #[derive(Debug, Default)]
 pub struct LifetimeTree {
-    lifetimes: Vec<Lifetime>,
-    children: FxHashMap<String, LifetimeTreeRef>,
-}
-
-impl LifetimeTree {
-    pub fn set_child(&mut self, name: String, lifetime_ref: LifetimeTreeRef) {
-        self.children.insert(name, lifetime_ref);
-    }
+    pub lifetimes: Vec<Lifetime>,
+    pub children: FxHashMap<String, LifetimeTreeRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

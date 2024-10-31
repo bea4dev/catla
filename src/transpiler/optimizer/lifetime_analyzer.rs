@@ -198,6 +198,30 @@ impl LifetimeInstance {
     pub fn add_function_call(&mut self, function_call: FunctionCallLifetime) {
         self.function_calls.push(function_call);
     }
+
+    fn take_lifetime_tree_ownership(&mut self, lifetime_tree_ref: LifetimeTreeRef) -> Option<LifetimeTree> {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+        self.lifetime_tree_map.remove(&lifetime_tree_ref)
+    }
+
+    pub fn merge(&mut self, lifetime_ref_left: LifetimeTreeRef, lifetime_ref_right: LifetimeTreeRef) {
+        let left_lifetime_tree = self.take_lifetime_tree_ownership(lifetime_ref_left);
+        let right_lifetime_tree = self.take_lifetime_tree_ownership(lifetime_ref_right);
+
+        match (left_lifetime_tree, right_lifetime_tree) {
+            (Some(left_lifetime_tree), Some(right_lifetime_tree)) => {
+                for (left_child_name, left_child_ref) in left_lifetime_tree.children.iter() {
+                    if let Some(right_child_ref) = right_lifetime_tree.children.get(left_child_name) {
+                        self.merge(*left_child_ref, *right_child_ref);
+                    }
+                }
+            },
+            (Some(left_lifetime_tree), None) => {
+                
+            },
+            _ => unreachable!()
+        }
+    }
 }
 
 pub struct LifetimeExpected {

@@ -199,7 +199,11 @@ impl LifetimeInstance {
         self.function_calls.push(function_call);
     }
 
-    pub fn merge(&mut self, lifetime_ref_left: LifetimeTreeRef, lifetime_ref_right: LifetimeTreeRef) {
+    pub fn merge(
+        &mut self,
+        lifetime_ref_left: LifetimeTreeRef,
+        lifetime_ref_right: LifetimeTreeRef,
+    ) {
         let left_resolved_ref = self.resolve_lifetime_ref(lifetime_ref_left);
         let right_resolved_ref = self.resolve_lifetime_ref(lifetime_ref_right);
 
@@ -213,21 +217,61 @@ impl LifetimeInstance {
         let merged_tree = match (left_lifetime_tree, right_lifetime_tree) {
             (Some(mut left_lifetime_tree), Some(mut right_lifetime_tree)) => {
                 for (left_child_name, left_child_ref) in left_lifetime_tree.children.iter() {
-                    if let Some(right_child_ref) = right_lifetime_tree.children.remove(left_child_name) {
+                    if let Some(right_child_ref) =
+                        right_lifetime_tree.children.remove(left_child_name)
+                    {
                         self.merge(*left_child_ref, right_child_ref);
                     }
                 }
 
-                left_lifetime_tree.children.extend(right_lifetime_tree.children);
-                left_lifetime_tree.lifetimes.extend(right_lifetime_tree.lifetimes);
+                left_lifetime_tree
+                    .children
+                    .extend(right_lifetime_tree.children);
+                left_lifetime_tree
+                    .lifetimes
+                    .extend(right_lifetime_tree.lifetimes);
 
                 left_lifetime_tree
-            },
-            _ => unreachable!()
+            }
+            _ => unreachable!(),
         };
 
-        self.lifetime_ref_reference_map.insert(right_resolved_ref, left_resolved_ref);
-        self.lifetime_tree_map.insert(left_resolved_ref, merged_tree);
+        self.lifetime_ref_reference_map
+            .insert(right_resolved_ref, left_resolved_ref);
+        self.lifetime_tree_map
+            .insert(left_resolved_ref, merged_tree);
+    }
+
+    pub fn get_or_create_child(
+        &mut self,
+        parent: LifetimeTreeRef,
+        child_name: &str,
+    ) -> LifetimeTreeRef {
+        let parent_resolved = self.resolve_lifetime_ref(parent);
+
+        {
+            let parent_lifetime_tree = self.get_lifetime_tree(parent_resolved);
+
+            if let Some(child) = parent_lifetime_tree.children.get(child_name) {
+                return *child;
+            }
+        }
+
+        let new_child_ref = self.create_lifetime_tree();
+        let parent_lifetime_tree = self.get_lifetime_tree(parent_resolved);
+        parent_lifetime_tree
+            .children
+            .insert(child_name.to_string(), new_child_ref);
+
+        new_child_ref
+    }
+
+    pub fn link_entity_and_lifetime_ref(
+        &mut self,
+        entity_id: EntityID,
+        lifetime_ref: LifetimeTreeRef,
+    ) {
+        self.entity_lifetime_ref_map.insert(entity_id, lifetime_ref);
     }
 }
 
@@ -291,10 +335,12 @@ pub fn collect_lifetime(
     let mut lifetime_instance = LifetimeInstance::new();
     let mut lifetime_scope = LifetimeScope::new(&mut lifetime_instance, allocator);
     let mut stack_lifetime_scope = StackLifetimeScope::new(allocator);
+    let return_value_tree_ref = lifetime_scope.instance.create_lifetime_tree();
 
     collect_lifetime_program(
         ast,
         None,
+        return_value_tree_ref,
         import_element_map,
         name_resolved_map,
         module_user_type_map,

@@ -164,7 +164,7 @@ fn collect_lifetime_expression<'allocator>(
                 );
             }
         }
-        ExpressionEnum::Closure(closure) => {},
+        ExpressionEnum::Closure(closure) => {}
     }
 }
 
@@ -902,7 +902,103 @@ fn collect_lifetime_primary_left<'allocator>(
                 .instance
                 .merge(ast_lifetime_ref, last_lifetime_ref);
         }
-        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => todo!(),
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
+            let array_type = type_inference_result.get_entity_type(EntityID::from(&ast.first_expr));
+            let base_type = if let Type::Array(base_type) = array_type {
+                base_type.as_ref()
+            } else {
+                &Type::Unknown
+            };
+
+            let array_lifetime_ref = lifetime_scope
+                .instance
+                .create_entity_lifetime_tree(EntityID::from(new_array_init_expression));
+
+            if new_array_init_expression.for_keyword_span.is_some() {
+                let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                let return_init_func_value =
+                    if let Ok(init_expression) = new_array_init_expression.init_expression {
+                        let init_expression_lifetime_ref = lifetime_scope
+                            .instance
+                            .create_entity_lifetime_tree(EntityID::from(init_expression));
+
+                        {
+                            let mut lifetime_scope =
+                                LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                            collect_lifetime_expression(
+                                init_expression,
+                                false,
+                                Some(init_expression_lifetime_ref),
+                                return_value_tree_ref,
+                                import_element_map,
+                                name_resolved_map,
+                                module_user_type_map,
+                                module_element_type_map,
+                                module_element_type_maps,
+                                type_inference_result,
+                                &mut lifetime_scope,
+                                stack_lifetime_scope,
+                                lifetime_instance_map,
+                                allocator,
+                                context,
+                            );
+
+                            lifetime_scope.collect();
+                        }
+
+                        let init_expression_type =
+                            type_inference_result.get_entity_type(EntityID::from(init_expression));
+
+                        add_lifetime_tree_to_scope(
+                            init_expression_lifetime_ref,
+                            init_expression_type,
+                            &mut lifetime_scope,
+                            stack_lifetime_scope,
+                        );
+
+                        let return_value = lifetime_scope.instance.create_lifetime_tree();
+
+                        if let Type::Function {
+                            function_info,
+                            generics: _,
+                        } = init_expression_type
+                        {
+                            let function_call = FunctionCallLifetime {
+                                arguments: vec![lifetime_scope.instance.create_lifetime_tree()],
+                                return_value,
+                                function: function_info.clone(),
+                            };
+
+                            lifetime_scope.instance.add_function_call(function_call);
+                        }
+
+                        return_value
+                    } else {
+                        lifetime_scope.instance.create_lifetime_tree()
+                    };
+
+                add_lifetime_tree_to_scope(
+                    return_init_func_value,
+                    base_type,
+                    &mut lifetime_scope,
+                    stack_lifetime_scope,
+                );
+
+                let child_lifetime_ref = lifetime_scope
+                    .instance
+                    .get_or_create_child(array_lifetime_ref, "");
+
+                lifetime_scope
+                    .instance
+                    .merge(child_lifetime_ref, return_init_func_value);
+
+                lifetime_scope.collect();
+            } else {
+
+            }
+        }
         PrimaryLeftExpr::NewArrayExpression(new_array_expression) => todo!(),
         PrimaryLeftExpr::NewExpression(new_expression) => todo!(),
         PrimaryLeftExpr::IfExpression(if_expression) => todo!(),

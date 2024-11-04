@@ -231,6 +231,18 @@ impl LifetimeInstance {
                     .lifetimes
                     .extend(right_lifetime_tree.lifetimes);
 
+                if left_lifetime_tree.is_merged {
+                    left_lifetime_tree.is_alloc_point =
+                        left_lifetime_tree.is_alloc_point && right_lifetime_tree.is_alloc_point;
+                } else {
+                    left_lifetime_tree.is_alloc_point = right_lifetime_tree.is_alloc_point;
+                }
+                left_lifetime_tree.is_merged = true;
+
+                if !left_lifetime_tree.is_alloc_point && right_lifetime_tree.is_alloc_point {
+                    left_lifetime_tree.lifetimes.push(STATIC_LIFETIME);
+                }
+
                 left_lifetime_tree
             }
             _ => unreachable!(),
@@ -289,6 +301,8 @@ pub struct TypedElementAccess {
 pub struct LifetimeTree {
     pub lifetimes: Vec<Lifetime>,
     pub children: FxHashMap<String, LifetimeTreeRef>,
+    pub is_merged: bool,
+    pub is_alloc_point: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

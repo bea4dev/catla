@@ -3,7 +3,7 @@ use std::{cell::RefCell, sync::Arc};
 use allocator_api2::vec::Vec;
 use bumpalo::Bump;
 use catla_parser::parser::{Program, Spanned};
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use lifetime_collector::collect_lifetime_program;
 
 use crate::transpiler::{
@@ -230,6 +230,9 @@ impl LifetimeInstance {
                 left_lifetime_tree
                     .lifetimes
                     .extend(right_lifetime_tree.lifetimes);
+                left_lifetime_tree
+                    .depend_trees
+                    .extend(right_lifetime_tree.depend_trees);
 
                 if left_lifetime_tree.is_merged {
                     left_lifetime_tree.is_alloc_point =
@@ -303,6 +306,7 @@ pub struct LifetimeTree {
     pub children: FxHashMap<String, LifetimeTreeRef>,
     pub is_merged: bool,
     pub is_alloc_point: bool,
+    pub depend_trees: FxHashSet<LifetimeTreeRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

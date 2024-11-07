@@ -6,8 +6,9 @@ use bumpalo::Bump;
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
     FunctionCall, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, Program,
-    SimplePrimary, Spanned, StatementAST, AST,
+    SimplePrimary, Spanned, StatementAST,
 };
+use either::Either;
 use fxhash::FxHashMap;
 
 use crate::transpiler::{
@@ -920,13 +921,6 @@ fn collect_lifetime_primary_left<'allocator>(
                 .merge(ast_lifetime_ref, last_lifetime_ref);
         }
         PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
-            let array_type = type_inference_result.get_entity_type(EntityID::from(&ast.first_expr));
-            let base_type = if let Type::Array(base_type) = array_type {
-                base_type.as_ref()
-            } else {
-                &Type::Unknown
-            };
-
             let array_lifetime_ref = lifetime_scope
                 .instance
                 .create_entity_lifetime_tree(EntityID::from(new_array_init_expression));
@@ -1066,9 +1060,219 @@ fn collect_lifetime_primary_left<'allocator>(
                 .instance
                 .merge(ast_lifetime_ref, array_lifetime_ref);
         }
-        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => todo!(),
-        PrimaryLeftExpr::NewExpression(new_expression) => todo!(),
-        PrimaryLeftExpr::IfExpression(if_expression) => todo!(),
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {
+            let array_lifetime_ref = lifetime_scope
+                .instance
+                .create_entity_lifetime_tree(EntityID::from(new_array_expression));
+            let child_lifetime_ref = lifetime_scope
+                .instance
+                .get_or_create_child(array_lifetime_ref, "");
+
+            for value_expression in new_array_expression.value_expressions.iter() {
+                let value_expression = match value_expression {
+                    Ok(expression) => expression,
+                    Err(_) => continue,
+                };
+
+                let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                let expression_lifetime_ref = lifetime_scope
+                    .instance
+                    .create_entity_lifetime_tree(EntityID::from(*value_expression));
+
+                collect_lifetime_expression(
+                    value_expression,
+                    false,
+                    Some(expression_lifetime_ref),
+                    return_value_tree_ref,
+                    import_element_map,
+                    name_resolved_map,
+                    module_user_type_map,
+                    module_element_type_map,
+                    module_element_type_maps,
+                    type_inference_result,
+                    &mut lifetime_scope,
+                    stack_lifetime_scope,
+                    lifetime_instance_map,
+                    allocator,
+                    context,
+                );
+
+                let expression_lifetime_tree = lifetime_scope
+                    .instance
+                    .get_lifetime_tree(expression_lifetime_ref);
+                expression_lifetime_tree
+                    .depend_trees
+                    .insert(array_lifetime_ref);
+
+                lifetime_scope
+                    .instance
+                    .merge(child_lifetime_ref, expression_lifetime_ref);
+
+                lifetime_scope.collect();
+            }
+
+            lifetime_scope
+                .instance
+                .merge(ast_lifetime_ref, array_lifetime_ref);
+        }
+        PrimaryLeftExpr::NewExpression(new_expression) => {
+            let object_lifetime_ref = lifetime_scope
+                .instance
+                .create_entity_lifetime_tree(EntityID::from(new_expression));
+
+            if let Ok(field_assigns) = &new_expression.field_assigns {
+                for field_assign in field_assigns.iter() {
+                    let expression = match field_assign.expression {
+                        Ok(expression) => expression,
+                        Err(_) => continue,
+                    };
+
+                    let expression_lifetime_ref = lifetime_scope
+                        .instance
+                        .create_entity_lifetime_tree(EntityID::from(expression));
+
+                    {
+                        let mut lifetime_scope =
+                            LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                        collect_lifetime_expression(
+                            expression,
+                            false,
+                            Some(expression_lifetime_ref),
+                            return_value_tree_ref,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            module_element_type_maps,
+                            type_inference_result,
+                            &mut lifetime_scope,
+                            stack_lifetime_scope,
+                            lifetime_instance_map,
+                            allocator,
+                            context,
+                        );
+
+                        let expression_lifetime_tree = lifetime_scope
+                            .instance
+                            .get_lifetime_tree(expression_lifetime_ref);
+                        expression_lifetime_tree
+                            .depend_trees
+                            .insert(object_lifetime_ref);
+
+                        let child_lifetime_ref = lifetime_scope
+                            .instance
+                            .get_or_create_child(object_lifetime_ref, field_assign.name.value);
+                        lifetime_scope
+                            .instance
+                            .merge(child_lifetime_ref, expression_lifetime_ref);
+
+                        lifetime_scope.collect();
+                    }
+                }
+            }
+
+            lifetime_scope
+                .instance
+                .merge(ast_lifetime_ref, object_lifetime_ref);
+        }
+        PrimaryLeftExpr::IfExpression(if_expression) => {
+            let first_condition = [if_expression.if_statement.condition.as_ref().ok()];
+            let first_block = [if_expression.if_statement.block.value.as_ref()];
+
+            let chain_conditions = if_expression.chain.iter().map(|chain| {
+                chain
+                    .else_if_or_else
+                    .value
+                    .as_ref()
+                    .map(|chain| match chain {
+                        Either::Left(if_statement) => if_statement.condition.as_ref().ok(),
+                        Either::Right(_) => None,
+                    })
+                    .unwrap_or(None)
+            });
+
+            let chain_blocks = if_expression.chain.iter().map(|chain| {
+                chain
+                    .else_if_or_else
+                    .value
+                    .as_ref()
+                    .map(|chain| match chain {
+                        Either::Left(if_statement) => if_statement.block.value.as_ref(),
+                        Either::Right(block) => Some(block),
+                    })
+                    .unwrap_or(None)
+            });
+
+            let conditions_iter = first_condition.iter().cloned().chain(chain_conditions);
+            let blocks_iter = first_block.iter().cloned().chain(chain_blocks);
+
+            let if_expression_lifetime_ref = lifetime_scope
+                .instance
+                .create_entity_lifetime_tree(EntityID::from(if_expression));
+
+            for (condition, block) in conditions_iter.zip(blocks_iter) {
+                if let Some(condition) = condition {
+                    let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                    collect_lifetime_expression(
+                        *condition,
+                        false,
+                        None,
+                        return_value_tree_ref,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        module_element_type_maps,
+                        type_inference_result,
+                        &mut lifetime_scope,
+                        stack_lifetime_scope,
+                        lifetime_instance_map,
+                        allocator,
+                        context,
+                    );
+
+                    lifetime_scope.collect();
+                }
+
+                if let Some(block) = block {
+                    let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                    let program_lifetime_ref = lifetime_scope
+                        .instance
+                        .create_entity_lifetime_tree(EntityID::from(block.program));
+
+                    collect_lifetime_program(
+                        block.program,
+                        Some(program_lifetime_ref),
+                        return_value_tree_ref,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        module_element_type_maps,
+                        type_inference_result,
+                        &mut lifetime_scope,
+                        stack_lifetime_scope,
+                        lifetime_instance_map,
+                        allocator,
+                        context,
+                    );
+
+                    lifetime_scope
+                        .instance
+                        .merge(if_expression_lifetime_ref, program_lifetime_ref);
+
+                    lifetime_scope.collect();
+                }
+            }
+
+            lifetime_scope
+                .instance
+                .merge(ast_lifetime_ref, if_expression_lifetime_ref);
+        }
         PrimaryLeftExpr::LoopExpression(loop_expression) => todo!(),
     };
 

@@ -62,7 +62,8 @@ impl<'allocator, 'instance> LifetimeScope<'allocator, 'instance> {
     pub fn collect(self) {
         for lifetime_tree_ref in self.lifetime_trees.iter().rev() {
             let lifetime = self.instance.next_lifetime();
-            let lifetime_tree = self.instance.get_lifetime_tree(*lifetime_tree_ref);
+            let lifetime_tree_ref = self.instance.resolve_lifetime_ref(*lifetime_tree_ref);
+            let lifetime_tree = self.instance.get_lifetime_tree(lifetime_tree_ref);
             lifetime_tree.lifetimes.push(lifetime);
         }
     }
@@ -87,6 +88,7 @@ impl<'allocator> StackLifetimeScope<'allocator> {
         let lifetime = lifetime_instance.next_lifetime();
 
         for lifetime_tree_ref in self.lifetime_trees {
+            let lifetime_tree_ref = lifetime_instance.resolve_lifetime_ref(lifetime_tree_ref);
             let lifetime_tree = lifetime_instance.get_lifetime_tree(lifetime_tree_ref);
             lifetime_tree.lifetimes.push(lifetime);
         }
@@ -231,8 +233,8 @@ impl LifetimeInstance {
                     .lifetimes
                     .extend(right_lifetime_tree.lifetimes);
                 left_lifetime_tree
-                    .depend_trees
-                    .extend(right_lifetime_tree.depend_trees);
+                    .alloc_point_ref
+                    .extend(right_lifetime_tree.alloc_point_ref);
 
                 if left_lifetime_tree.is_merged {
                     left_lifetime_tree.is_alloc_point =
@@ -280,14 +282,6 @@ impl LifetimeInstance {
 
         new_child_ref
     }
-
-    pub fn link_entity_and_lifetime_ref(
-        &mut self,
-        entity_id: EntityID,
-        lifetime_ref: LifetimeTreeRef,
-    ) {
-        self.entity_lifetime_ref_map.insert(entity_id, lifetime_ref);
-    }
 }
 
 pub struct LifetimeExpected {
@@ -306,7 +300,8 @@ pub struct LifetimeTree {
     pub children: FxHashMap<String, LifetimeTreeRef>,
     pub is_merged: bool,
     pub is_alloc_point: bool,
-    pub depend_trees: FxHashSet<LifetimeTreeRef>,
+    pub alloc_point_ref: FxHashSet<LifetimeTreeRef>,
+    pub borrow_ref: FxHashSet<LifetimeTreeRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

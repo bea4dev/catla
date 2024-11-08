@@ -235,6 +235,9 @@ impl LifetimeInstance {
                 left_lifetime_tree
                     .alloc_point_ref
                     .extend(right_lifetime_tree.alloc_point_ref);
+                left_lifetime_tree
+                    .borrow_ref
+                    .extend(right_lifetime_tree.borrow_ref);
 
                 if left_lifetime_tree.is_merged {
                     left_lifetime_tree.is_alloc_point =
@@ -279,6 +282,13 @@ impl LifetimeInstance {
         parent_lifetime_tree
             .children
             .insert(child_name.to_string(), new_child_ref);
+
+        let parent_alloc_point_ref = parent_lifetime_tree.alloc_point_ref.clone();
+        let parent_borrow_ref = parent_lifetime_tree.borrow_ref.clone();
+
+        for parent_borrow_ref in parent_borrow_ref {
+            
+        }
 
         new_child_ref
     }

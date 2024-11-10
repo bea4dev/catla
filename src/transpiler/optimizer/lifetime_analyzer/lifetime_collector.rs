@@ -6,7 +6,7 @@ use bumpalo::Bump;
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
     FunctionCall, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, Program,
-    SimplePrimary, Spanned, StatementAST,
+    SimplePrimary, Spanned, StatementAST, VariableBinding,
 };
 use either::Either;
 use fxhash::FxHashMap;
@@ -124,6 +124,13 @@ pub fn collect_lifetime_program<'allocator>(
                         context,
                     );
 
+                    add_lifetime_tree_to_scope(
+                        expression_lifetime_ref,
+                        type_inference_result.get_entity_type(EntityID::from(expression)),
+                        &mut lifetime_scope,
+                        stack_lifetime_scope,
+                    );
+
                     lifetime_scope.collect();
 
                     expression_lifetime_ref
@@ -142,7 +149,20 @@ pub fn collect_lifetime_program<'allocator>(
                 left_lifetime_tree.borrow_ref.insert(right_lifetime_ref);
             }
             StatementAST::Exchange(exchange) => {}
-            StatementAST::VariableDefine(variable_define) => {}
+            StatementAST::VariableDefine(variable_define) => {
+                fn create_lifetime_tree_for_variable_binding(lifetime_scope: &mut LifetimeInstance, binding: &VariableBinding) -> LifetimeTreeRef {
+                    match &binding.binding {
+                        Either::Left(literal) => {
+                            lifetime_scope.create_entity_lifetime_tree(EntityID::from(literal))
+                        },
+                        Either::Right(bindings) => {
+                            let lifetime_ref = lifetime_scope.create_lifetime_tree();
+
+                            lifetime_ref
+                        },
+                    }
+                }
+            }
             StatementAST::FunctionDefine(function_define) => {}
             StatementAST::UserTypeDefine(user_type_define) => {}
             StatementAST::Implements(implements) => {}

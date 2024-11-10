@@ -150,18 +150,98 @@ pub fn collect_lifetime_program<'allocator>(
             }
             StatementAST::Exchange(exchange) => {}
             StatementAST::VariableDefine(variable_define) => {
-                fn create_lifetime_tree_for_variable_binding(lifetime_scope: &mut LifetimeInstance, binding: &VariableBinding) -> LifetimeTreeRef {
+                fn create_lifetime_tree_for_variable_binding(
+                    lifetime_instance: &mut LifetimeInstance,
+                    binding: &VariableBinding,
+                ) -> LifetimeTreeRef {
                     match &binding.binding {
                         Either::Left(literal) => {
-                            lifetime_scope.create_entity_lifetime_tree(EntityID::from(literal))
-                        },
+                            lifetime_instance.create_entity_lifetime_tree(EntityID::from(literal))
+                        }
                         Either::Right(bindings) => {
-                            let lifetime_ref = lifetime_scope.create_lifetime_tree();
+                            let lifetime_ref = lifetime_instance.create_lifetime_tree();
+
+                            for (index, binding) in bindings.iter().enumerate() {
+                                let index_str = index.to_string();
+
+                                let child_ref = lifetime_instance
+                                    .get_or_create_child(lifetime_ref, index_str.as_str());
+                                let binding_ref = create_lifetime_tree_for_variable_binding(
+                                    lifetime_instance,
+                                    binding,
+                                );
+                                lifetime_instance.merge(child_ref, binding_ref);
+                            }
 
                             lifetime_ref
-                        },
+                        }
                     }
                 }
+
+                let variable_lifetime_ref = if let Ok(binding) = &variable_define.binding {
+                    create_lifetime_tree_for_variable_binding(lifetime_scope.instance, binding)
+                } else {
+                    lifetime_scope.instance.create_lifetime_tree()
+                };
+
+                let (expression_lifetime_ref, expression_type) =
+                    if let Some(expression_result) = &variable_define.expression {
+                        if let Ok(expression) = expression_result {
+                            let mut lifetime_scope =
+                                LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                            let expression_lifetime_ref = lifetime_scope
+                                .instance
+                                .create_entity_lifetime_tree(EntityID::from(*expression));
+
+                            collect_lifetime_expression(
+                                *expression,
+                                true,
+                                false,
+                                Some(expression_lifetime_ref),
+                                return_value_tree_ref,
+                                import_element_map,
+                                name_resolved_map,
+                                module_user_type_map,
+                                module_element_type_map,
+                                module_element_type_maps,
+                                type_inference_result,
+                                &mut lifetime_scope,
+                                stack_lifetime_scope,
+                                lifetime_instance_map,
+                                allocator,
+                                context,
+                            );
+
+                            lifetime_scope.collect();
+
+                            (
+                                expression_lifetime_ref,
+                                type_inference_result.get_entity_type(EntityID::from(*expression)),
+                            )
+                        } else {
+                            (
+                                lifetime_scope.instance.create_lifetime_tree(),
+                                &Type::Unknown,
+                            )
+                        }
+                    } else {
+                        (
+                            lifetime_scope.instance.create_lifetime_tree(),
+                            &Type::Unknown,
+                        )
+                    };
+
+                lifetime_scope
+                    .instance
+                    .merge(variable_lifetime_ref, expression_lifetime_ref);
+
+                add_lifetime_tree_to_scope(
+                    variable_lifetime_ref,
+                    expression_type,
+                    lifetime_scope,
+                    stack_lifetime_scope,
+                );
             }
             StatementAST::FunctionDefine(function_define) => {}
             StatementAST::UserTypeDefine(user_type_define) => {}

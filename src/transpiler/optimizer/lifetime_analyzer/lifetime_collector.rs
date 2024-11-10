@@ -22,8 +22,8 @@ use crate::transpiler::{
 };
 
 use super::{
-    FunctionCallLifetime, LifetimeInstance, LifetimeScope, LifetimeTreeRef, ScoopGroup,
-    StackLifetimeScope, STATIC_LIFETIME,
+    FunctionCallLifetime, LifetimeExpected, LifetimeInstance, LifetimeScope, LifetimeTreeRef,
+    ScoopGroup, StackLifetimeScope, STATIC_LIFETIME,
 };
 
 fn add_lifetime_tree_to_scope(
@@ -68,16 +68,85 @@ pub fn collect_lifetime_program<'allocator>(
         };
 
         match statement {
-            StatementAST::Assignment(assignment) => {}
-            StatementAST::Exchange(exchange) => todo!(),
-            StatementAST::Import(import) => todo!(),
-            StatementAST::StatementAttributes(vec) => todo!(),
-            StatementAST::VariableDefine(variable_define) => todo!(),
-            StatementAST::FunctionDefine(function_define) => todo!(),
-            StatementAST::UserTypeDefine(user_type_define) => todo!(),
-            StatementAST::TypeDefine(type_define) => todo!(),
-            StatementAST::Implements(implements) => todo!(),
-            StatementAST::DropStatement(drop_statement) => todo!(),
+            StatementAST::Assignment(assignment) => {
+                let left_lifetime_ref = lifetime_scope
+                    .instance
+                    .create_entity_lifetime_tree(EntityID::from(assignment.left_expr));
+
+                {
+                    let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                    collect_lifetime_expression(
+                        assignment.left_expr,
+                        true,
+                        true,
+                        Some(left_lifetime_ref),
+                        return_value_tree_ref,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        module_element_type_maps,
+                        type_inference_result,
+                        &mut lifetime_scope,
+                        stack_lifetime_scope,
+                        lifetime_instance_map,
+                        allocator,
+                        context,
+                    );
+
+                    lifetime_scope.collect();
+                }
+
+                let right_lifetime_ref = if let Ok(expression) = assignment.right_expr {
+                    let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
+
+                    let expression_lifetime_ref = lifetime_scope
+                        .instance
+                        .create_entity_lifetime_tree(EntityID::from(expression));
+
+                    collect_lifetime_expression(
+                        expression,
+                        true,
+                        false,
+                        Some(expression_lifetime_ref),
+                        return_value_tree_ref,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        module_element_type_maps,
+                        type_inference_result,
+                        &mut lifetime_scope,
+                        stack_lifetime_scope,
+                        lifetime_instance_map,
+                        allocator,
+                        context,
+                    );
+
+                    lifetime_scope.collect();
+
+                    expression_lifetime_ref
+                } else {
+                    lifetime_scope.instance.create_lifetime_tree()
+                };
+
+                let expected = LifetimeExpected {
+                    shorter: left_lifetime_ref,
+                    longer: right_lifetime_ref,
+                };
+                lifetime_scope.instance.add_lifetime_expected(expected);
+
+                let left_lifetime_tree =
+                    lifetime_scope.instance.get_lifetime_tree(left_lifetime_ref);
+                left_lifetime_tree.borrow_ref.insert(right_lifetime_ref);
+            }
+            StatementAST::Exchange(exchange) => {}
+            StatementAST::VariableDefine(variable_define) => {}
+            StatementAST::FunctionDefine(function_define) => {}
+            StatementAST::UserTypeDefine(user_type_define) => {}
+            StatementAST::Implements(implements) => {}
+            StatementAST::DropStatement(drop_statement) => {}
             StatementAST::Expression(expression) => {
                 let is_last_expression = index + 1 == ast.statements.len();
 
@@ -106,6 +175,7 @@ pub fn collect_lifetime_program<'allocator>(
                     context,
                 );
             }
+            _ => {}
         }
     }
 }
@@ -774,25 +844,19 @@ fn collect_lifetime_primary<'allocator>(
                 let child_lifetime_ref = lifetime_scope
                     .instance
                     .get_or_create_child(prev_lifetime_tree_ref, literal.value);
-                let child_lifetime_ref = if as_assign_left && current_chain + 1 == ast.chain.len() {
-                    child_lifetime_ref
-                } else {
-                    let borrow_lifetime_ref = lifetime_scope
-                        .instance
-                        .create_entity_lifetime_tree(EntityID::from(literal));
-                    let borrow_lifetime_tree = lifetime_scope
-                        .instance
-                        .get_lifetime_tree(borrow_lifetime_ref);
-                    borrow_lifetime_tree.borrow_ref.insert(child_lifetime_ref);
-
-                    borrow_lifetime_ref
-                };
+                let borrow_lifetime_ref = lifetime_scope
+                    .instance
+                    .create_entity_lifetime_tree(EntityID::from(literal));
+                let borrow_lifetime_tree = lifetime_scope
+                    .instance
+                    .get_lifetime_tree(borrow_lifetime_ref);
+                borrow_lifetime_tree.borrow_ref.insert(child_lifetime_ref);
 
                 if let Some(function_call) = function_call {
                     let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
 
                     add_lifetime_tree_to_scope(
-                        child_lifetime_ref,
+                        borrow_lifetime_ref,
                         type_inference_result.get_entity_type(EntityID::from(literal)),
                         &mut lifetime_scope,
                         stack_lifetime_scope,
@@ -825,7 +889,7 @@ fn collect_lifetime_primary<'allocator>(
                     )
                 } else {
                     (
-                        child_lifetime_ref,
+                        borrow_lifetime_ref,
                         type_inference_result
                             .get_entity_type(EntityID::from(literal))
                             .clone(),

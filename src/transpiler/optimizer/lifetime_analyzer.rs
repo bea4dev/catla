@@ -285,23 +285,28 @@ impl LifetimeInstance {
 
         let parent_alloc_point_ref = parent_lifetime_tree.alloc_point_ref.clone();
         let parent_borrow_ref = parent_lifetime_tree.borrow_ref.clone();
+        let mut child_borrow_ref_set = FxHashSet::default();
 
         for parent_borrow_ref in parent_borrow_ref {
-            
+            let child_borrow_ref = self.get_or_create_child(parent_borrow_ref, child_name);
+            child_borrow_ref_set.insert(child_borrow_ref);
         }
 
+        let child_tree = self.get_lifetime_tree(new_child_ref);
+        child_tree.borrow_ref.extend(child_borrow_ref_set);
+        child_tree.alloc_point_ref.extend(parent_alloc_point_ref);
+
         new_child_ref
+    }
+
+    pub fn add_lifetime_expected(&mut self, expected: LifetimeExpected) {
+        self.lifetime_expected.push(expected);
     }
 }
 
 pub struct LifetimeExpected {
-    pub shorter: TypedElementAccess,
-    pub longer: TypedElementAccess,
-}
-
-pub struct TypedElementAccess {
-    pub root: EntityID,
-    pub element_path: Vec<String>,
+    pub shorter: LifetimeTreeRef,
+    pub longer: LifetimeTreeRef,
 }
 
 #[derive(Debug, Default)]

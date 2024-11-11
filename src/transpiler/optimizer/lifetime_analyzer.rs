@@ -103,13 +103,12 @@ pub struct LifetimeInstance {
     entity_lifetime_ref_map: FxHashMap<EntityID, LifetimeTreeRef>,
     lifetime_tree_map: FxHashMap<LifetimeTreeRef, LifetimeTree>,
     lifetime_ref_reference_map: FxHashMap<LifetimeTreeRef, LifetimeTreeRef>,
-    this_argument_lifetime_ref: Option<LifetimeTreeRef>,
-    argument_lifetime_ref: FxHashMap<EntityID, LifetimeTreeRef>,
+    this_argument_lifetime_ref: LifetimeTreeRef,
 }
 
 impl LifetimeInstance {
     pub fn new() -> Self {
-        Self {
+        let mut instance = Self {
             lifetime_counter: 0,
             tree_ref_counter: 0,
             lifetime_expected: Vec::new(),
@@ -117,26 +116,12 @@ impl LifetimeInstance {
             entity_lifetime_ref_map: FxHashMap::default(),
             lifetime_tree_map: FxHashMap::default(),
             lifetime_ref_reference_map: FxHashMap::default(),
-            this_argument_lifetime_ref: None,
-            argument_lifetime_ref: FxHashMap::default(),
-        }
-    }
+            this_argument_lifetime_ref: LifetimeTreeRef(0),
+        };
 
-    pub fn init_function_argument(
-        &mut self,
-        arguments: impl Iterator<Item = EntityID>,
-        has_this_argument: bool,
-    ) {
-        if has_this_argument {
-            let this_lifetime_ref = self.create_lifetime_tree();
-            self.this_argument_lifetime_ref = Some(this_lifetime_ref);
-        }
+        instance.this_argument_lifetime_ref = instance.create_lifetime_tree();
 
-        self.argument_lifetime_ref.clear();
-
-        for argument in arguments {
-            self.create_entity_lifetime_tree(argument);
-        }
+        instance
     }
 
     pub fn next_lifetime(&mut self) -> Lifetime {

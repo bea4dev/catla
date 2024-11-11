@@ -23,7 +23,7 @@ use crate::transpiler::{
 
 use super::{
     FunctionCallLifetime, LifetimeExpected, LifetimeInstance, LifetimeScope, LifetimeTreeRef,
-    ScoopGroup, StackLifetimeScope, STATIC_LIFETIME,
+    StackLifetimeScope, STATIC_LIFETIME,
 };
 
 fn add_lifetime_tree_to_scope(
@@ -150,34 +150,6 @@ pub fn collect_lifetime_program<'allocator>(
             }
             StatementAST::Exchange(exchange) => {}
             StatementAST::VariableDefine(variable_define) => {
-                fn create_lifetime_tree_for_variable_binding(
-                    lifetime_instance: &mut LifetimeInstance,
-                    binding: &VariableBinding,
-                ) -> LifetimeTreeRef {
-                    match &binding.binding {
-                        Either::Left(literal) => {
-                            lifetime_instance.create_entity_lifetime_tree(EntityID::from(literal))
-                        }
-                        Either::Right(bindings) => {
-                            let lifetime_ref = lifetime_instance.create_lifetime_tree();
-
-                            for (index, binding) in bindings.iter().enumerate() {
-                                let index_str = index.to_string();
-
-                                let child_ref = lifetime_instance
-                                    .get_or_create_child(lifetime_ref, index_str.as_str());
-                                let binding_ref = create_lifetime_tree_for_variable_binding(
-                                    lifetime_instance,
-                                    binding,
-                                );
-                                lifetime_instance.merge(child_ref, binding_ref);
-                            }
-
-                            lifetime_ref
-                        }
-                    }
-                }
-
                 let variable_lifetime_ref = if let Ok(binding) = &variable_define.binding {
                     create_lifetime_tree_for_variable_binding(lifetime_scope.instance, binding)
                 } else {
@@ -243,9 +215,109 @@ pub fn collect_lifetime_program<'allocator>(
                     stack_lifetime_scope,
                 );
             }
-            StatementAST::FunctionDefine(function_define) => {}
-            StatementAST::UserTypeDefine(user_type_define) => {}
-            StatementAST::Implements(implements) => {}
+            StatementAST::FunctionDefine(function_define) => {
+                let mut lifetime_instance = LifetimeInstance::new();
+
+                for argument in function_define.args.arguments.iter() {
+                    create_lifetime_tree_for_variable_binding(
+                        &mut lifetime_instance,
+                        &argument.binding,
+                    );
+                }
+
+                let mut lifetime_scope = LifetimeScope::new(&mut lifetime_instance, allocator);
+                let mut stack_lifetime_scope = StackLifetimeScope::new(allocator);
+
+                let return_value_tree_ref = lifetime_scope.instance.create_lifetime_tree();
+
+                if let Some(block_or_semicolon) = &function_define.block_or_semicolon.value {
+                    if let Either::Right(block) = block_or_semicolon {
+                        collect_lifetime_program(
+                            block.program,
+                            None,
+                            return_value_tree_ref,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            module_element_type_maps,
+                            type_inference_result,
+                            &mut lifetime_scope,
+                            &mut stack_lifetime_scope,
+                            lifetime_instance_map,
+                            allocator,
+                            context,
+                        );
+                    }
+                }
+
+                lifetime_scope.collect();
+                stack_lifetime_scope.collect(&mut lifetime_instance);
+
+                lifetime_instance_map.insert(EntityID::from(function_define), lifetime_instance);
+            }
+            StatementAST::UserTypeDefine(user_type_define) => {
+                let mut lifetime_instance = LifetimeInstance::new();
+                let mut lifetime_scope = LifetimeScope::new(&mut lifetime_instance, allocator);
+                let mut stack_lifetime_scope = StackLifetimeScope::new(allocator);
+
+                let return_value_tree_ref = lifetime_scope.instance.create_lifetime_tree();
+
+                if let Some(block) = &user_type_define.block.value {
+                    collect_lifetime_program(
+                        block.program,
+                        None,
+                        return_value_tree_ref,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        module_element_type_maps,
+                        type_inference_result,
+                        &mut lifetime_scope,
+                        &mut stack_lifetime_scope,
+                        lifetime_instance_map,
+                        allocator,
+                        context,
+                    );
+                }
+
+                lifetime_scope.collect();
+                stack_lifetime_scope.collect(&mut lifetime_instance);
+
+                lifetime_instance_map.insert(EntityID::from(user_type_define), lifetime_instance);
+            }
+            StatementAST::Implements(implements) => {
+                let mut lifetime_instance = LifetimeInstance::new();
+                let mut lifetime_scope = LifetimeScope::new(&mut lifetime_instance, allocator);
+                let mut stack_lifetime_scope = StackLifetimeScope::new(allocator);
+
+                let return_value_tree_ref = lifetime_scope.instance.create_lifetime_tree();
+
+                if let Some(block) = &implements.block.value {
+                    collect_lifetime_program(
+                        block.program,
+                        None,
+                        return_value_tree_ref,
+                        import_element_map,
+                        name_resolved_map,
+                        module_user_type_map,
+                        module_element_type_map,
+                        module_element_type_maps,
+                        type_inference_result,
+                        &mut lifetime_scope,
+                        &mut stack_lifetime_scope,
+                        lifetime_instance_map,
+                        allocator,
+                        context,
+                    );
+                }
+
+                lifetime_scope.collect();
+                stack_lifetime_scope.collect(&mut lifetime_instance);
+
+                lifetime_instance_map.insert(EntityID::from(implements), lifetime_instance);
+            }
             StatementAST::DropStatement(drop_statement) => {}
             StatementAST::Expression(expression) => {
                 let is_last_expression = index + 1 == ast.statements.len();
@@ -276,6 +348,32 @@ pub fn collect_lifetime_program<'allocator>(
                 );
             }
             _ => {}
+        }
+    }
+}
+
+fn create_lifetime_tree_for_variable_binding(
+    lifetime_instance: &mut LifetimeInstance,
+    binding: &VariableBinding,
+) -> LifetimeTreeRef {
+    match &binding.binding {
+        Either::Left(literal) => {
+            lifetime_instance.create_entity_lifetime_tree(EntityID::from(literal))
+        }
+        Either::Right(bindings) => {
+            let lifetime_ref = lifetime_instance.create_lifetime_tree();
+
+            for (index, binding) in bindings.iter().enumerate() {
+                let index_str = index.to_string();
+
+                let child_ref =
+                    lifetime_instance.get_or_create_child(lifetime_ref, index_str.as_str());
+                let binding_ref =
+                    create_lifetime_tree_for_variable_binding(lifetime_instance, binding);
+                lifetime_instance.merge(child_ref, binding_ref);
+            }
+
+            lifetime_ref
         }
     }
 }
@@ -1657,14 +1755,22 @@ fn collect_lifetime_simple_primary<'allocator>(
                     .merge(ast_lifetime_ref, literal_lifetime_ref);
             }
         }
-        SimplePrimary::ThisKeyword(_) => {
-            if let Some(this_argument_lifetime_ref) =
-                lifetime_scope.instance.this_argument_lifetime_ref
-            {
-                lifetime_scope
-                    .instance
-                    .merge(ast_lifetime_ref, this_argument_lifetime_ref);
-            }
+        SimplePrimary::ThisKeyword(literal) => {
+            let this_lifetime_ref = lifetime_scope.instance.this_argument_lifetime_ref;
+
+            let borrowed_this_lifetime_ref = lifetime_scope
+                .instance
+                .create_entity_lifetime_tree(EntityID::from(literal));
+            let borrowed_this_lifetime_tree = lifetime_scope
+                .instance
+                .get_lifetime_tree(borrowed_this_lifetime_ref);
+            borrowed_this_lifetime_tree
+                .borrow_ref
+                .insert(this_lifetime_ref);
+
+            lifetime_scope
+                .instance
+                .merge(ast_lifetime_ref, borrowed_this_lifetime_ref);
         }
         _ => {}
     }

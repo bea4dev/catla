@@ -22,8 +22,8 @@ use crate::transpiler::{
 };
 
 use super::{
-    FunctionCallLifetime, LifetimeExpected, LifetimeInstance, LifetimeScope, LifetimeTreeRef,
-    StackLifetimeScope, STATIC_LIFETIME,
+    FunctionCallLifetime, LifetimeExpected, LifetimeInstance, LifetimeScope, LifetimeSource,
+    LifetimeTreeRef, StackLifetimeScope, STATIC_LIFETIME,
 };
 
 fn add_lifetime_tree_to_scope(
@@ -57,7 +57,7 @@ pub fn collect_lifetime_program<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
-    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    lifetime_source_map: &mut FxHashMap<EntityID, LifetimeSource>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
@@ -90,7 +90,7 @@ pub fn collect_lifetime_program<'allocator>(
                         type_inference_result,
                         &mut lifetime_scope,
                         stack_lifetime_scope,
-                        lifetime_instance_map,
+                        lifetime_source_map,
                         allocator,
                         context,
                     );
@@ -119,7 +119,7 @@ pub fn collect_lifetime_program<'allocator>(
                         type_inference_result,
                         &mut lifetime_scope,
                         stack_lifetime_scope,
-                        lifetime_instance_map,
+                        lifetime_source_map,
                         allocator,
                         context,
                     );
@@ -180,7 +180,7 @@ pub fn collect_lifetime_program<'allocator>(
                                 type_inference_result,
                                 &mut lifetime_scope,
                                 stack_lifetime_scope,
-                                lifetime_instance_map,
+                                lifetime_source_map,
                                 allocator,
                                 context,
                             );
@@ -218,11 +218,14 @@ pub fn collect_lifetime_program<'allocator>(
             StatementAST::FunctionDefine(function_define) => {
                 let mut lifetime_instance = LifetimeInstance::new();
 
+                let mut argument_lifetimes = Vec::new();
                 for argument in function_define.args.arguments.iter() {
-                    create_lifetime_tree_for_variable_binding(
+                    let lifetime_ref = create_lifetime_tree_for_variable_binding(
                         &mut lifetime_instance,
                         &argument.binding,
                     );
+
+                    argument_lifetimes.push(lifetime_ref);
                 }
 
                 let mut lifetime_scope = LifetimeScope::new(&mut lifetime_instance, allocator);
@@ -244,7 +247,7 @@ pub fn collect_lifetime_program<'allocator>(
                             type_inference_result,
                             &mut lifetime_scope,
                             &mut stack_lifetime_scope,
-                            lifetime_instance_map,
+                            lifetime_source_map,
                             allocator,
                             context,
                         );
@@ -254,7 +257,13 @@ pub fn collect_lifetime_program<'allocator>(
                 lifetime_scope.collect();
                 stack_lifetime_scope.collect(&mut lifetime_instance);
 
-                lifetime_instance_map.insert(EntityID::from(function_define), lifetime_instance);
+                let lifetime_source = LifetimeSource {
+                    instance: lifetime_instance,
+                    arguments: argument_lifetimes,
+                    return_value: return_value_tree_ref,
+                };
+
+                lifetime_source_map.insert(EntityID::from(function_define), lifetime_source);
             }
             StatementAST::UserTypeDefine(user_type_define) => {
                 let mut lifetime_instance = LifetimeInstance::new();
@@ -276,7 +285,7 @@ pub fn collect_lifetime_program<'allocator>(
                         type_inference_result,
                         &mut lifetime_scope,
                         &mut stack_lifetime_scope,
-                        lifetime_instance_map,
+                        lifetime_source_map,
                         allocator,
                         context,
                     );
@@ -285,7 +294,13 @@ pub fn collect_lifetime_program<'allocator>(
                 lifetime_scope.collect();
                 stack_lifetime_scope.collect(&mut lifetime_instance);
 
-                lifetime_instance_map.insert(EntityID::from(user_type_define), lifetime_instance);
+                let lifetime_source = LifetimeSource {
+                    instance: lifetime_instance,
+                    arguments: vec![],
+                    return_value: return_value_tree_ref,
+                };
+
+                lifetime_source_map.insert(EntityID::from(user_type_define), lifetime_source);
             }
             StatementAST::Implements(implements) => {
                 let mut lifetime_instance = LifetimeInstance::new();
@@ -307,7 +322,7 @@ pub fn collect_lifetime_program<'allocator>(
                         type_inference_result,
                         &mut lifetime_scope,
                         &mut stack_lifetime_scope,
-                        lifetime_instance_map,
+                        lifetime_source_map,
                         allocator,
                         context,
                     );
@@ -316,7 +331,13 @@ pub fn collect_lifetime_program<'allocator>(
                 lifetime_scope.collect();
                 stack_lifetime_scope.collect(&mut lifetime_instance);
 
-                lifetime_instance_map.insert(EntityID::from(implements), lifetime_instance);
+                let lifetime_source = LifetimeSource {
+                    instance: lifetime_instance,
+                    arguments: vec![],
+                    return_value: return_value_tree_ref,
+                };
+
+                lifetime_source_map.insert(EntityID::from(implements), lifetime_source);
             }
             StatementAST::DropStatement(drop_statement) => {}
             StatementAST::Expression(expression) => {
@@ -342,7 +363,7 @@ pub fn collect_lifetime_program<'allocator>(
                     type_inference_result,
                     lifetime_scope,
                     stack_lifetime_scope,
-                    lifetime_instance_map,
+                    lifetime_source_map,
                     allocator,
                     context,
                 );
@@ -392,7 +413,7 @@ fn collect_lifetime_expression<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
-    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    lifetime_source_map: &mut FxHashMap<EntityID, LifetimeSource>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
@@ -412,7 +433,7 @@ fn collect_lifetime_expression<'allocator>(
                 type_inference_result,
                 lifetime_scope,
                 stack_lifetime_scope,
-                lifetime_instance_map,
+                lifetime_source_map,
                 allocator,
                 context,
             );
@@ -433,7 +454,7 @@ fn collect_lifetime_expression<'allocator>(
                     type_inference_result,
                     lifetime_scope,
                     stack_lifetime_scope,
-                    lifetime_instance_map,
+                    lifetime_source_map,
                     allocator,
                     context,
                 );
@@ -457,7 +478,7 @@ fn collect_lifetime_or_expression<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
-    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    lifetime_source_map: &mut FxHashMap<EntityID, LifetimeSource>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
@@ -476,7 +497,7 @@ fn collect_lifetime_or_expression<'allocator>(
             type_inference_result,
             lifetime_scope,
             stack_lifetime_scope,
-            lifetime_instance_map,
+            lifetime_source_map,
             allocator,
             context,
         );
@@ -495,7 +516,7 @@ fn collect_lifetime_or_expression<'allocator>(
             type_inference_result,
             lifetime_scope,
             stack_lifetime_scope,
-            lifetime_instance_map,
+            lifetime_source_map,
             allocator,
             context,
         );
@@ -516,7 +537,7 @@ fn collect_lifetime_or_expression<'allocator>(
                     type_inference_result,
                     lifetime_scope,
                     stack_lifetime_scope,
-                    lifetime_instance_map,
+                    lifetime_source_map,
                     allocator,
                     context,
                 );
@@ -539,7 +560,7 @@ fn collect_lifetime_and_expression<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
-    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    lifetime_source_map: &mut FxHashMap<EntityID, LifetimeSource>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
@@ -558,7 +579,7 @@ fn collect_lifetime_and_expression<'allocator>(
             type_inference_result,
             lifetime_scope,
             stack_lifetime_scope,
-            lifetime_instance_map,
+            lifetime_source_map,
             allocator,
             context,
         );
@@ -577,7 +598,7 @@ fn collect_lifetime_and_expression<'allocator>(
             type_inference_result,
             lifetime_scope,
             stack_lifetime_scope,
-            lifetime_instance_map,
+            lifetime_source_map,
             allocator,
             context,
         );
@@ -598,7 +619,7 @@ fn collect_lifetime_and_expression<'allocator>(
                     type_inference_result,
                     lifetime_scope,
                     stack_lifetime_scope,
-                    lifetime_instance_map,
+                    lifetime_source_map,
                     allocator,
                     context,
                 );
@@ -623,7 +644,7 @@ macro_rules! collect_lifetime_for_op2 {
             type_inference_result: &TypeInferenceResultContainer,
             lifetime_scope: &mut LifetimeScope,
             stack_lifetime_scope: &mut StackLifetimeScope,
-            lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+            lifetime_source_map: &mut FxHashMap<EntityID, LifetimeSource>,
             allocator: &'allocator Bump,
             context: &TranspileModuleContext,
         ) {
@@ -642,7 +663,7 @@ macro_rules! collect_lifetime_for_op2 {
                     type_inference_result,
                     lifetime_scope,
                     stack_lifetime_scope,
-                    lifetime_instance_map,
+                    lifetime_source_map,
                     allocator,
                     context,
                 );
@@ -668,7 +689,7 @@ macro_rules! collect_lifetime_for_op2 {
                         type_inference_result,
                         &mut lifetime_scope,
                         stack_lifetime_scope,
-                        lifetime_instance_map,
+                        lifetime_source_map,
                         allocator,
                         context,
                     );
@@ -729,7 +750,7 @@ macro_rules! collect_lifetime_for_op2 {
                             type_inference_result,
                             &mut lifetime_scope,
                             stack_lifetime_scope,
-                            lifetime_instance_map,
+                            lifetime_source_map,
                             allocator,
                             context,
                         );
@@ -798,7 +819,7 @@ fn collect_lifetime_factor<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
-    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    lifetime_source_map: &mut FxHashMap<EntityID, LifetimeSource>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
@@ -818,7 +839,7 @@ fn collect_lifetime_factor<'allocator>(
                 type_inference_result,
                 lifetime_scope,
                 stack_lifetime_scope,
-                lifetime_instance_map,
+                lifetime_source_map,
                 allocator,
                 context,
             );
@@ -847,7 +868,7 @@ fn collect_lifetime_factor<'allocator>(
                 type_inference_result,
                 &mut primary_lifetime_scope,
                 stack_lifetime_scope,
-                lifetime_instance_map,
+                lifetime_source_map,
                 allocator,
                 context,
             );
@@ -923,7 +944,7 @@ fn collect_lifetime_primary<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
-    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    lifetime_source_map: &mut FxHashMap<EntityID, LifetimeSource>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
@@ -988,7 +1009,7 @@ fn collect_lifetime_primary<'allocator>(
                     type_inference_result,
                     lifetime_scope,
                     stack_lifetime_scope,
-                    lifetime_instance_map,
+                    lifetime_source_map,
                     allocator,
                     context,
                 );
@@ -1013,7 +1034,7 @@ fn collect_lifetime_primary<'allocator>(
             type_inference_result,
             lifetime_scope,
             stack_lifetime_scope,
-            lifetime_instance_map,
+            lifetime_source_map,
             allocator,
             context,
         );
@@ -1072,7 +1093,7 @@ fn collect_lifetime_primary<'allocator>(
                         type_inference_result,
                         &mut lifetime_scope,
                         stack_lifetime_scope,
-                        lifetime_instance_map,
+                        lifetime_source_map,
                         allocator,
                         context,
                     );
@@ -1135,7 +1156,7 @@ fn collect_lifetime_primary_left<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
-    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    lifetime_source_map: &mut FxHashMap<EntityID, LifetimeSource>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) -> LifetimeTreeRef {
@@ -1156,7 +1177,7 @@ fn collect_lifetime_primary_left<'allocator>(
                 type_inference_result,
                 lifetime_scope,
                 stack_lifetime_scope,
-                lifetime_instance_map,
+                lifetime_source_map,
                 allocator,
                 context,
             );
@@ -1183,7 +1204,7 @@ fn collect_lifetime_primary_left<'allocator>(
                     type_inference_result,
                     &mut lifetime_scope,
                     stack_lifetime_scope,
-                    lifetime_instance_map,
+                    lifetime_source_map,
                     allocator,
                     context,
                 );
@@ -1231,7 +1252,7 @@ fn collect_lifetime_primary_left<'allocator>(
                                 type_inference_result,
                                 &mut lifetime_scope,
                                 stack_lifetime_scope,
-                                lifetime_instance_map,
+                                lifetime_source_map,
                                 allocator,
                                 context,
                             );
@@ -1311,7 +1332,7 @@ fn collect_lifetime_primary_left<'allocator>(
                                 type_inference_result,
                                 &mut lifetime_scope,
                                 stack_lifetime_scope,
-                                lifetime_instance_map,
+                                lifetime_source_map,
                                 allocator,
                                 context,
                             );
@@ -1379,7 +1400,7 @@ fn collect_lifetime_primary_left<'allocator>(
                     type_inference_result,
                     &mut lifetime_scope,
                     stack_lifetime_scope,
-                    lifetime_instance_map,
+                    lifetime_source_map,
                     allocator,
                     context,
                 );
@@ -1436,7 +1457,7 @@ fn collect_lifetime_primary_left<'allocator>(
                             type_inference_result,
                             &mut lifetime_scope,
                             stack_lifetime_scope,
-                            lifetime_instance_map,
+                            lifetime_source_map,
                             allocator,
                             context,
                         );
@@ -1517,7 +1538,7 @@ fn collect_lifetime_primary_left<'allocator>(
                         type_inference_result,
                         &mut lifetime_scope,
                         stack_lifetime_scope,
-                        lifetime_instance_map,
+                        lifetime_source_map,
                         allocator,
                         context,
                     );
@@ -1545,7 +1566,7 @@ fn collect_lifetime_primary_left<'allocator>(
                             type_inference_result,
                             &mut lifetime_scope,
                             stack_lifetime_scope,
-                            lifetime_instance_map,
+                            lifetime_source_map,
                             allocator,
                             context,
                         );
@@ -1566,7 +1587,7 @@ fn collect_lifetime_primary_left<'allocator>(
                             type_inference_result,
                             &mut lifetime_scope,
                             stack_lifetime_scope,
-                            lifetime_instance_map,
+                            lifetime_source_map,
                             allocator,
                             context,
                         );
@@ -1597,7 +1618,7 @@ fn collect_lifetime_simple_primary<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
-    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    lifetime_source_map: &mut FxHashMap<EntityID, LifetimeSource>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) -> LifetimeTreeRef {
@@ -1635,7 +1656,7 @@ fn collect_lifetime_simple_primary<'allocator>(
                         type_inference_result,
                         &mut lifetime_scope,
                         stack_lifetime_scope,
-                        lifetime_instance_map,
+                        lifetime_source_map,
                         allocator,
                         context,
                     );
@@ -1672,7 +1693,7 @@ fn collect_lifetime_simple_primary<'allocator>(
                             type_inference_result,
                             &mut lifetime_scope,
                             stack_lifetime_scope,
-                            lifetime_instance_map,
+                            lifetime_source_map,
                             allocator,
                             context,
                         );
@@ -1790,7 +1811,7 @@ fn collect_lifetime_function_call<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_scope: &mut LifetimeScope,
     stack_lifetime_scope: &mut StackLifetimeScope,
-    lifetime_instance_map: &mut FxHashMap<EntityID, LifetimeInstance>,
+    lifetime_source_map: &mut FxHashMap<EntityID, LifetimeSource>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) -> LifetimeTreeRef {
@@ -1829,7 +1850,7 @@ fn collect_lifetime_function_call<'allocator>(
                         type_inference_result,
                         &mut lifetime_scope,
                         stack_lifetime_scope,
-                        lifetime_instance_map,
+                        lifetime_source_map,
                         allocator,
                         context,
                     );

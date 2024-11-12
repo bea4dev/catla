@@ -1,6 +1,7 @@
 use std::{cell::RefCell, sync::Arc};
 
 use allocator_api2::vec::Vec;
+use allocator_api2::vec;
 use bumpalo::Bump;
 use catla_parser::parser::{Program, Spanned};
 use fxhash::{FxHashMap, FxHashSet};
@@ -332,6 +333,12 @@ impl ScoopGroup {
     }
 }
 
+pub struct LifetimeSource {
+    instance: LifetimeInstance,
+    arguments: Vec<LifetimeTreeRef>,
+    return_value: LifetimeTreeRef,
+}
+
 pub fn collect_lifetime(
     ast: Program,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
@@ -342,7 +349,7 @@ pub fn collect_lifetime(
     type_inference_result: &TypeInferenceResultContainer,
     allocator: &Bump,
     context: &TranspileModuleContext,
-) -> FxHashMap<EntityID, LifetimeInstance> {
+) -> FxHashMap<EntityID, LifetimeSource> {
     let mut lifetime_instance_map = FxHashMap::default();
 
     let mut lifetime_instance = LifetimeInstance::new();
@@ -369,7 +376,14 @@ pub fn collect_lifetime(
 
     lifetime_scope.collect();
     stack_lifetime_scope.collect(&mut lifetime_instance);
-    lifetime_instance_map.insert(EntityID::from(ast), lifetime_instance);
+
+    let lifetime_source = LifetimeSource {
+        instance: lifetime_instance,
+        arguments: vec![],
+        return_value: return_value_tree_ref,
+    };
+
+    lifetime_instance_map.insert(EntityID::from(ast), lifetime_source);
 
     lifetime_instance_map
 }

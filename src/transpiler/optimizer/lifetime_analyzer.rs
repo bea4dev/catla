@@ -1,7 +1,7 @@
 use std::{cell::RefCell, sync::Arc};
 
-use allocator_api2::vec::Vec;
 use allocator_api2::vec;
+use allocator_api2::vec::Vec;
 use bumpalo::Bump;
 use catla_parser::parser::{Program, Spanned};
 use fxhash::{FxHashMap, FxHashSet};
@@ -237,6 +237,9 @@ impl LifetimeInstance {
                     left_lifetime_tree.lifetimes.push(STATIC_LIFETIME);
                 }
 
+                left_lifetime_tree.contains_function_return_value |=
+                    right_lifetime_tree.contains_function_return_value;
+
                 left_lifetime_tree
             }
             _ => unreachable!(),
@@ -301,6 +304,7 @@ pub struct LifetimeTree {
     pub children: FxHashMap<String, LifetimeTreeRef>,
     pub is_merged: bool,
     pub is_alloc_point: bool,
+    pub contains_function_return_value: bool,
     pub alloc_point_ref: FxHashSet<LifetimeTreeRef>,
     pub borrow_ref: FxHashSet<LifetimeTreeRef>,
 }
@@ -312,25 +316,6 @@ pub struct FunctionCallLifetime {
     pub arguments: Vec<LifetimeTreeRef>,
     pub return_value: LifetimeTreeRef,
     pub function: Arc<FunctionType>,
-}
-
-pub struct ScoopGroup {
-    group_entities: RefCell<Vec<EntityID>>,
-    value_entity: EntityID,
-}
-
-impl ScoopGroup {
-    pub fn new(value_entity: EntityID) -> Self {
-        Self {
-            group_entities: RefCell::new(Vec::new()),
-            value_entity,
-        }
-    }
-
-    pub fn add(&self, entity_id: EntityID) {
-        let mut group_entities = self.group_entities.borrow_mut();
-        group_entities.push(entity_id);
-    }
 }
 
 pub struct LifetimeSource {

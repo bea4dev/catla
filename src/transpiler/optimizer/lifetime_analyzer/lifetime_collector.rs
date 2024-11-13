@@ -896,6 +896,12 @@ fn collect_lifetime_factor<'allocator>(
 
             let return_value_ref = primary_lifetime_scope.instance.create_lifetime_tree();
 
+            let return_value_tree = primary_lifetime_scope
+                .instance
+                .get_lifetime_tree(return_value_ref);
+            return_value_tree.contains_function_return_value = true;
+            return_value_tree.is_alloc_point = true;
+
             let function_call = FunctionCallLifetime {
                 arguments: vec![primary_lifetime_tree_ref],
                 return_value: return_value_ref,
@@ -1228,75 +1234,95 @@ fn collect_lifetime_primary_left<'allocator>(
             if new_array_init_expression.for_keyword_span.is_some() {
                 let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
 
-                let return_init_func_value =
-                    if let Ok(init_expression) = new_array_init_expression.init_expression {
-                        let init_expression_lifetime_ref = lifetime_scope
-                            .instance
-                            .create_entity_lifetime_tree(EntityID::from(init_expression));
+                let return_init_func_value = if let Ok(init_expression) =
+                    new_array_init_expression.init_expression
+                {
+                    let init_expression_lifetime_ref = lifetime_scope
+                        .instance
+                        .create_entity_lifetime_tree(EntityID::from(init_expression));
 
-                        {
-                            let mut lifetime_scope =
-                                LifetimeScope::new(lifetime_scope.instance, allocator);
+                    {
+                        let mut lifetime_scope =
+                            LifetimeScope::new(lifetime_scope.instance, allocator);
 
-                            collect_lifetime_expression(
-                                init_expression,
-                                true,
-                                false,
-                                Some(init_expression_lifetime_ref),
-                                return_value_tree_ref,
-                                import_element_map,
-                                name_resolved_map,
-                                module_user_type_map,
-                                module_element_type_map,
-                                module_element_type_maps,
-                                type_inference_result,
-                                &mut lifetime_scope,
-                                stack_lifetime_scope,
-                                lifetime_source_map,
-                                allocator,
-                                context,
-                            );
-
-                            lifetime_scope.collect();
-                        }
-
-                        let init_expression_type =
-                            type_inference_result.get_entity_type(EntityID::from(init_expression));
-
-                        add_lifetime_tree_to_scope(
-                            init_expression_lifetime_ref,
-                            init_expression_type,
+                        collect_lifetime_expression(
+                            init_expression,
+                            true,
+                            false,
+                            Some(init_expression_lifetime_ref),
+                            return_value_tree_ref,
+                            import_element_map,
+                            name_resolved_map,
+                            module_user_type_map,
+                            module_element_type_map,
+                            module_element_type_maps,
+                            type_inference_result,
                             &mut lifetime_scope,
                             stack_lifetime_scope,
+                            lifetime_source_map,
+                            allocator,
+                            context,
                         );
 
-                        let return_value = lifetime_scope.instance.create_lifetime_tree();
+                        lifetime_scope.collect();
+                    }
 
-                        if let Type::Function {
-                            function_info,
-                            generics: _,
-                        } = init_expression_type
-                        {
-                            let function_call = FunctionCallLifetime {
-                                arguments: vec![lifetime_scope.instance.create_lifetime_tree()],
-                                return_value,
-                                function: function_info.clone(),
-                            };
+                    let init_expression_type =
+                        type_inference_result.get_entity_type(EntityID::from(init_expression));
 
-                            lifetime_scope.instance.add_function_call(function_call);
-                        }
+                    add_lifetime_tree_to_scope(
+                        init_expression_lifetime_ref,
+                        init_expression_type,
+                        &mut lifetime_scope,
+                        stack_lifetime_scope,
+                    );
 
-                        return_value
-                    } else {
-                        lifetime_scope.instance.create_lifetime_tree()
-                    };
+                    let return_value = lifetime_scope.instance.create_lifetime_tree();
 
-                let return_init_func_value_tree = lifetime_scope
+                    let return_value_tree = lifetime_scope.instance.get_lifetime_tree(return_value);
+                    return_value_tree.contains_function_return_value = true;
+
+                    if let Type::Function {
+                        function_info,
+                        generics: _,
+                    } = init_expression_type
+                    {
+                        let function_call = FunctionCallLifetime {
+                            arguments: vec![lifetime_scope.instance.create_lifetime_tree()],
+                            return_value,
+                            function: function_info.clone(),
+                        };
+
+                        lifetime_scope.instance.add_function_call(function_call);
+                    }
+
+                    return_value
+                } else {
+                    lifetime_scope.instance.create_lifetime_tree()
+                };
+
+                let array_type = type_inference_result
+                    .get_entity_type(EntityID::from(new_array_init_expression));
+                let base_type = if let Type::Array(base_type) = array_type {
+                    base_type.as_ref()
+                } else {
+                    &Type::Unknown
+                };
+
+                add_lifetime_tree_to_scope(
+                    return_init_func_value,
+                    base_type,
+                    &mut lifetime_scope,
+                    stack_lifetime_scope,
+                );
+
+                let borrowed_return_value = lifetime_scope.instance.create_lifetime_tree();
+                let borrowed_return_value_tree = lifetime_scope
                     .instance
-                    .get_lifetime_tree(return_init_func_value);
-                return_init_func_value_tree
-                    .alloc_point_ref
-                    .insert(array_lifetime_ref);
+                    .get_lifetime_tree(borrowed_return_value);
+                borrowed_return_value_tree
+                    .borrow_ref
+                    .insert(return_init_func_value);
 
                 let child_lifetime_ref = lifetime_scope
                     .instance
@@ -1304,7 +1330,7 @@ fn collect_lifetime_primary_left<'allocator>(
 
                 lifetime_scope
                     .instance
-                    .merge(child_lifetime_ref, return_init_func_value);
+                    .merge(child_lifetime_ref, borrowed_return_value);
 
                 lifetime_scope.collect();
             } else {
@@ -1885,6 +1911,7 @@ fn collect_lifetime_function_call<'allocator>(
 
     let return_value_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(return_value);
     return_value_lifetime_tree.is_alloc_point = true;
+    return_value_lifetime_tree.contains_function_return_value = true;
 
     return_value
 }
@@ -1908,6 +1935,11 @@ fn collect_lifetime_operator<'allocator>(
     };
 
     let return_value_ref = lifetime_scope.instance.create_lifetime_tree();
+
+    let return_value_tree = lifetime_scope.instance.get_lifetime_tree(return_value_ref);
+    return_value_tree.contains_function_return_value = true;
+    return_value_tree.is_alloc_point = true;
+
     let right_expr_tree_ref = lifetime_scope
         .instance
         .get_entity_lifetime_tree_ref(right_expr);
@@ -1918,9 +1950,6 @@ fn collect_lifetime_operator<'allocator>(
         function: function_type,
     };
     lifetime_scope.instance.add_function_call(function_call);
-
-    let return_value_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(return_value_ref);
-    return_value_lifetime_tree.is_alloc_point = true;
 
     (
         return_value_ref,

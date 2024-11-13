@@ -283,7 +283,6 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
 
     if module_context.context.settings.is_transpiler_debug
         && module_context.module_name.as_str() == "test::test" {
-        
         std::thread::sleep(std::time::Duration::from_millis(1000));
     }
 

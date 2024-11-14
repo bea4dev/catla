@@ -292,6 +292,22 @@ impl LifetimeInstance {
     pub fn add_lifetime_expected(&mut self, expected: LifetimeExpected) {
         self.lifetime_expected.push(expected);
     }
+
+    pub fn init_lifetime_expected_relationships(&mut self) {
+        let mut lifetime_expected = Vec::new();
+
+        for (lifetime_ref, lifetime_tree) in self.lifetime_tree_map.iter() {
+            for child_ref in lifetime_tree.children.values() {
+                let expected = LifetimeExpected {
+                    shorter: *lifetime_ref,
+                    longer: *child_ref,
+                };
+                lifetime_expected.push(expected);
+            }
+        }
+
+        self.lifetime_expected.extend(lifetime_expected);
+    }
 }
 
 pub struct LifetimeExpected {
@@ -325,6 +341,25 @@ pub struct LifetimeSource {
     return_value: LifetimeTreeRef,
 }
 
+impl LifetimeSource {
+    pub fn finalize_return_value(&mut self) {
+        self.disable_function_return_value_stack_alloc(self.return_value);
+    }
+
+    fn disable_function_return_value_stack_alloc(&mut self, lifetime_ref: LifetimeTreeRef) {
+        let lifetime_tree = self.instance.get_lifetime_tree(lifetime_ref);
+
+        if lifetime_tree.contains_function_return_value {
+            lifetime_tree.is_alloc_point = false;
+        }
+
+        let children = lifetime_tree.children.values().cloned().collect::<Vec<_>>();
+        for child_ref in children {
+            self.disable_function_return_value_stack_alloc(child_ref);
+        }
+    }
+}
+
 pub struct LifetimeEvaluator {
     lifetime_source_map:
         RwLock<FxHashMap<Arc<String>, FxHashMap<EntityID, RwLock<LifetimeSource>>>>,
@@ -344,15 +379,14 @@ impl LifetimeEvaluator {
         module_name: Arc<String>,
         lifetime_sources: FxHashMap<EntityID, LifetimeSource>,
     ) {
+        let lifetime_sources = lifetime_sources
+            .into_iter()
+            .map(|(entity_id, lifetime_source)| (entity_id, RwLock::new(lifetime_source)))
+            .collect();
+
         let mut lifetime_source_map = self.lifetime_source_map.write().unwrap();
 
-        lifetime_source_map.insert(
-            module_name,
-            lifetime_sources
-                .into_iter()
-                .map(|(entity_id, lifetime_source)| (entity_id, RwLock::new(lifetime_source)))
-                .collect(),
-        );
+        lifetime_source_map.insert(module_name, lifetime_sources);
     }
 
     pub async fn eval(&self, context: &TranspileContext) {
@@ -366,7 +400,16 @@ impl LifetimeEvaluator {
                 futures.push(future);
             }
 
-            let results = join_all(futures).await;
+            let mut queue = self.queue.lock().unwrap();
+            let mut is_any_changed = false;
+            for (modules, is_changed) in join_all(futures).await {
+                queue.extend(modules);
+                is_any_changed |= is_changed;
+            }
+
+            if !is_any_changed {
+                break;
+            }
         }
     }
 

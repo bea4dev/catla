@@ -1,15 +1,16 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock};
 
 use allocator_api2::vec;
 use allocator_api2::vec::Vec;
 use bumpalo::Bump;
 use catla_parser::parser::{Program, Spanned};
+use futures::future::join_all;
 use fxhash::{FxHashMap, FxHashSet};
 use lifetime_collector::collect_lifetime_program;
 
 use crate::transpiler::{
     component::EntityID,
-    context::TranspileModuleContext,
+    context::{TranspileContext, TranspileModuleContext},
     name_resolver::FoundDefineInfo,
     semantics::types::{
         type_inference::TypeInferenceResultContainer,
@@ -322,6 +323,56 @@ pub struct LifetimeSource {
     instance: LifetimeInstance,
     arguments: Vec<LifetimeTreeRef>,
     return_value: LifetimeTreeRef,
+}
+
+pub struct LifetimeEvaluator {
+    lifetime_source_map:
+        RwLock<FxHashMap<Arc<String>, FxHashMap<EntityID, RwLock<LifetimeSource>>>>,
+    queue: Mutex<Vec<Arc<String>>>,
+}
+
+impl LifetimeEvaluator {
+    pub fn new() -> Self {
+        Self {
+            lifetime_source_map: RwLock::new(FxHashMap::default()),
+            queue: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn add_sources(
+        &self,
+        module_name: Arc<String>,
+        lifetime_sources: FxHashMap<EntityID, LifetimeSource>,
+    ) {
+        let mut lifetime_source_map = self.lifetime_source_map.write().unwrap();
+
+        lifetime_source_map.insert(
+            module_name,
+            lifetime_sources
+                .into_iter()
+                .map(|(entity_id, lifetime_source)| (entity_id, RwLock::new(lifetime_source)))
+                .collect(),
+        );
+    }
+
+    pub async fn eval(&self, context: &TranspileContext) {
+        let num_threads = context.settings.num_threads;
+
+        loop {
+            let mut futures = Vec::with_capacity(num_threads);
+
+            for _ in 0..num_threads {
+                let future = self.eval_lifetime_source();
+                futures.push(future);
+            }
+
+            let results = join_all(futures).await;
+        }
+    }
+
+    async fn eval_lifetime_source(&self) -> (Vec<Arc<String>>, bool) {
+        todo!()
+    }
 }
 
 pub fn collect_lifetime(

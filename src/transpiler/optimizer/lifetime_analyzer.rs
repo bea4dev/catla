@@ -1,4 +1,4 @@
-use std::{cell::RefCell, sync::Arc};
+use std::sync::Arc;
 
 use allocator_api2::vec;
 use allocator_api2::vec::Vec;

@@ -1302,7 +1302,7 @@ fn collect_lifetime_primary_left<'allocator>(
                 };
 
                 let array_type = type_inference_result
-                    .get_entity_type(EntityID::from(new_array_init_expression));
+                    .get_entity_type(EntityID::from(&ast.first_expr));
                 let base_type = if let Type::Array(base_type) = array_type {
                     base_type.as_ref()
                 } else {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use allocator_api2::vec::Vec;
 use allocator_api2::vec;
+use allocator_api2::vec::Vec;
 use ariadne::Color;
 use async_recursion::async_recursion;
 use bumpalo::Bump;
@@ -9,6 +9,7 @@ use catla_parser::parser::{parse_source, Spanned};
 use either::Either;
 use error::SimpleError;
 use fxhash::FxHashMap;
+use optimizer::optimize;
 use semantics::types::{
     type_inference::{infer_type_program, TypeInferenceResultContainer},
     type_info::{collect_duplicated_implementation_error, ScopeThisType, Type, WithDefineInfo},
@@ -38,10 +39,10 @@ pub mod context;
 pub mod error;
 pub mod future;
 pub mod name_resolver;
+pub mod optimizer;
 pub mod parse_error;
 pub mod resource;
 pub mod semantics;
-pub mod optimizer;
 
 pub struct TranspileError(Box<dyn TranspileReport + Send>, AdviceReport);
 pub struct TranspileWarning(Box<dyn TranspileReport + Send>, AdviceReport);
@@ -85,18 +86,43 @@ pub struct SourceCode {
     pub module_name: String,
 }
 
+const TRANSPILE_PHASE_ANALYZE_SEMANTICS: usize = 0;
+const TRANSPILE_PHASE_LIFETIME_EVAL: usize = 1;
+const TRANSPILE_PHASE_CODE_GEN: usize = 2;
+
 pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> Result<(), String> {
     let module_context =
         TranspileContext::try_create_module_context(&context, &entry_module_name).unwrap()?;
 
-    context.transpile_future.mark_as_running();
+    context.transpile_phase_future.mark_as_started();
 
     let transpile_context = context.clone();
 
     context.future_runtime.block_on(async move {
-        transpile_module(entry_module_name, module_context).await;
+        transpile_context.future_runtime.spawn(async {
+            transpile_module(entry_module_name, module_context).await;
+        });
 
-        transpile_context.transpile_future.get_future().await;
+        // await until all of semantic analyze task is finished
+        transpile_context
+            .transpile_phase_future
+            .phase(TRANSPILE_PHASE_ANALYZE_SEMANTICS)
+            .future()
+            .await;
+
+        // run lifetime evaluator
+        transpile_context
+            .transpile_phase_future
+            .phase(TRANSPILE_PHASE_LIFETIME_EVAL)
+            .force_finish()
+            .await;
+
+        // await until all of code gen task is finished
+        transpile_context
+            .transpile_phase_future
+            .phase(TRANSPILE_PHASE_CODE_GEN)
+            .future()
+            .await;
     });
 
     Ok(())
@@ -194,7 +220,7 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
             };
             let module_name = module_name.value.clone();
 
-            context.transpile_future.mark_as_running();
+            context.transpile_phase_future.mark_as_started();
 
             context
                 .future_runtime
@@ -282,10 +308,12 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
     merged_implements_infos.merge(&implements_infos);
 
     if module_context.context.settings.is_transpiler_debug
-        && module_context.module_name.as_str() == "test::test" {
+        && module_context.module_name.as_str() == "test::test"
+    {
         std::thread::sleep(std::time::Duration::from_millis(1000));
     }
 
+    let mut type_inference_results = TypeInferenceResultContainer::default();
     {
         // This is not implemented 'Send'.
         let mut type_environment = TypeEnvironment::new_with_return_type(
@@ -296,8 +324,6 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
             }),
             &allocator,
         );
-
-        let mut type_inference_results = TypeInferenceResultContainer::default();
 
         infer_type_program(
             ast,
@@ -336,13 +362,43 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         );
     }
 
+    let optimize_result = optimize(
+        ast,
+        &import_element_map,
+        &name_resolved_map,
+        &module_user_type_map,
+        &module_type_info,
+        &module_element_type_maps,
+        &type_inference_results,
+        &allocator,
+        &module_context,
+    );
+
+    module_context
+        .context
+        .transpile_phase_future
+        .phase(TRANSPILE_PHASE_ANALYZE_SEMANTICS)
+        .mark_as_finished()
+        .await;
+
+    // await until the lifetime evaluator is finished
+    module_context
+        .context
+        .transpile_phase_future
+        .phase(TRANSPILE_PHASE_LIFETIME_EVAL)
+        .future()
+        .await;
+
     module_context
         .context
         .add_error_and_warning(module_name, errors, warnings);
 
+    // TODO : Code gen
+
     module_context
         .context
-        .transpile_future
+        .transpile_phase_future
+        .phase(TRANSPILE_PHASE_CODE_GEN)
         .mark_as_finished()
         .await;
 }

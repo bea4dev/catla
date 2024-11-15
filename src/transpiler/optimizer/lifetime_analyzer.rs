@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex, RwLock,
+};
 
 use allocator_api2::vec;
 use allocator_api2::vec::Vec;
@@ -18,6 +21,7 @@ use crate::transpiler::{
     },
 };
 
+pub mod debug;
 pub mod lifetime_collector;
 
 pub static STATIC_LIFETIME: Lifetime = Lifetime {
@@ -308,6 +312,77 @@ impl LifetimeInstance {
 
         self.lifetime_expected.extend(lifetime_expected);
     }
+
+    pub fn collect_lifetimes(
+        &self,
+        lifetime_tree_ref: LifetimeTreeRef,
+        lifetimes: &mut Vec<Lifetime>,
+        override_map: &FxHashMap<LifetimeTreeRef, LifetimeTree>,
+    ) {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+
+        let lifetime_tree = match override_map.get(&lifetime_tree_ref) {
+            Some(lifetime_tree) => lifetime_tree,
+            None => self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap(),
+        };
+
+        if lifetime_tree.is_alloc_point {
+            lifetimes.extend(lifetime_tree.lifetimes.iter());
+        } else {
+            lifetimes.extend(
+                lifetime_tree
+                    .lifetimes
+                    .iter()
+                    .filter(|lifetime| **lifetime == STATIC_LIFETIME),
+            );
+        }
+
+        for borrowed_ref in lifetime_tree.borrow_ref.iter() {
+            self.collect_lifetimes(*borrowed_ref, lifetimes, override_map);
+        }
+
+        for alloc_point_ref in lifetime_tree.alloc_point_ref.iter() {
+            self.collect_lifetimes(*alloc_point_ref, lifetimes, override_map);
+        }
+    }
+
+    pub fn into_static(
+        &self,
+        lifetime_tree_ref: LifetimeTreeRef,
+        override_map: &mut FxHashMap<LifetimeTreeRef, LifetimeTree>,
+    ) {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+
+        if override_map.contains_key(&lifetime_tree_ref) {
+            let borrowed_ref = {
+                let lifetime_tree = override_map.get_mut(&lifetime_tree_ref).unwrap();
+                lifetime_tree.lifetimes = vec![STATIC_LIFETIME];
+                lifetime_tree.is_alloc_point = false;
+
+                lifetime_tree.borrow_ref.clone()
+            };
+
+            for borrowed_ref in borrowed_ref {
+                self.into_static(borrowed_ref, override_map);
+            }
+        } else {
+            let mut lifetime_tree = self
+                .lifetime_tree_map
+                .get(&lifetime_tree_ref)
+                .unwrap()
+                .clone();
+            lifetime_tree.lifetimes = vec![STATIC_LIFETIME];
+            lifetime_tree.is_alloc_point = false;
+
+            let borrowed_ref = lifetime_tree.borrow_ref.clone();
+
+            override_map.insert(lifetime_tree_ref, lifetime_tree);
+
+            for borrowed_ref in borrowed_ref {
+                self.into_static(borrowed_ref, override_map);
+            }
+        }
+    }
 }
 
 pub struct LifetimeExpected {
@@ -315,7 +390,7 @@ pub struct LifetimeExpected {
     pub longer: LifetimeTreeRef,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct LifetimeTree {
     pub lifetimes: Vec<Lifetime>,
     pub children: FxHashMap<String, LifetimeTreeRef>,
@@ -342,8 +417,10 @@ pub struct LifetimeSource {
 }
 
 impl LifetimeSource {
-    pub fn finalize_return_value(&mut self) {
+    pub fn finalize(mut self) -> Self {
         self.disable_function_return_value_stack_alloc(self.return_value);
+        self.instance.init_lifetime_expected_relationships();
+        self
     }
 
     fn disable_function_return_value_stack_alloc(&mut self, lifetime_ref: LifetimeTreeRef) {
@@ -351,6 +428,7 @@ impl LifetimeSource {
 
         if lifetime_tree.contains_function_return_value {
             lifetime_tree.is_alloc_point = false;
+            lifetime_tree.lifetimes.push(STATIC_LIFETIME);
         }
 
         let children = lifetime_tree.children.values().cloned().collect::<Vec<_>>();
@@ -364,6 +442,7 @@ pub struct LifetimeEvaluator {
     lifetime_source_map:
         RwLock<FxHashMap<Arc<String>, FxHashMap<EntityID, RwLock<LifetimeSource>>>>,
     queue: Mutex<Vec<Arc<String>>>,
+    max_queue_size: AtomicUsize,
 }
 
 impl LifetimeEvaluator {
@@ -371,6 +450,7 @@ impl LifetimeEvaluator {
         Self {
             lifetime_source_map: RwLock::new(FxHashMap::default()),
             queue: Mutex::new(Vec::new()),
+            max_queue_size: AtomicUsize::new(0),
         }
     }
 
@@ -381,12 +461,18 @@ impl LifetimeEvaluator {
     ) {
         let lifetime_sources = lifetime_sources
             .into_iter()
-            .map(|(entity_id, lifetime_source)| (entity_id, RwLock::new(lifetime_source)))
+            .map(|(entity_id, lifetime_source)| {
+                (entity_id, RwLock::new(lifetime_source.finalize()))
+            })
             .collect();
 
         let mut lifetime_source_map = self.lifetime_source_map.write().unwrap();
+        lifetime_source_map.insert(module_name.clone(), lifetime_sources);
 
-        lifetime_source_map.insert(module_name, lifetime_sources);
+        let mut queue = self.queue.lock().unwrap();
+        queue.push(module_name);
+
+        self.max_queue_size.fetch_add(1, Ordering::Relaxed);
     }
 
     pub async fn eval(&self, context: &TranspileContext) {
@@ -400,12 +486,15 @@ impl LifetimeEvaluator {
                 futures.push(future);
             }
 
-            let mut queue = self.queue.lock().unwrap();
+            let mut back_queue = Vec::with_capacity(self.max_queue_size.load(Ordering::Relaxed));
             let mut is_any_changed = false;
             for (modules, is_changed) in join_all(futures).await {
-                queue.extend(modules);
+                back_queue.extend(modules);
                 is_any_changed |= is_changed;
             }
+
+            let mut queue = self.queue.lock().unwrap();
+            queue.extend(back_queue);
 
             if !is_any_changed {
                 break;
@@ -414,7 +503,119 @@ impl LifetimeEvaluator {
     }
 
     async fn eval_lifetime_source(&self) -> (Vec<Arc<String>>, bool) {
-        todo!()
+        let mut is_changed = false;
+        let mut completed_modules = Vec::new();
+
+        let lifetime_source_map = self.lifetime_source_map.read().unwrap();
+
+        loop {
+            let module_name = {
+                let mut queue = self.queue.lock().unwrap();
+
+                match queue.pop() {
+                    Some(module_name) => module_name,
+                    _ => break,
+                }
+            };
+
+            let mut changed_maps = Vec::new();
+
+            {
+                let lifetime_sources = lifetime_source_map.get(&module_name).unwrap().iter();
+
+                for (entity_id, lifetime_source) in lifetime_sources {
+                    let lifetime_source = lifetime_source.read().unwrap();
+
+                    let mut changed_map = FxHashMap::default();
+
+                    for expected in lifetime_source.instance.lifetime_expected.iter() {
+                        let mut is_satisfied = true;
+
+                        let mut shorter_lifetims = Vec::new();
+                        let mut longer_lifetims = Vec::new();
+
+                        lifetime_source.instance.collect_lifetimes(
+                            expected.shorter,
+                            &mut shorter_lifetims,
+                            &mut changed_map,
+                        );
+                        lifetime_source.instance.collect_lifetimes(
+                            expected.longer,
+                            &mut longer_lifetims,
+                            &mut changed_map,
+                        );
+
+                        'check: for shorter in shorter_lifetims {
+                            for longer in longer_lifetims.iter().cloned() {
+                                if shorter > longer {
+                                    is_satisfied = false;
+                                    break 'check;
+                                }
+                            }
+                        }
+
+                        if !is_satisfied {
+                            lifetime_source
+                                .instance
+                                .into_static(expected.longer, &mut changed_map);
+                            is_changed |= true;
+                        }
+                    }
+
+                    changed_maps.push((entity_id, changed_map));
+                }
+            }
+
+            // apply changes
+            let lifetime_source_map = lifetime_source_map.get(&module_name).unwrap();
+            for (entity_id, changed_map) in changed_maps {
+                let lifetime_source = lifetime_source_map.get(entity_id).unwrap();
+                let mut lifetime_source = lifetime_source.write().unwrap();
+
+                lifetime_source
+                    .instance
+                    .lifetime_tree_map
+                    .extend(changed_map);
+            }
+
+            completed_modules.push(module_name);
+        }
+
+        (completed_modules, is_changed)
+    }
+
+    pub fn get_lifetime_tree(
+        &self,
+        module_name: &Arc<String>,
+        entity_id: EntityID,
+    ) -> Option<LifetimeTree> {
+        let lifetime_source_maps_lock = self.lifetime_source_map.read().unwrap();
+
+        let lifetime_source_maps = lifetime_source_maps_lock.get(module_name).unwrap();
+
+        for lifetime_source in lifetime_source_maps.values() {
+            let lifetime_source = lifetime_source.read().unwrap();
+
+            let lifetime_ref = match lifetime_source
+                .instance
+                .entity_lifetime_ref_map
+                .get(&entity_id)
+            {
+                Some(lifetime_ref) => lifetime_source.instance.resolve_lifetime_ref(*lifetime_ref),
+                None => continue,
+            };
+
+            return Some(
+                lifetime_source
+                    .instance
+                    .lifetime_tree_map
+                    .get(&lifetime_ref)
+                    .unwrap()
+                    .clone(),
+            );
+        }
+
+        None
     }
 }
 

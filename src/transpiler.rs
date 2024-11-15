@@ -9,7 +9,7 @@ use catla_parser::parser::{parse_source, Spanned};
 use either::Either;
 use error::SimpleError;
 use fxhash::FxHashMap;
-use optimizer::optimize;
+use optimizer::{lifetime_analyzer::debug::print_lifetime_debug_info, optimize};
 use semantics::types::{
     type_inference::{infer_type_program, TypeInferenceResultContainer},
     type_info::{collect_duplicated_implementation_error, ScopeThisType, Type, WithDefineInfo},
@@ -111,6 +111,13 @@ pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> R
             .await;
 
         // run lifetime evaluator
+        if transpile_context.settings.optimization.lifetime_analyzer {
+            transpile_context
+                .lifetime_evaluator
+                .eval(&transpile_context)
+                .await;
+        }
+
         transpile_context
             .transpile_phase_future
             .phase(TRANSPILE_PHASE_LIFETIME_EVAL)
@@ -307,12 +314,6 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
 
     merged_implements_infos.merge(&implements_infos);
 
-    if module_context.context.settings.is_transpiler_debug
-        && module_context.module_name.as_str() == "test::test"
-    {
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-    }
-
     let mut type_inference_results = TypeInferenceResultContainer::default();
     {
         // This is not implemented 'Send'.
@@ -362,7 +363,7 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         );
     }
 
-    let optimize_result = optimize(
+    optimize(
         ast,
         &import_element_map,
         &name_resolved_map,
@@ -388,6 +389,15 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         .phase(TRANSPILE_PHASE_LIFETIME_EVAL)
         .future()
         .await;
+
+    if module_context
+        .context
+        .settings
+        .optimization
+        .lifetime_analyzer
+    {
+        print_lifetime_debug_info(ast, &module_context);
+    }
 
     module_context
         .context

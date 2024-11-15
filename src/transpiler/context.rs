@@ -11,6 +11,7 @@ use crate::{localize::localizer::LocalizedText, transpiler::error::TranspileRepo
 
 use super::{
     future::{MultiPhaseFuture, SharedManualFuture},
+    optimizer::lifetime_analyzer::LifetimeEvaluator,
     resource::SourceCodeProvider,
     semantics::types::type_info::{ImplementsInfoSet, Type},
     SourceCode, TranspileError, TranspileWarning,
@@ -22,9 +23,11 @@ pub struct TranspileContext {
     pub(crate) auto_import: AutoImport,
     pub source_code_provider: Box<dyn SourceCodeProvider + Send + Sync>,
     pub module_context_map: Mutex<HashMap<String, Arc<TranspileModuleContext>>>,
+    pub lifetime_evaluator: Arc<LifetimeEvaluator>,
     error_and_warnings: Mutex<HashMap<String, (Vec<TranspileError>, Vec<TranspileWarning>)>>,
     pub(crate) future_runtime: Runtime,
     pub(crate) transpile_phase_future: MultiPhaseFuture,
+    pub debug_print_lock: Mutex<()>,
 }
 
 impl TranspileContext {
@@ -46,9 +49,11 @@ impl TranspileContext {
             auto_import,
             source_code_provider: Box::new(source_code_provider),
             module_context_map: Mutex::new(HashMap::new()),
+            lifetime_evaluator: Arc::new(LifetimeEvaluator::new()),
             error_and_warnings: Mutex::new(HashMap::new()),
             future_runtime,
             transpile_phase_future: MultiPhaseFuture::new(3),
+            debug_print_lock: Mutex::new(()),
         })
     }
 

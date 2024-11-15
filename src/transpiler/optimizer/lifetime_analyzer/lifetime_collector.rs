@@ -1301,8 +1301,8 @@ fn collect_lifetime_primary_left<'allocator>(
                     lifetime_scope.instance.create_lifetime_tree()
                 };
 
-                let array_type = type_inference_result
-                    .get_entity_type(EntityID::from(&ast.first_expr));
+                let array_type =
+                    type_inference_result.get_entity_type(EntityID::from(&ast.first_expr));
                 let base_type = if let Type::Array(base_type) = array_type {
                     base_type.as_ref()
                 } else {
@@ -1445,6 +1445,11 @@ fn collect_lifetime_primary_left<'allocator>(
                 lifetime_scope.collect();
             }
 
+            let array_lifetime_tree = lifetime_scope
+                .instance
+                .get_lifetime_tree(array_lifetime_ref);
+            array_lifetime_tree.is_alloc_point = true;
+
             lifetime_scope
                 .instance
                 .merge(ast_lifetime_ref, array_lifetime_ref);
@@ -1506,6 +1511,11 @@ fn collect_lifetime_primary_left<'allocator>(
                     }
                 }
             }
+
+            let object_lifetime_tree = lifetime_scope
+                .instance
+                .get_lifetime_tree(object_lifetime_ref);
+            object_lifetime_tree.is_alloc_point = true;
 
             lifetime_scope
                 .instance

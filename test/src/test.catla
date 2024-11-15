@@ -187,3 +187,15 @@ if true or false {}
 let tuple1: (int, float) = (100, 100.0)
 let tuple2 = (100, true)
 let (tuple3, tuple4) = (100.0, 100)
+
+class Tree {
+    let field: Tree?
+}
+
+let object1 = new Tree { field: null }
+
+if true {
+    let object2 = new Tree { field: null }
+
+    object1.field = object2
+}

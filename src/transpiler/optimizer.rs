@@ -5,7 +5,12 @@ use catla_parser::parser::{Program, Spanned};
 use fxhash::FxHashMap;
 use lifetime_analyzer::collect_lifetime;
 
-use super::{component::EntityID, context::TranspileModuleContext, name_resolver::FoundDefineInfo, semantics::types::{type_inference::TypeInferenceResultContainer, type_info::Type}};
+use super::{
+    component::EntityID,
+    context::TranspileModuleContext,
+    name_resolver::FoundDefineInfo,
+    semantics::types::{type_inference::TypeInferenceResultContainer, type_info::Type},
+};
 
 pub mod lifetime_analyzer;
 
@@ -21,7 +26,7 @@ pub fn optimize<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
-) -> OptimizeResultContainer {
+) {
     if context.context.settings.optimization.lifetime_analyzer {
         let lifetime_source_map = collect_lifetime(
             ast,
@@ -34,7 +39,10 @@ pub fn optimize<'allocator>(
             allocator,
             context,
         );
-    }
 
-    OptimizeResultContainer {}
+        context
+            .context
+            .lifetime_evaluator
+            .add_sources(context.module_name.clone(), lifetime_source_map);
+    }
 }

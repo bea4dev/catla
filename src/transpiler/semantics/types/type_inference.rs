@@ -1459,7 +1459,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
     }
 
     fn print_var_type(&self, context: &TranspileModuleContext) {
-        if !context.context.settings.is_transpiler_debug {
+        if !context.context.settings.is_transpiler_debug || self.var_span_and_entity_ids.is_empty() {
             return;
         }
 
@@ -1478,6 +1478,8 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
                     .with_message(self.get_type_display_string(&ty)),
             );
         }
+
+        let _lock = context.context.debug_print_lock.lock().unwrap();
 
         builder
             .finish()

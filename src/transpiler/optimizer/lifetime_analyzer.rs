@@ -240,6 +240,7 @@ impl LifetimeInstance {
 
                 if !left_lifetime_tree.is_alloc_point && right_lifetime_tree.is_alloc_point {
                     left_lifetime_tree.lifetimes.push(STATIC_LIFETIME);
+                    left_lifetime_tree.alloc_point_ref.clear();
                 }
 
                 left_lifetime_tree.contains_function_return_value |=
@@ -358,6 +359,7 @@ impl LifetimeInstance {
                 let lifetime_tree = override_map.get_mut(&lifetime_tree_ref).unwrap();
                 lifetime_tree.lifetimes = vec![STATIC_LIFETIME];
                 lifetime_tree.is_alloc_point = false;
+                lifetime_tree.alloc_point_ref.clear();
 
                 lifetime_tree.borrow_ref.clone()
             };
@@ -373,6 +375,7 @@ impl LifetimeInstance {
                 .clone();
             lifetime_tree.lifetimes = vec![STATIC_LIFETIME];
             lifetime_tree.is_alloc_point = false;
+            lifetime_tree.alloc_point_ref.clear();
 
             let borrowed_ref = lifetime_tree.borrow_ref.clone();
 
@@ -429,6 +432,7 @@ impl LifetimeSource {
         if lifetime_tree.contains_function_return_value {
             lifetime_tree.is_alloc_point = false;
             lifetime_tree.lifetimes.push(STATIC_LIFETIME);
+            lifetime_tree.alloc_point_ref.clear();
         }
 
         let children = lifetime_tree.children.values().cloned().collect::<Vec<_>>();

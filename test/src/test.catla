@@ -192,7 +192,10 @@ class Tree {
     let field: Tree?
 }
 
-let object1 = new Tree { field: null }
+let object0 = new Tree { field: null }
+let object1 = new Tree { field: new Tree { field: null } }
+
+object0.field = object1.field
 
 if true {
     let object2 = new Tree { field: null }

@@ -82,6 +82,7 @@ pub(crate) struct TypeEnvironment<'input, 'allocator> {
     var_span_and_entity_ids: Vec<(Range<usize>, EntityID), &'allocator Bump>,
     operator_function_types: Vec<(EntityID, Type), &'allocator Bump>,
     operator_return_types: Vec<(EntityID, Type), &'allocator Bump>,
+    function_equals_info: Vec<(Arc<FunctionType>, Arc<FunctionType>), &'allocator Bump>,
 }
 
 impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
@@ -103,6 +104,7 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
             var_span_and_entity_ids: Vec::new_in(allocator),
             operator_function_types: Vec::new_in(allocator),
             operator_return_types: Vec::new_in(allocator),
+            function_equals_info: Vec::new_in(allocator),
         }
     }
 
@@ -893,6 +895,12 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
                             current_scope_this_type,
                             allow_unknown,
                         )?;
+
+                        if first_function_info != second_function_info {
+                            self.function_equals_info
+                                .push((first_function_info.clone(), second_function_info.clone()));
+                        }
+
                         true
                     }
                 } else {
@@ -1455,11 +1463,23 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
                 .insert(*entity_id, return_type.clone());
         }
 
+        // for lifetime analyzer
+        if context.context.settings.optimization.lifetime_analyzer {
+            let mut global_function_eq_info = context
+                .context
+                .lifetime_evaluator
+                .function_equals_info
+                .write()
+                .unwrap();
+            global_function_eq_info.add_info(self.function_equals_info.iter().cloned());
+        }
+
         self.print_var_type(context);
     }
 
     fn print_var_type(&self, context: &TranspileModuleContext) {
-        if !context.context.settings.is_transpiler_debug || self.var_span_and_entity_ids.is_empty() {
+        if !context.context.settings.is_transpiler_debug || self.var_span_and_entity_ids.is_empty()
+        {
             return;
         }
 

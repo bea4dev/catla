@@ -447,6 +447,7 @@ pub struct LifetimeEvaluator {
         RwLock<FxHashMap<Arc<String>, FxHashMap<EntityID, RwLock<LifetimeSource>>>>,
     queue: Mutex<Vec<Arc<String>>>,
     max_queue_size: AtomicUsize,
+    pub function_equals_info: RwLock<GlobalFunctionEqualsInfo>,
 }
 
 impl LifetimeEvaluator {
@@ -455,6 +456,7 @@ impl LifetimeEvaluator {
             lifetime_source_map: RwLock::new(FxHashMap::default()),
             queue: Mutex::new(Vec::new()),
             max_queue_size: AtomicUsize::new(0),
+            function_equals_info: RwLock::new(GlobalFunctionEqualsInfo::new()),
         }
     }
 
@@ -620,6 +622,24 @@ impl LifetimeEvaluator {
         }
 
         None
+    }
+}
+
+pub struct GlobalFunctionEqualsInfo {
+    info: Vec<(Arc<FunctionType>, Arc<FunctionType>)>,
+    equals_map: FxHashMap<(Arc<String>, EntityID), FxHashSet<(Arc<String>, EntityID)>>,
+}
+
+impl GlobalFunctionEqualsInfo {
+    pub fn new() -> Self {
+        Self {
+            info: Vec::new(),
+            equals_map: FxHashMap::default(),
+        }
+    }
+
+    pub fn add_info(&mut self, info: impl Iterator<Item = (Arc<FunctionType>, Arc<FunctionType>)>) {
+        self.info.extend(info);
     }
 }
 

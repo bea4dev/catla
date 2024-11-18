@@ -112,10 +112,12 @@ pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> R
 
         // run lifetime evaluator
         if transpile_context.settings.optimization.lifetime_analyzer {
-            transpile_context
-                .lifetime_evaluator
-                .eval(&transpile_context)
+            let lifetime_evaluator = &transpile_context.lifetime_evaluator;
+
+            lifetime_evaluator
+                .build_function_equals_map(&transpile_context)
                 .await;
+            lifetime_evaluator.eval(&transpile_context).await;
         }
 
         transpile_context

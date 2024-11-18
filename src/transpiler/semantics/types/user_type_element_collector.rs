@@ -1,11 +1,11 @@
 use std::{
     mem,
     ops::DerefMut,
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
-use allocator_api2::vec::Vec;
 use allocator_api2::vec;
+use allocator_api2::vec::Vec;
 use ariadne::Color;
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, CompareExpression, Expression,
@@ -25,12 +25,10 @@ use crate::transpiler::{
     TranspileError, TranspileWarning,
 };
 
-use super::
-    type_info::{
-        Bound, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo,
-        ImplementsInfoSet, ScopeThisType, Type, WhereBound, WithDefineInfo,
-    }
-;
+use super::type_info::{
+    Bound, FreezableMutex, FunctionDefineInfo, FunctionType, GenericType, ImplementsInfo,
+    ImplementsInfoSet, ScopeThisType, Type, WhereBound, WithDefineInfo,
+};
 
 pub(crate) fn collect_module_element_types_program(
     ast: Program,
@@ -951,9 +949,11 @@ fn get_function_type_and_name<'allocator>(
 
     let define_info = FunctionDefineInfo {
         module_name: context.module_name.clone(),
+        entity_id: EntityID::from(ast),
         generics_define_span,
         arguments_span: ast.args.span.clone(),
         is_closure: false,
+        origin_function: Arc::new(RwLock::new(None)),
         span: ast.span.clone(),
     };
 

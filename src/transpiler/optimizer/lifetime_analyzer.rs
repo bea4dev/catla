@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Mutex, RwLock,
+use std::{
+    ops::Deref,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex, RwLock, RwLockReadGuard,
+    },
 };
 
 use allocator_api2::vec;
@@ -447,7 +450,7 @@ pub struct LifetimeEvaluator {
         RwLock<FxHashMap<Arc<String>, FxHashMap<EntityID, RwLock<LifetimeSource>>>>,
     queue: Mutex<Vec<Arc<String>>>,
     max_queue_size: AtomicUsize,
-    pub function_equals_info: RwLock<GlobalFunctionEqualsInfo>,
+    pub function_equals_info: GlobalFunctionEqualsInfo,
 }
 
 impl LifetimeEvaluator {
@@ -456,7 +459,7 @@ impl LifetimeEvaluator {
             lifetime_source_map: RwLock::new(FxHashMap::default()),
             queue: Mutex::new(Vec::new()),
             max_queue_size: AtomicUsize::new(0),
-            function_equals_info: RwLock::new(GlobalFunctionEqualsInfo::new()),
+            function_equals_info: GlobalFunctionEqualsInfo::new(),
         }
     }
 
@@ -481,26 +484,27 @@ impl LifetimeEvaluator {
         self.max_queue_size.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub async fn build_function_equals_map(&self, context: &TranspileContext) {
+        self.function_equals_info
+            .build_function_equals_map(context, &self.queue)
+            .await;
+    }
+
     pub async fn eval(&self, context: &TranspileContext) {
         let num_threads = context.settings.num_threads;
 
         loop {
-            let mut futures = Vec::with_capacity(num_threads);
+            let futures = (0..num_threads).map(|_| self.eval_lifetime_source());
 
-            for _ in 0..num_threads {
-                let future = self.eval_lifetime_source();
-                futures.push(future);
-            }
-
-            let mut back_queue = Vec::with_capacity(self.max_queue_size.load(Ordering::Relaxed));
+            let mut return_queue = Vec::with_capacity(self.max_queue_size.load(Ordering::Relaxed));
             let mut is_any_changed = false;
             for (modules, is_changed) in join_all(futures).await {
-                back_queue.extend(modules);
+                return_queue.extend(modules);
                 is_any_changed |= is_changed;
             }
 
             let mut queue = self.queue.lock().unwrap();
-            queue.extend(back_queue);
+            queue.extend(return_queue);
 
             if !is_any_changed {
                 break;
@@ -626,20 +630,107 @@ impl LifetimeEvaluator {
 }
 
 pub struct GlobalFunctionEqualsInfo {
-    info: Vec<(Arc<FunctionType>, Arc<FunctionType>)>,
-    equals_map: FxHashMap<(Arc<String>, EntityID), FxHashSet<(Arc<String>, EntityID)>>,
+    info: RwLock<Vec<(Arc<FunctionType>, Arc<FunctionType>)>>,
 }
 
 impl GlobalFunctionEqualsInfo {
     pub fn new() -> Self {
         Self {
-            info: Vec::new(),
-            equals_map: FxHashMap::default(),
+            info: RwLock::new(Vec::new()),
         }
     }
 
-    pub fn add_info(&mut self, info: impl Iterator<Item = (Arc<FunctionType>, Arc<FunctionType>)>) {
-        self.info.extend(info);
+    pub fn add_info(&self, info: impl Iterator<Item = (Arc<FunctionType>, Arc<FunctionType>)>) {
+        let mut info_lock = self.info.write().unwrap();
+        info_lock.extend(info);
+    }
+
+    async fn build_function_equals_map(
+        &self,
+        context: &TranspileContext,
+        queue: &Mutex<Vec<Arc<String>>>,
+    ) {
+        let num_threads = context.settings.num_threads;
+
+        let mut equals_map = FxHashMap::default();
+        let futures = (0..num_threads).map(|_| self.build_equals_map(queue));
+
+        let thread_results = join_all(futures).await;
+
+        for result in thread_results {
+            equals_map.extend(result);
+        }
+
+        loop {
+            let (key, equals) = match equals_map.iter().next() {
+                Some((key, equals)) => (key.clone(), equals.clone()),
+                None => break,
+            };
+
+            equals_map.remove(&key);
+            for key in equals.iter() {
+                equals_map.remove(key);
+            }
+        }
+    }
+
+    async fn build_equals_map(
+        &self,
+        queue: &Mutex<Vec<Arc<String>>>,
+    ) -> FxHashMap<(Arc<String>, EntityID), FxHashSet<(Arc<String>, EntityID)>> {
+        let info = self.info.read().unwrap();
+
+        let mut completed_modules = Vec::new();
+        let mut equals_map = FxHashMap::default();
+
+        loop {
+            let module_name = match queue.lock().unwrap().pop() {
+                Some(module_name) => module_name,
+                None => break,
+            };
+
+            for (function_0, function_1) in info.iter() {
+                let origin_define_info_0 = function_0.define_info.origin_function.read().unwrap();
+                let func_define_0 = match origin_define_info_0.deref() {
+                    Some(define_info) => (define_info.module_name.clone(), define_info.entity_id),
+                    None => (
+                        function_0.define_info.module_name.clone(),
+                        function_1.define_info.entity_id,
+                    ),
+                };
+
+                let origin_define_info_1 = function_1.define_info.origin_function.read().unwrap();
+                let func_define_1 = match origin_define_info_1.deref() {
+                    Some(define_info) => (define_info.module_name.clone(), define_info.entity_id),
+                    None => (
+                        function_1.define_info.module_name.clone(),
+                        function_1.define_info.entity_id,
+                    ),
+                };
+
+                if &module_name == &func_define_0.0 {
+                    let equals_set = equals_map
+                        .entry(func_define_0.clone())
+                        .or_insert_with(|| FxHashSet::default());
+
+                    equals_set.insert(func_define_1.clone());
+                }
+
+                if &module_name == &func_define_1.0 {
+                    let equals_set = equals_map
+                        .entry(func_define_1)
+                        .or_insert_with(|| FxHashSet::default());
+
+                    equals_set.insert(func_define_0);
+                }
+            }
+
+            completed_modules.push(module_name);
+        }
+
+        queue.lock().unwrap().extend(completed_modules);
+
+        equals_map
     }
 }
 

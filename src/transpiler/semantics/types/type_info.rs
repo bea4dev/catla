@@ -1,11 +1,11 @@
 use std::{
     mem::swap,
     ops::Range,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock},
 };
 
-use allocator_api2::vec::Vec;
 use allocator_api2::vec;
+use allocator_api2::vec::Vec;
 use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, Source};
 use bumpalo::Bump;
 use catla_parser::parser::{Spanned, StatementAttribute, UserTypeKindEnum};
@@ -1061,9 +1061,11 @@ pub struct FunctionType {
 #[derive(Debug, Clone)]
 pub struct FunctionDefineInfo {
     pub module_name: Arc<String>,
+    pub entity_id: EntityID,
     pub generics_define_span: Option<Range<usize>>,
     pub arguments_span: Range<usize>,
     pub is_closure: bool,
+    pub origin_function: Arc<RwLock<Option<FunctionDefineInfo>>>,
     pub span: Range<usize>,
 }
 
@@ -2828,7 +2830,7 @@ impl OverrideElementsEnvironment {
                         _ => element_type.clone(),
                     }
                 } else {
-                    element_type
+                    element_type.clone()
                 };
 
             if name == element_name.value {
@@ -2921,6 +2923,25 @@ impl OverrideElementsEnvironment {
                                     bounds,
                                 });
                             }
+                        }
+                    }
+
+                    // for lifetime analyzer
+                    if let Type::Function {
+                        function_info: interface_function_type,
+                        generics: _,
+                    } = &interface_element_type.value
+                    {
+                        if let Type::Function {
+                            function_info: element_function_type,
+                            generics: _,
+                        } = &element_type
+                        {
+                            *element_function_type
+                                .define_info
+                                .origin_function
+                                .write()
+                                .unwrap() = Some(interface_function_type.define_info.clone());
                         }
                     }
 

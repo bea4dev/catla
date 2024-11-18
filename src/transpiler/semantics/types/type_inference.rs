@@ -1,6 +1,6 @@
 use std::{
     ops::{Deref, Range},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 use allocator_api2::vec;
@@ -1465,13 +1465,11 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
 
         // for lifetime analyzer
         if context.context.settings.optimization.lifetime_analyzer {
-            let mut global_function_eq_info = context
+            context
                 .context
                 .lifetime_evaluator
                 .function_equals_info
-                .write()
-                .unwrap();
-            global_function_eq_info.add_info(self.function_equals_info.iter().cloned());
+                .add_info(self.function_equals_info.iter().cloned());
         }
 
         self.print_var_type(context);
@@ -3328,9 +3326,11 @@ fn infer_type_expression<'input, 'allocator>(
 
             let define_info = FunctionDefineInfo {
                 module_name: context.module_name.clone(),
+                entity_id: EntityID::from(closure),
                 generics_define_span: None,
                 arguments_span: closure.arguments.span.clone(),
                 is_closure: true,
+                origin_function: Arc::new(RwLock::new(None)),
                 span: closure.span.clone(),
             };
 
@@ -4841,9 +4841,11 @@ fn infer_type_primary_left<'input, 'allocator>(
 
                     let define_info = FunctionDefineInfo {
                         module_name: context.module_name.clone(),
+                        entity_id: EntityID::from(init_expression),
                         generics_define_span: None,
                         arguments_span: init_expression.get_span(),
                         is_closure: true,
+                        origin_function: Arc::new(RwLock::new(None)),
                         span: init_expression.get_span(),
                     };
 

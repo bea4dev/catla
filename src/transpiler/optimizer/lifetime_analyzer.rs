@@ -631,12 +631,14 @@ impl LifetimeEvaluator {
 
 pub struct GlobalFunctionEqualsInfo {
     info: RwLock<Vec<(Arc<FunctionType>, Arc<FunctionType>)>>,
+    equals_map: RwLock<FxHashMap<(Arc<String>, EntityID), (Arc<String>, EntityID)>>,
 }
 
 impl GlobalFunctionEqualsInfo {
     pub fn new() -> Self {
         Self {
             info: RwLock::new(Vec::new()),
+            equals_map: RwLock::new(FxHashMap::default()),
         }
     }
 
@@ -661,6 +663,8 @@ impl GlobalFunctionEqualsInfo {
             equals_map.extend(result);
         }
 
+        let mut new_equals_map = FxHashMap::default();
+
         loop {
             let (key, equals) = match equals_map.iter().next() {
                 Some((key, equals)) => (key.clone(), equals.clone()),
@@ -671,7 +675,14 @@ impl GlobalFunctionEqualsInfo {
             for key in equals.iter() {
                 equals_map.remove(key);
             }
+
+            new_equals_map.insert(key.clone(), key.clone());
+            for eq in equals {
+                new_equals_map.insert(eq, key.clone());
+            }
         }
+
+        *self.equals_map.write().unwrap() = new_equals_map;
     }
 
     async fn build_equals_map(

@@ -2,8 +2,9 @@ use std::{
     ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex, RwLock, RwLockReadGuard,
+        Arc, Mutex, RwLock,
     },
+    usize,
 };
 
 use allocator_api2::vec;
@@ -30,6 +31,7 @@ pub mod lifetime_collector;
 pub static STATIC_LIFETIME: Lifetime = Lifetime {
     drop_position: usize::MAX,
 };
+pub static STATIC_LIFETIME_REF: LifetimeTreeRef = LifetimeTreeRef(usize::MAX);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Lifetime {
@@ -129,6 +131,12 @@ impl LifetimeInstance {
         };
 
         instance.this_argument_lifetime_ref = instance.create_lifetime_tree();
+
+        let static_lifetime_tree = LifetimeTree {
+            lifetimes: vec![STATIC_LIFETIME],
+            ..Default::default()
+        };
+        instance.lifetime_tree_map.insert(STATIC_LIFETIME_REF, static_lifetime_tree);
 
         instance
     }
@@ -232,6 +240,7 @@ impl LifetimeInstance {
                 left_lifetime_tree
                     .borrow_ref
                     .extend(right_lifetime_tree.borrow_ref);
+                left_lifetime_tree.is_argument_tree |= right_lifetime_tree.is_argument_tree;
 
                 if left_lifetime_tree.is_merged {
                     left_lifetime_tree.is_alloc_point =
@@ -283,6 +292,7 @@ impl LifetimeInstance {
 
         let parent_alloc_point_ref = parent_lifetime_tree.alloc_point_ref.clone();
         let parent_borrow_ref = parent_lifetime_tree.borrow_ref.clone();
+        let is_argument_tree = parent_lifetime_tree.is_argument_tree;
         let mut child_borrow_ref_set = FxHashSet::default();
 
         for parent_borrow_ref in parent_borrow_ref {
@@ -293,6 +303,7 @@ impl LifetimeInstance {
         let child_tree = self.get_lifetime_tree(new_child_ref);
         child_tree.borrow_ref.extend(child_borrow_ref_set);
         child_tree.alloc_point_ref.extend(parent_alloc_point_ref);
+        child_tree.is_argument_tree = is_argument_tree;
 
         new_child_ref
     }
@@ -405,6 +416,7 @@ pub struct LifetimeTree {
     pub contains_function_return_value: bool,
     pub alloc_point_ref: FxHashSet<LifetimeTreeRef>,
     pub borrow_ref: FxHashSet<LifetimeTreeRef>,
+    pub is_argument_tree: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

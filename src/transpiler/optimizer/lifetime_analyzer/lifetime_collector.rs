@@ -151,7 +151,11 @@ pub fn collect_lifetime_program<'allocator>(
             StatementAST::Exchange(exchange) => {}
             StatementAST::VariableDefine(variable_define) => {
                 let variable_lifetime_ref = if let Ok(binding) = &variable_define.binding {
-                    create_lifetime_tree_for_variable_binding(lifetime_scope.instance, binding)
+                    create_lifetime_tree_for_variable_binding(
+                        lifetime_scope.instance,
+                        binding,
+                        false,
+                    )
                 } else {
                     lifetime_scope.instance.create_lifetime_tree()
                 };
@@ -223,6 +227,7 @@ pub fn collect_lifetime_program<'allocator>(
                     let lifetime_ref = create_lifetime_tree_for_variable_binding(
                         &mut lifetime_instance,
                         &argument.binding,
+                        true,
                     );
 
                     argument_lifetimes.push(lifetime_ref);
@@ -376,21 +381,34 @@ pub fn collect_lifetime_program<'allocator>(
 fn create_lifetime_tree_for_variable_binding(
     lifetime_instance: &mut LifetimeInstance,
     binding: &VariableBinding,
+    is_argument: bool,
 ) -> LifetimeTreeRef {
     match &binding.binding {
         Either::Left(literal) => {
-            lifetime_instance.create_entity_lifetime_tree(EntityID::from(literal))
+            let lifetime_tree_ref =
+                lifetime_instance.create_entity_lifetime_tree(EntityID::from(literal));
+
+            let lifetime_tree = lifetime_instance.get_lifetime_tree(lifetime_tree_ref);
+            lifetime_tree.is_argument_tree = is_argument;
+
+            lifetime_tree_ref
         }
         Either::Right(bindings) => {
             let lifetime_ref = lifetime_instance.create_lifetime_tree();
+
+            let lifetime_tree = lifetime_instance.get_lifetime_tree(lifetime_ref);
+            lifetime_tree.is_argument_tree = is_argument;
 
             for (index, binding) in bindings.iter().enumerate() {
                 let index_str = index.to_string();
 
                 let child_ref =
                     lifetime_instance.get_or_create_child(lifetime_ref, index_str.as_str());
-                let binding_ref =
-                    create_lifetime_tree_for_variable_binding(lifetime_instance, binding);
+                let binding_ref = create_lifetime_tree_for_variable_binding(
+                    lifetime_instance,
+                    binding,
+                    is_argument,
+                );
                 lifetime_instance.merge(child_ref, binding_ref);
             }
 

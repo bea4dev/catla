@@ -136,7 +136,9 @@ impl LifetimeInstance {
             lifetimes: vec![STATIC_LIFETIME],
             ..Default::default()
         };
-        instance.lifetime_tree_map.insert(STATIC_LIFETIME_REF, static_lifetime_tree);
+        instance
+            .lifetime_tree_map
+            .insert(STATIC_LIFETIME_REF, static_lifetime_tree);
 
         instance
     }
@@ -400,6 +402,75 @@ impl LifetimeInstance {
             }
         }
     }
+
+    pub fn contains_argument_tree(&self, lifetime_tree_ref: LifetimeTreeRef) -> bool {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+        let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
+
+        if lifetime_tree.is_argument_tree {
+            return true;
+        }
+
+        for child_ref in lifetime_tree.children.values() {
+            if self.contains_argument_tree(*child_ref) {
+                return true;
+            }
+        }
+
+        for borrowed_ref in lifetime_tree.borrow_ref.iter() {
+            if self.contains_argument_tree(*borrowed_ref) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    pub fn contains_static_lifetime(&self, lifetime_tree_ref: LifetimeTreeRef) -> bool {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+        let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
+
+        if lifetime_tree.lifetimes.contains(&STATIC_LIFETIME) {
+            return true;
+        }
+
+        for child_ref in lifetime_tree.children.values() {
+            if self.contains_static_lifetime(*child_ref) {
+                return true;
+            }
+        }
+
+        for borrowed_ref in lifetime_tree.borrow_ref.iter() {
+            if self.contains_static_lifetime(*borrowed_ref) {
+                return true;
+            }
+        }
+
+        for alloc_ref in lifetime_tree.alloc_point_ref.iter() {
+            if self.contains_static_lifetime(*alloc_ref) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn collect_argument_tree_ref(&self, lifetime_tree_ref: LifetimeTreeRef, argument_refs: &mut Vec<LifetimeTreeRef>) {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+        let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
+
+        if lifetime_tree.is_argument_tree {
+            argument_refs.push(lifetime_tree_ref);
+        }
+
+        for child_ref in lifetime_tree.children.values() {
+            self.collect_argument_tree_ref(*child_ref, argument_refs);
+        }
+
+        for borrowed_ref in lifetime_tree.borrow_ref.iter() {
+            self.collect_argument_tree_ref(*borrowed_ref, argument_refs);
+        }
+    }
 }
 
 pub struct LifetimeExpected {
@@ -454,6 +525,44 @@ impl LifetimeSource {
         for child_ref in children {
             self.disable_function_return_value_stack_alloc(child_ref);
         }
+    }
+
+    fn collect_argument_lifetime_expected(&self) -> Vec<LifetimeExpected> {
+        let mut expected_list = Vec::new();
+
+        for expected in self.instance.lifetime_expected.iter() {
+            if self.instance.contains_argument_tree(expected.longer) {
+                let mut long_argument_refs = Vec::new();
+                self.instance.collect_argument_tree_ref(expected.longer, &mut long_argument_refs);
+
+                if self.instance.contains_argument_tree(expected.shorter) {
+                    let mut short_argument_refs = Vec::new();
+                    self.instance.collect_argument_tree_ref(expected.shorter, &mut short_argument_refs);
+
+                    for longer in long_argument_refs.iter().cloned() {
+                        for shorter in short_argument_refs.iter().cloned() {
+                            let expected = LifetimeExpected {
+                                shorter,
+                                longer,
+                            };
+                            expected_list.push(expected);
+                        }
+                    }
+                }
+
+                if self.instance.contains_static_lifetime(expected.shorter) {
+                    for longer in long_argument_refs {
+                        let expected = LifetimeExpected {
+                            shorter: STATIC_LIFETIME_REF,
+                            longer,
+                        };
+                        expected_list.push(expected);
+                    }
+                }
+            }
+        }
+
+        expected_list
     }
 }
 
@@ -657,6 +766,10 @@ impl GlobalFunctionEqualsInfo {
     pub fn add_info(&self, info: impl Iterator<Item = (Arc<FunctionType>, Arc<FunctionType>)>) {
         let mut info_lock = self.info.write().unwrap();
         info_lock.extend(info);
+    }
+
+    pub fn resolve(&self, define: &(Arc<String>, EntityID)) -> Option<(Arc<String>, EntityID)> {
+        self.equals_map.read().unwrap().get(define).cloned()
     }
 
     async fn build_function_equals_map(

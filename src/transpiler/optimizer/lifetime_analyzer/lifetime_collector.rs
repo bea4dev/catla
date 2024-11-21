@@ -233,6 +233,12 @@ pub fn collect_lifetime_program<'allocator>(
                     argument_lifetimes.push(lifetime_ref);
                 }
 
+                let mut argument_tree_refs = Vec::new();
+                for argument_ref in argument_lifetimes.iter() {
+                    lifetime_instance
+                        .collect_argument_tree_ref(*argument_ref, &mut argument_tree_refs);
+                }
+
                 let mut lifetime_scope = LifetimeScope::new(&mut lifetime_instance, allocator);
                 let mut stack_lifetime_scope = StackLifetimeScope::new(allocator);
 
@@ -261,6 +267,12 @@ pub fn collect_lifetime_program<'allocator>(
 
                 lifetime_scope.collect();
                 stack_lifetime_scope.collect(&mut lifetime_instance);
+
+                let argument_lifetime = lifetime_instance.next_lifetime();
+                for argument_tree_ref in argument_tree_refs {
+                    let argument_tree = lifetime_instance.get_lifetime_tree(argument_tree_ref);
+                    argument_tree.lifetimes.push(argument_lifetime);
+                }
 
                 let lifetime_source = LifetimeSource {
                     instance: lifetime_instance,

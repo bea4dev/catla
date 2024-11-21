@@ -455,7 +455,11 @@ impl LifetimeInstance {
         false
     }
 
-    fn collect_argument_tree_ref(&self, lifetime_tree_ref: LifetimeTreeRef, argument_refs: &mut Vec<LifetimeTreeRef>) {
+    fn collect_argument_tree_ref(
+        &self,
+        lifetime_tree_ref: LifetimeTreeRef,
+        argument_refs: &mut Vec<LifetimeTreeRef>,
+    ) {
         let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
         let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
 
@@ -533,18 +537,17 @@ impl LifetimeSource {
         for expected in self.instance.lifetime_expected.iter() {
             if self.instance.contains_argument_tree(expected.longer) {
                 let mut long_argument_refs = Vec::new();
-                self.instance.collect_argument_tree_ref(expected.longer, &mut long_argument_refs);
+                self.instance
+                    .collect_argument_tree_ref(expected.longer, &mut long_argument_refs);
 
                 if self.instance.contains_argument_tree(expected.shorter) {
                     let mut short_argument_refs = Vec::new();
-                    self.instance.collect_argument_tree_ref(expected.shorter, &mut short_argument_refs);
+                    self.instance
+                        .collect_argument_tree_ref(expected.shorter, &mut short_argument_refs);
 
                     for longer in long_argument_refs.iter().cloned() {
                         for shorter in short_argument_refs.iter().cloned() {
-                            let expected = LifetimeExpected {
-                                shorter,
-                                longer,
-                            };
+                            let expected = LifetimeExpected { shorter, longer };
                             expected_list.push(expected);
                         }
                     }
@@ -563,6 +566,15 @@ impl LifetimeSource {
         }
 
         expected_list
+    }
+
+    fn create_replace_map(
+        before_instance: &LifetimeInstance,
+        before_tree_ref: LifetimeTreeRef,
+        after_instance: &LifetimeInstance,
+        after_tree_ref: LifetimeTreeRef,
+        replace_map: &mut FxHashMap<LifetimeTreeRef, LifetimeTreeRef>,
+    ) {
     }
 }
 
@@ -656,6 +668,29 @@ impl LifetimeEvaluator {
 
                 for (entity_id, lifetime_source) in lifetime_sources {
                     let lifetime_source = lifetime_source.read().unwrap();
+
+                    for function_call in lifetime_source.instance.function_calls.iter() {
+                        let function_define = &function_call.function.define_info;
+                        let define = (
+                            function_define.module_name.clone(),
+                            function_define.entity_id,
+                        );
+                        let define = match self.function_equals_info.resolve(&define) {
+                            Some(resolved) => resolved,
+                            None => define,
+                        };
+
+                        let function_lifetime_source = lifetime_source_map
+                            .get(&define.0)
+                            .unwrap()
+                            .get(&define.1)
+                            .unwrap()
+                            .read()
+                            .unwrap();
+
+                        let expected =
+                            function_lifetime_source.collect_argument_lifetime_expected();
+                    }
 
                     let mut changed_map = FxHashMap::default();
 

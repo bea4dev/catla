@@ -1036,6 +1036,7 @@ fn collect_lifetime_primary<'allocator>(
                 let return_value = collect_lifetime_function_call(
                     function_call,
                     EntityID::from(literal),
+                    None,
                     return_value_tree_ref,
                     import_element_map,
                     name_resolved_map,
@@ -1120,6 +1121,7 @@ fn collect_lifetime_primary<'allocator>(
                     let return_value = collect_lifetime_function_call(
                         function_call,
                         EntityID::from(literal),
+                        Some(prev_lifetime_tree_ref),
                         return_value_tree_ref,
                         import_element_map,
                         name_resolved_map,
@@ -1231,6 +1233,7 @@ fn collect_lifetime_primary_left<'allocator>(
                 let return_value = collect_lifetime_function_call(
                     function_call,
                     EntityID::from(simple_primary),
+                    None,
                     return_value_tree_ref,
                     import_element_map,
                     name_resolved_map,
@@ -1868,6 +1871,7 @@ fn collect_lifetime_simple_primary<'allocator>(
 fn collect_lifetime_function_call<'allocator>(
     ast: &'allocator FunctionCall<'_, 'allocator>,
     call_target_entity_id: EntityID,
+    this_lifetime_ref: Option<LifetimeTreeRef>,
     return_value_tree_ref: LifetimeTreeRef,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
@@ -1892,6 +1896,12 @@ fn collect_lifetime_function_call<'allocator>(
     {
         let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
         let mut arguments = Vec::new();
+
+        if function_info.is_extension {
+            if let Some(this_lifetime_ref) = this_lifetime_ref {
+                arguments.push(this_lifetime_ref);
+            }
+        }
 
         if let Ok(arg_exprs) = &ast.arg_exprs {
             for argument in arg_exprs.iter() {

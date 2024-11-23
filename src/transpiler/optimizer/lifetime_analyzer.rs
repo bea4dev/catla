@@ -411,12 +411,6 @@ impl LifetimeInstance {
             return true;
         }
 
-        for child_ref in lifetime_tree.children.values() {
-            if self.contains_argument_tree(*child_ref) {
-                return true;
-            }
-        }
-
         for borrowed_ref in lifetime_tree.borrow_ref.iter() {
             if self.contains_argument_tree(*borrowed_ref) {
                 return true;
@@ -432,12 +426,6 @@ impl LifetimeInstance {
 
         if lifetime_tree.lifetimes.contains(&STATIC_LIFETIME) {
             return true;
-        }
-
-        for child_ref in lifetime_tree.children.values() {
-            if self.contains_static_lifetime(*child_ref) {
-                return true;
-            }
         }
 
         for borrowed_ref in lifetime_tree.borrow_ref.iter() {

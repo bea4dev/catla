@@ -463,6 +463,40 @@ impl LifetimeInstance {
             self.collect_argument_tree_ref(*borrowed_ref, argument_refs);
         }
     }
+
+    fn export_contains_static_tree(&self, from: LifetimeTreeRef) -> ContainsStaticTree {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(from);
+        let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
+
+        let mut contains_static_tree = ContainsStaticTree {
+            contains_static: self.contains_static_lifetime(lifetime_tree_ref),
+            children: FxHashMap::default(),
+        };
+
+        for (child_name, child_ref) in lifetime_tree.children.iter() {
+            let child_contains_static_tree = self.export_contains_static_tree(*child_ref);
+
+            contains_static_tree
+                .children
+                .insert(child_name.clone(), child_contains_static_tree);
+        }
+
+        contains_static_tree
+    }
+
+    fn import_contains_static_tree(&mut self, to: LifetimeTreeRef, from: &ContainsStaticTree) {
+        let lifetime_tree = self.get_lifetime_tree(to);
+
+        if from.contains_static {
+            
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ContainsStaticTree {
+    contains_static: bool,
+    children: FxHashMap<String, ContainsStaticTree>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -702,7 +736,7 @@ impl LifetimeEvaluator {
             let mut change_list = Vec::new();
 
             {
-                let lifetime_sources = lifetime_source_map.get(&module_name).unwrap().iter(); 
+                let lifetime_sources = lifetime_source_map.get(&module_name).unwrap().iter();
 
                 for (entity_id, lifetime_source) in lifetime_sources {
                     let lifetime_source = lifetime_source.read().unwrap();
@@ -754,7 +788,11 @@ impl LifetimeEvaluator {
                         );
 
                         for expected in expected {
-                            if !lifetime_source.instance.lifetime_expected.contains(&expected) {
+                            if !lifetime_source
+                                .instance
+                                .lifetime_expected
+                                .contains(&expected)
+                            {
                                 expected_add.insert(expected);
                                 is_changed = true;
                             }

@@ -1,4 +1,5 @@
 use std::{
+    mem::swap,
     ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -115,6 +116,8 @@ pub struct LifetimeInstance {
     lifetime_tree_map: FxHashMap<LifetimeTreeRef, LifetimeTree>,
     lifetime_ref_reference_map: FxHashMap<LifetimeTreeRef, LifetimeTreeRef>,
     this_argument_lifetime_ref: LifetimeTreeRef,
+    inserts: Vec<(LifetimeTreeRef, LifetimeTreeRef)>,
+    insert_ref_map: FxHashMap<LifetimeTreeRef, Arc<FxHashSet<LifetimeTreeRef>>>,
 }
 
 impl LifetimeInstance {
@@ -128,6 +131,8 @@ impl LifetimeInstance {
             lifetime_tree_map: FxHashMap::default(),
             lifetime_ref_reference_map: FxHashMap::default(),
             this_argument_lifetime_ref: LifetimeTreeRef(0),
+            inserts: Vec::new(),
+            insert_ref_map: FxHashMap::default(),
         };
 
         instance.this_argument_lifetime_ref = instance.create_lifetime_tree();
@@ -222,6 +227,10 @@ impl LifetimeInstance {
 
         let merged_tree = match (left_lifetime_tree, right_lifetime_tree) {
             (Some(mut left_lifetime_tree), Some(mut right_lifetime_tree)) => {
+                left_lifetime_tree
+                    .borrow_ref
+                    .extend(right_lifetime_tree.borrow_ref);
+
                 for (left_child_name, left_child_ref) in left_lifetime_tree.children.iter() {
                     if let Some(right_child_ref) =
                         right_lifetime_tree.children.remove(left_child_name)
@@ -233,29 +242,28 @@ impl LifetimeInstance {
                 left_lifetime_tree
                     .children
                     .extend(right_lifetime_tree.children);
+
+                for (child_name, child_ref) in left_lifetime_tree.children.iter() {
+                    let borrowed_ref_children = left_lifetime_tree
+                        .borrow_ref
+                        .iter()
+                        .map(|borrowed_ref| self.get_or_create_child(*borrowed_ref, child_name))
+                        .collect::<FxHashSet<_>>();
+
+                    let child_tree = self.get_lifetime_tree(*child_ref);
+                    child_tree.borrow_ref.extend(borrowed_ref_children);
+                }
+
                 left_lifetime_tree
                     .lifetimes
                     .extend(right_lifetime_tree.lifetimes);
                 left_lifetime_tree
                     .alloc_point_ref
                     .extend(right_lifetime_tree.alloc_point_ref);
-                left_lifetime_tree
-                    .borrow_ref
-                    .extend(right_lifetime_tree.borrow_ref);
                 left_lifetime_tree.is_argument_tree |= right_lifetime_tree.is_argument_tree;
 
-                if left_lifetime_tree.is_merged {
-                    left_lifetime_tree.is_alloc_point =
-                        left_lifetime_tree.is_alloc_point && right_lifetime_tree.is_alloc_point;
-                } else {
-                    left_lifetime_tree.is_alloc_point = right_lifetime_tree.is_alloc_point;
-                }
+                left_lifetime_tree.is_alloc_point |= right_lifetime_tree.is_alloc_point;
                 left_lifetime_tree.is_merged = true;
-
-                if !left_lifetime_tree.is_alloc_point && right_lifetime_tree.is_alloc_point {
-                    left_lifetime_tree.lifetimes.push(STATIC_LIFETIME);
-                    left_lifetime_tree.alloc_point_ref.clear();
-                }
 
                 left_lifetime_tree.contains_function_return_value |=
                     right_lifetime_tree.contains_function_return_value;
@@ -328,6 +336,96 @@ impl LifetimeInstance {
         }
 
         self.lifetime_expected.extend(lifetime_expected);
+    }
+
+    pub fn add_insert(&mut self, left: LifetimeTreeRef, right: LifetimeTreeRef) {
+        self.inserts.push((left, right));
+    }
+
+    pub fn init_insert_map(&mut self) {
+        let mut group_sets = Vec::new();
+
+        self.init_insert_groups(&mut group_sets);
+
+        for group_set in group_sets {
+            let group_set = Arc::new(group_set);
+
+            for lifetime_ref in group_set.iter() {
+                self.insert_ref_map.insert(*lifetime_ref, group_set.clone());
+            }
+        }
+    }
+
+    fn init_insert_groups(&self, group_sets: &mut Vec<FxHashSet<LifetimeTreeRef>>) {
+        for (left, right) in self.inserts.iter().cloned() {
+            self.init_insert_groups_lr(left, right, group_sets);
+            self.init_insert_groups_borrowed_ref(left, group_sets);
+            self.init_insert_groups_borrowed_ref(right, group_sets);
+        }
+    }
+
+    fn init_insert_groups_children(&self, group_sets: &mut Vec<FxHashSet<LifetimeTreeRef>>) {
+        for group_set in group_sets.clone() {
+            let mut child_names = FxHashSet::default();
+            for lifetime_ref in group_set.iter() {
+                let lifetime_ref = self.resolve_lifetime_ref(*lifetime_ref);
+                let lifetime_tree = self.lifetime_tree_map.get(&lifetime_ref).unwrap();
+                child_names.extend(lifetime_tree.children.keys());
+            }
+
+            for child_name in child_names {
+                
+            }
+        }
+    }
+
+    fn init_insert_groups_lr(
+        &self,
+        left: LifetimeTreeRef,
+        right: LifetimeTreeRef,
+        group_sets: &mut Vec<FxHashSet<LifetimeTreeRef>>,
+    ) {
+        let left = self.resolve_lifetime_ref(left);
+        let right = self.resolve_lifetime_ref(right);
+
+        let left_group_index = group_sets.iter().position(|set| set.contains(&left));
+        let right_group_index = group_sets.iter().position(|set| set.contains(&right));
+
+        match (left_group_index, right_group_index) {
+            (Some(left_group_index), Some(right_group_index)) => {
+                // merge right into left
+                let mut right_group_swap = FxHashSet::default();
+                swap(&mut group_sets[right_group_index], &mut right_group_swap);
+
+                group_sets[left_group_index].extend(right_group_swap);
+                group_sets.remove(right_group_index);
+            }
+            (Some(group_index), None) | (None, Some(group_index)) => {
+                let set = &mut group_sets[group_index];
+                set.insert(left);
+                set.insert(right);
+            }
+            (None, None) => {
+                let mut new_set = FxHashSet::default();
+                new_set.insert(left);
+                new_set.insert(right);
+                group_sets.push(new_set);
+            }
+        }
+    }
+
+    fn init_insert_groups_borrowed_ref(
+        &self,
+        origin: LifetimeTreeRef,
+        group_sets: &mut Vec<FxHashSet<LifetimeTreeRef>>,
+    ) {
+        let origin = self.resolve_lifetime_ref(origin);
+        let origin_tree = self.lifetime_tree_map.get(&origin).unwrap();
+
+        for borrowed_ref in origin_tree.borrow_ref.iter() {
+            self.init_insert_groups_lr(origin, *borrowed_ref, group_sets);
+            self.init_insert_groups_borrowed_ref(*borrowed_ref, group_sets);
+        }
     }
 
     pub fn collect_lifetimes(
@@ -487,9 +585,7 @@ impl LifetimeInstance {
     fn import_contains_static_tree(&mut self, to: LifetimeTreeRef, from: &ContainsStaticTree) {
         let lifetime_tree = self.get_lifetime_tree(to);
 
-        if from.contains_static {
-            
-        }
+        if from.contains_static {}
     }
 }
 
@@ -536,6 +632,7 @@ impl LifetimeSource {
     pub fn finalize(mut self) -> Self {
         self.disable_function_return_value_stack_alloc(self.return_value);
         self.instance.init_lifetime_expected_relationships();
+        self.instance.init_insert_map();
         self
     }
 
@@ -650,6 +747,26 @@ impl LifetimeSource {
     }
 }
 
+pub struct LoopSuppressor {
+    explored: FxHashSet<LifetimeTreeRef>,
+}
+
+impl LoopSuppressor {
+    pub fn new() -> Self {
+        Self {
+            explored: FxHashSet::default(),
+        }
+    }
+
+    pub fn mark_as_explored(&mut self, current: LifetimeTreeRef) -> bool {
+        if self.explored.contains(&current) {
+            return false;
+        }
+        self.explored.insert(current);
+        true
+    }
+}
+
 pub struct LifetimeEvaluator {
     lifetime_source_map:
         RwLock<FxHashMap<Arc<String>, FxHashMap<EntityID, RwLock<LifetimeSource>>>>,
@@ -753,6 +870,11 @@ impl LifetimeEvaluator {
                             Some(resolved) => resolved,
                             None => define,
                         };
+
+                        println!("{} : {}", &define.0, define.1.get_type_name());
+                        if define.1.get_type_name() == "catla_parser::parser::Closure" {
+                            continue;
+                        }
 
                         let function_lifetime_source = lifetime_source_map
                             .get(&define.0)

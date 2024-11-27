@@ -346,6 +346,7 @@ impl LifetimeInstance {
         let mut group_sets = Vec::new();
 
         self.init_insert_groups(&mut group_sets);
+        self.init_insert_groups_children(&mut group_sets);
 
         for group_set in group_sets {
             let group_set = Arc::new(group_set);
@@ -366,16 +367,45 @@ impl LifetimeInstance {
 
     fn init_insert_groups_children(&self, group_sets: &mut Vec<FxHashSet<LifetimeTreeRef>>) {
         for group_set in group_sets.clone() {
-            let mut child_names = FxHashSet::default();
-            for lifetime_ref in group_set.iter() {
-                let lifetime_ref = self.resolve_lifetime_ref(*lifetime_ref);
-                let lifetime_tree = self.lifetime_tree_map.get(&lifetime_ref).unwrap();
-                child_names.extend(lifetime_tree.children.keys());
+            self.init_insert_groups_children_recursive(&group_set, group_sets);
+        }
+    }
+
+    fn init_insert_groups_children_recursive(
+        &self,
+        current_set: &FxHashSet<LifetimeTreeRef>,
+        group_sets: &mut Vec<FxHashSet<LifetimeTreeRef>>,
+    ) {
+        let mut child_names = FxHashSet::default();
+        for lifetime_ref in current_set.iter() {
+            let lifetime_ref = self.resolve_lifetime_ref(*lifetime_ref);
+            let lifetime_tree = self.lifetime_tree_map.get(&lifetime_ref).unwrap();
+            child_names.extend(lifetime_tree.children.keys());
+        }
+
+        for child_name in child_names {
+            let children = current_set
+                .iter()
+                .map(|lifetime_ref| {
+                    let lifetime_ref = self.resolve_lifetime_ref(*lifetime_ref);
+                    let lifetime_tree = self.lifetime_tree_map.get(&lifetime_ref).unwrap();
+                    lifetime_tree.children.get(child_name)
+                })
+                .flatten()
+                .cloned()
+                .collect::<FxHashSet<_>>();
+
+            let mut children_iter = children.iter();
+
+            if let Some(first) = children_iter.next() {
+                let mut prev = *first;
+                for next in children_iter.cloned() {
+                    self.init_insert_groups_lr(prev, next, group_sets);
+                    prev = next;
+                }
             }
 
-            for child_name in child_names {
-                
-            }
+            self.init_insert_groups_children_recursive(&children, group_sets);
         }
     }
 

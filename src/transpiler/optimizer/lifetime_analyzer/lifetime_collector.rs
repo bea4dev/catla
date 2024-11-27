@@ -23,7 +23,7 @@ use crate::transpiler::{
 
 use super::{
     FunctionCallLifetime, LifetimeExpected, LifetimeInstance, LifetimeScope, LifetimeSource,
-    LifetimeTreeRef, StackLifetimeScope, STATIC_LIFETIME,
+    LifetimeTreeRef, LoopSuppressor, StackLifetimeScope, STATIC_LIFETIME,
 };
 
 fn add_lifetime_tree_to_scope(
@@ -235,8 +235,11 @@ pub fn collect_lifetime_program<'allocator>(
 
                 let mut argument_tree_refs = Vec::new();
                 for argument_ref in argument_lifetimes.iter() {
-                    lifetime_instance
-                        .collect_argument_tree_ref(*argument_ref, &mut argument_tree_refs);
+                    lifetime_instance.collect_argument_tree_ref(
+                        *argument_ref,
+                        &mut argument_tree_refs,
+                        &mut LoopSuppressor::new(),
+                    );
                 }
 
                 let mut lifetime_scope = LifetimeScope::new(&mut lifetime_instance, allocator);

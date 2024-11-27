@@ -463,8 +463,13 @@ impl LifetimeInstance {
         lifetime_tree_ref: LifetimeTreeRef,
         lifetimes: &mut Vec<Lifetime>,
         override_map: &FxHashMap<LifetimeTreeRef, LifetimeTree>,
+        loop_suppressor: &mut LoopSuppressor,
     ) {
         let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+
+        if !loop_suppressor.mark_as_explored(lifetime_tree_ref) {
+            return;
+        }
 
         let lifetime_tree = match override_map.get(&lifetime_tree_ref) {
             Some(lifetime_tree) => lifetime_tree,
@@ -483,11 +488,17 @@ impl LifetimeInstance {
         }
 
         for borrowed_ref in lifetime_tree.borrow_ref.iter() {
-            self.collect_lifetimes(*borrowed_ref, lifetimes, override_map);
+            self.collect_lifetimes(*borrowed_ref, lifetimes, override_map, loop_suppressor);
         }
 
         for alloc_point_ref in lifetime_tree.alloc_point_ref.iter() {
-            self.collect_lifetimes(*alloc_point_ref, lifetimes, override_map);
+            self.collect_lifetimes(*alloc_point_ref, lifetimes, override_map, loop_suppressor);
+        }
+
+        if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
+            for inserted_ref in inserted_refs.iter() {
+                self.collect_lifetimes(*inserted_ref, lifetimes, override_map, loop_suppressor);
+            }
         }
     }
 
@@ -495,8 +506,13 @@ impl LifetimeInstance {
         &self,
         lifetime_tree_ref: LifetimeTreeRef,
         override_map: &mut FxHashMap<LifetimeTreeRef, LifetimeTree>,
+        loop_suppressor: &mut LoopSuppressor,
     ) {
         let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+
+        if !loop_suppressor.mark_as_explored(lifetime_tree_ref) {
+            return;
+        }
 
         if override_map.contains_key(&lifetime_tree_ref) {
             let borrowed_ref = {
@@ -509,7 +525,13 @@ impl LifetimeInstance {
             };
 
             for borrowed_ref in borrowed_ref {
-                self.into_static(borrowed_ref, override_map);
+                self.into_static(borrowed_ref, override_map, loop_suppressor);
+            }
+
+            if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
+                for inserted_ref in inserted_refs.iter() {
+                    self.into_static(*inserted_ref, override_map, loop_suppressor);
+                }
             }
         } else {
             let mut lifetime_tree = self
@@ -526,13 +548,28 @@ impl LifetimeInstance {
             override_map.insert(lifetime_tree_ref, lifetime_tree);
 
             for borrowed_ref in borrowed_ref {
-                self.into_static(borrowed_ref, override_map);
+                self.into_static(borrowed_ref, override_map, loop_suppressor);
+            }
+
+            if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
+                for inserted_ref in inserted_refs.iter() {
+                    self.into_static(*inserted_ref, override_map, loop_suppressor);
+                }
             }
         }
     }
 
-    pub fn contains_argument_tree(&self, lifetime_tree_ref: LifetimeTreeRef) -> bool {
+    pub fn contains_argument_tree(
+        &self,
+        lifetime_tree_ref: LifetimeTreeRef,
+        loop_suppressor: &mut LoopSuppressor,
+    ) -> bool {
         let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+
+        if !loop_suppressor.mark_as_explored(lifetime_tree_ref) {
+            return false;
+        }
+
         let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
 
         if lifetime_tree.is_argument_tree {
@@ -540,16 +577,33 @@ impl LifetimeInstance {
         }
 
         for borrowed_ref in lifetime_tree.borrow_ref.iter() {
-            if self.contains_argument_tree(*borrowed_ref) {
+            if self.contains_argument_tree(*borrowed_ref, loop_suppressor) {
                 return true;
+            }
+        }
+
+        if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
+            for inserted_ref in inserted_refs.iter() {
+                if self.contains_argument_tree(*inserted_ref, loop_suppressor) {
+                    return true;
+                }
             }
         }
 
         false
     }
 
-    pub fn contains_static_lifetime(&self, lifetime_tree_ref: LifetimeTreeRef) -> bool {
+    pub fn contains_static_lifetime(
+        &self,
+        lifetime_tree_ref: LifetimeTreeRef,
+        loop_suppressor: &mut LoopSuppressor,
+    ) -> bool {
         let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+
+        if !loop_suppressor.mark_as_explored(lifetime_tree_ref) {
+            return false;
+        }
+
         let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
 
         if lifetime_tree.lifetimes.contains(&STATIC_LIFETIME) {
@@ -557,14 +611,22 @@ impl LifetimeInstance {
         }
 
         for borrowed_ref in lifetime_tree.borrow_ref.iter() {
-            if self.contains_static_lifetime(*borrowed_ref) {
+            if self.contains_static_lifetime(*borrowed_ref, loop_suppressor) {
                 return true;
             }
         }
 
         for alloc_ref in lifetime_tree.alloc_point_ref.iter() {
-            if self.contains_static_lifetime(*alloc_ref) {
+            if self.contains_static_lifetime(*alloc_ref, loop_suppressor) {
                 return true;
+            }
+        }
+
+        if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
+            for inserted_ref in inserted_refs.iter() {
+                if self.contains_static_lifetime(*inserted_ref, loop_suppressor) {
+                    return true;
+                }
             }
         }
 
@@ -575,20 +637,28 @@ impl LifetimeInstance {
         &self,
         lifetime_tree_ref: LifetimeTreeRef,
         argument_refs: &mut Vec<LifetimeTreeRef>,
+        loop_suppressor: &mut LoopSuppressor,
     ) {
         let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+
+        if !loop_suppressor.mark_as_explored(lifetime_tree_ref) {
+            return;
+        }
+
         let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
 
         if lifetime_tree.is_argument_tree {
             argument_refs.push(lifetime_tree_ref);
         }
 
-        for child_ref in lifetime_tree.children.values() {
-            self.collect_argument_tree_ref(*child_ref, argument_refs);
+        for borrowed_ref in lifetime_tree.borrow_ref.iter() {
+            self.collect_argument_tree_ref(*borrowed_ref, argument_refs, loop_suppressor);
         }
 
-        for borrowed_ref in lifetime_tree.borrow_ref.iter() {
-            self.collect_argument_tree_ref(*borrowed_ref, argument_refs);
+        if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
+            for inserted_ref in inserted_refs.iter() {
+                self.collect_argument_tree_ref(*inserted_ref, argument_refs, loop_suppressor);
+            }
         }
     }
 
@@ -597,7 +667,8 @@ impl LifetimeInstance {
         let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
 
         let mut contains_static_tree = ContainsStaticTree {
-            contains_static: self.contains_static_lifetime(lifetime_tree_ref),
+            contains_static: self
+                .contains_static_lifetime(lifetime_tree_ref, &mut LoopSuppressor::new()),
             children: FxHashMap::default(),
         };
 
@@ -685,15 +756,27 @@ impl LifetimeSource {
         let mut expected_set = FxHashSet::default();
 
         for expected in self.instance.lifetime_expected.iter() {
-            if self.instance.contains_argument_tree(expected.longer) {
+            if self
+                .instance
+                .contains_argument_tree(expected.longer, &mut LoopSuppressor::new())
+            {
                 let mut long_argument_refs = Vec::new();
-                self.instance
-                    .collect_argument_tree_ref(expected.longer, &mut long_argument_refs);
+                self.instance.collect_argument_tree_ref(
+                    expected.longer,
+                    &mut long_argument_refs,
+                    &mut LoopSuppressor::new(),
+                );
 
-                if self.instance.contains_argument_tree(expected.shorter) {
+                if self
+                    .instance
+                    .contains_argument_tree(expected.shorter, &mut LoopSuppressor::new())
+                {
                     let mut short_argument_refs = Vec::new();
-                    self.instance
-                        .collect_argument_tree_ref(expected.shorter, &mut short_argument_refs);
+                    self.instance.collect_argument_tree_ref(
+                        expected.shorter,
+                        &mut short_argument_refs,
+                        &mut LoopSuppressor::new(),
+                    );
 
                     for longer in long_argument_refs.iter().cloned() {
                         for shorter in short_argument_refs.iter().cloned() {
@@ -703,7 +786,10 @@ impl LifetimeSource {
                     }
                 }
 
-                if self.instance.contains_static_lifetime(expected.shorter) {
+                if self
+                    .instance
+                    .contains_static_lifetime(expected.shorter, &mut LoopSuppressor::new())
+                {
                     for longer in long_argument_refs {
                         let expected = LifetimeExpected {
                             shorter: STATIC_LIFETIME_REF,
@@ -963,11 +1049,13 @@ impl LifetimeEvaluator {
                             expected.shorter,
                             &mut shorter_lifetims,
                             &mut changed_map,
+                            &mut LoopSuppressor::new(),
                         );
                         lifetime_source.instance.collect_lifetimes(
                             expected.longer,
                             &mut longer_lifetims,
                             &mut changed_map,
+                            &mut LoopSuppressor::new(),
                         );
 
                         'check: for shorter in shorter_lifetims {
@@ -980,9 +1068,11 @@ impl LifetimeEvaluator {
                         }
 
                         if !is_satisfied {
-                            lifetime_source
-                                .instance
-                                .into_static(expected.longer, &mut changed_map);
+                            lifetime_source.instance.into_static(
+                                expected.longer,
+                                &mut changed_map,
+                                &mut LoopSuppressor::new(),
+                            );
                             is_changed = true;
                         }
                     }

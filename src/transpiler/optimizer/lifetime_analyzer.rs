@@ -633,7 +633,7 @@ impl LifetimeInstance {
         false
     }
 
-    fn collect_argument_tree_ref(
+    pub fn collect_argument_tree_ref(
         &self,
         lifetime_tree_ref: LifetimeTreeRef,
         argument_refs: &mut Vec<LifetimeTreeRef>,
@@ -683,10 +683,26 @@ impl LifetimeInstance {
         contains_static_tree
     }
 
-    fn import_contains_static_tree(&mut self, to: LifetimeTreeRef, from: &ContainsStaticTree) {
-        let lifetime_tree = self.get_lifetime_tree(to);
+    fn import_contains_static_tree(
+        &mut self,
+        lifetime_tree_ref: LifetimeTreeRef,
+        from: &ContainsStaticTree,
+    ) {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
 
-        if from.contains_static {}
+        if from.contains_static {
+            let lifetime_tree = self.lifetime_tree_map.get_mut(&lifetime_tree_ref).unwrap();
+
+            if !lifetime_tree.lifetimes.contains(&STATIC_LIFETIME) {
+                lifetime_tree.lifetimes.push(STATIC_LIFETIME);
+            }
+        }
+
+        for (child_name, contains_static_tree) in from.children.iter() {
+            let lifetime_tree_ref = self.get_or_create_child(lifetime_tree_ref, child_name);
+
+            self.import_contains_static_tree(lifetime_tree_ref, contains_static_tree);
+        }
     }
 }
 
@@ -861,6 +877,26 @@ impl LifetimeSource {
             })
             .collect()
     }
+
+    fn export_arguments_static_tree(&self) -> Vec<ContainsStaticTree> {
+        self.arguments
+            .iter()
+            .map(|argument_ref| self.instance.export_contains_static_tree(*argument_ref))
+            .collect()
+    }
+
+    fn import_arguments_static_tree(&mut self, static_trees: &Vec<ContainsStaticTree>) {
+        for i in 0..static_trees.len() {
+            let static_tree = &static_trees[i];
+            let argument_ref = match self.arguments.get(i).cloned() {
+                Some(argument_ref) => argument_ref,
+                None => break,
+            };
+
+            self.instance
+                .import_contains_static_tree(argument_ref, static_tree);
+        }
+    }
 }
 
 pub struct LoopSuppressor {
@@ -967,6 +1003,7 @@ impl LifetimeEvaluator {
             };
 
             let mut change_list = Vec::new();
+            let mut shared_change_list = Vec::new();
 
             {
                 let lifetime_sources = lifetime_source_map.get(&module_name).unwrap().iter();
@@ -1078,19 +1115,87 @@ impl LifetimeEvaluator {
                     }
 
                     change_list.push((entity_id, changed_map, expected_add));
+
+                    if let Some(origin_function) = self
+                        .function_equals_info
+                        .resolve(&(module_name.clone(), *entity_id))
+                    {
+                        let origin_lifetime_source = lifetime_source_map
+                            .get(&origin_function.0)
+                            .unwrap()
+                            .get(&origin_function.1)
+                            .unwrap()
+                            .read()
+                            .unwrap();
+
+                        let expected = lifetime_source.collect_argument_lifetime_expected();
+
+                        let mut replace_map = FxHashMap::default();
+                        for i in 0..origin_lifetime_source.arguments.len() {
+                            let origin_argument = origin_lifetime_source.arguments[i];
+                            let argument = match lifetime_source.arguments.get(i) {
+                                Some(argument) => argument,
+                                None => break,
+                            };
+
+                            LifetimeSource::create_replace_map(
+                                &lifetime_source.instance,
+                                *argument,
+                                &origin_lifetime_source.instance,
+                                origin_argument,
+                                &mut replace_map,
+                            );
+                        }
+
+                        let expected = LifetimeSource::convert_argument_lifetime_expected(
+                            &replace_map,
+                            expected,
+                        );
+
+                        shared_change_list
+                            .push(((origin_function.0.clone(), origin_function.1), expected));
+                    }
                 }
             }
 
             // apply changes
-            let lifetime_source_map = lifetime_source_map.get(&module_name).unwrap();
+            let lifetime_source_module_map = lifetime_source_map.get(&module_name).unwrap();
             for (entity_id, changed_map, expected_add) in change_list {
-                let lifetime_source = lifetime_source_map.get(entity_id).unwrap();
+                let lifetime_source = lifetime_source_module_map.get(entity_id).unwrap();
                 let mut lifetime_source = lifetime_source.write().unwrap();
 
                 lifetime_source
                     .instance
                     .lifetime_tree_map
                     .extend(changed_map);
+
+                lifetime_source
+                    .instance
+                    .lifetime_expected
+                    .extend(expected_add);
+            }
+
+            for (origin_define, expected) in shared_change_list {
+                let lifetime_source_module_map = lifetime_source_map.get(&origin_define.0).unwrap();
+                let mut origin_lifetime_source = lifetime_source_module_map
+                    .get(&origin_define.1)
+                    .unwrap()
+                    .write()
+                    .unwrap();
+
+                for expected in expected {
+                    if !origin_lifetime_source
+                        .instance
+                        .lifetime_expected
+                        .contains(&expected)
+                    {
+                        origin_lifetime_source
+                            .instance
+                            .lifetime_expected
+                            .insert(expected);
+                        is_changed = true;
+                    }
+                }
             }
 
             completed_modules.push(module_name);

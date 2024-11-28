@@ -687,21 +687,49 @@ impl LifetimeInstance {
         &mut self,
         lifetime_tree_ref: LifetimeTreeRef,
         from: &ContainsStaticTree,
+        changed_flag: &mut bool,
+        loop_suppressor: &mut LoopSuppressor,
     ) {
         let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
 
-        if from.contains_static {
-            let lifetime_tree = self.lifetime_tree_map.get_mut(&lifetime_tree_ref).unwrap();
+        if !loop_suppressor.mark_as_explored(lifetime_tree_ref) {
+            return;
+        }
 
+        let lifetime_tree = self.lifetime_tree_map.get_mut(&lifetime_tree_ref).unwrap();
+
+        if from.contains_static {
             if !lifetime_tree.lifetimes.contains(&STATIC_LIFETIME) {
+                *changed_flag = true;
+
                 lifetime_tree.lifetimes.push(STATIC_LIFETIME);
+            }
+        }
+
+        for borrowed_ref in lifetime_tree.borrow_ref.clone() {
+            self.import_contains_static_tree(borrowed_ref, from, changed_flag, loop_suppressor);
+        }
+
+        if let Some(inserted_ref) = self.insert_ref_map.get(&lifetime_tree_ref).cloned() {
+            for inserted_ref in inserted_ref.iter() {
+                self.import_contains_static_tree(
+                    *inserted_ref,
+                    from,
+                    changed_flag,
+                    loop_suppressor,
+                );
             }
         }
 
         for (child_name, contains_static_tree) in from.children.iter() {
             let lifetime_tree_ref = self.get_or_create_child(lifetime_tree_ref, child_name);
 
-            self.import_contains_static_tree(lifetime_tree_ref, contains_static_tree);
+            self.import_contains_static_tree(
+                lifetime_tree_ref,
+                contains_static_tree,
+                changed_flag,
+                loop_suppressor,
+            );
         }
     }
 }
@@ -885,7 +913,11 @@ impl LifetimeSource {
             .collect()
     }
 
-    fn import_arguments_static_tree(&mut self, static_trees: &Vec<ContainsStaticTree>) {
+    fn import_arguments_static_tree(
+        &mut self,
+        static_trees: &Vec<ContainsStaticTree>,
+        changed_flag: &mut bool,
+    ) {
         for i in 0..static_trees.len() {
             let static_tree = &static_trees[i];
             let argument_ref = match self.arguments.get(i).cloned() {
@@ -893,8 +925,12 @@ impl LifetimeSource {
                 None => break,
             };
 
-            self.instance
-                .import_contains_static_tree(argument_ref, static_tree);
+            self.instance.import_contains_static_tree(
+                argument_ref,
+                static_tree,
+                changed_flag,
+                &mut LoopSuppressor::new(),
+            );
         }
     }
 }
@@ -1011,6 +1047,37 @@ impl LifetimeEvaluator {
                 for (entity_id, lifetime_source) in lifetime_sources {
                     let lifetime_source = lifetime_source.read().unwrap();
 
+                    let mut apply_static_trees = Vec::new();
+
+                    // apply static tree from origin function
+                    if let Some(origin_define) = self
+                        .function_equals_info
+                        .resolve(&(module_name.clone(), *entity_id))
+                    {
+                        if origin_define.1.get_type_name() == "catla_parser::parser::Closure" {
+                            continue;
+                        }
+
+                        let origin_lifetime_source = lifetime_source_map
+                            .get(&origin_define.0)
+                            .unwrap()
+                            .get(&origin_define.1)
+                            .unwrap()
+                            .read()
+                            .unwrap();
+
+                        let origin_argument_static_trees = origin_lifetime_source.export_arguments_static_tree();
+                        for i in 0..lifetime_source.arguments.len() {
+                            let argument_ref = lifetime_source.arguments[i];
+                            let origin_static_tree= match origin_argument_static_trees.get(i) {
+                                Some(origin_static_tree) => origin_static_tree,
+                                None => todo!(),
+                            };
+
+                            apply_static_trees.push((argument_ref, origin_static_tree.clone()));
+                        }
+                    }
+
                     let mut expected_add = FxHashSet::default();
 
                     for function_call in lifetime_source.instance.function_calls.iter() {
@@ -1072,6 +1139,34 @@ impl LifetimeEvaluator {
                                 is_changed = true;
                             }
                         }
+
+                        let function_argument_static_trees =
+                            function_lifetime_source.export_arguments_static_tree();
+                        for i in 0..function_call.arguments.len() {
+                            let argument_ref = function_call.arguments[i];
+                            let static_tree = match function_argument_static_trees.get(i) {
+                                Some(static_tree) => static_tree,
+                                None => break,
+                            };
+
+                            apply_static_trees.push((argument_ref, static_tree.clone()));
+                        }
+
+                        let argument_static_trees = function_call
+                            .arguments
+                            .iter()
+                            .map(|argument_ref| {
+                                lifetime_source
+                                    .instance
+                                    .export_contains_static_tree(*argument_ref)
+                            })
+                            .collect::<Vec<_>>();
+
+                        shared_change_list.push((
+                            define,
+                            FxHashSet::default(),
+                            argument_static_trees,
+                        ));
                     }
 
                     let mut changed_map = FxHashMap::default();
@@ -1114,7 +1209,7 @@ impl LifetimeEvaluator {
                         }
                     }
 
-                    change_list.push((entity_id, changed_map, expected_add));
+                    change_list.push((entity_id, changed_map, expected_add, apply_static_trees));
 
                     if let Some(origin_function) = self
                         .function_equals_info
@@ -1152,15 +1247,20 @@ impl LifetimeEvaluator {
                             expected,
                         );
 
-                        shared_change_list
-                            .push(((origin_function.0.clone(), origin_function.1), expected));
+                        let argument_static_trees = lifetime_source.export_arguments_static_tree();
+
+                        shared_change_list.push((
+                            (origin_function.0.clone(), origin_function.1),
+                            expected,
+                            argument_static_trees,
+                        ));
                     }
                 }
             }
 
             // apply changes
             let lifetime_source_module_map = lifetime_source_map.get(&module_name).unwrap();
-            for (entity_id, changed_map, expected_add) in change_list {
+            for (entity_id, changed_map, expected_add, apply_static_trees) in change_list {
                 let lifetime_source = lifetime_source_module_map.get(entity_id).unwrap();
                 let mut lifetime_source = lifetime_source.write().unwrap();
 
@@ -1173,9 +1273,18 @@ impl LifetimeEvaluator {
                     .instance
                     .lifetime_expected
                     .extend(expected_add);
+
+                for (lifetime_ref, static_tree) in apply_static_trees {
+                    lifetime_source.instance.import_contains_static_tree(
+                        lifetime_ref,
+                        &static_tree,
+                        &mut is_changed,
+                        &mut LoopSuppressor::new(),
+                    );
+                }
             }
 
-            for (origin_define, expected) in shared_change_list {
+            for (origin_define, expected, argument_static_trees) in shared_change_list {
                 let lifetime_source_module_map = lifetime_source_map.get(&origin_define.0).unwrap();
                 let mut origin_lifetime_source = lifetime_source_module_map
                     .get(&origin_define.1)
@@ -1196,6 +1305,9 @@ impl LifetimeEvaluator {
                         is_changed = true;
                     }
                 }
+
+                origin_lifetime_source
+                    .import_arguments_static_tree(&argument_static_trees, &mut is_changed);
             }
 
             completed_modules.push(module_name);

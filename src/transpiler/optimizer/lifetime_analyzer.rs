@@ -303,6 +303,7 @@ impl LifetimeInstance {
         let parent_alloc_point_ref = parent_lifetime_tree.alloc_point_ref.clone();
         let parent_borrow_ref = parent_lifetime_tree.borrow_ref.clone();
         let is_argument_tree = parent_lifetime_tree.is_argument_tree;
+        let contains_function_return_value = parent_lifetime_tree.contains_function_return_value;
         let mut child_borrow_ref_set = FxHashSet::default();
 
         for parent_borrow_ref in parent_borrow_ref {
@@ -314,6 +315,7 @@ impl LifetimeInstance {
         child_tree.borrow_ref.extend(child_borrow_ref_set);
         child_tree.alloc_point_ref.extend(parent_alloc_point_ref);
         child_tree.is_argument_tree = is_argument_tree;
+        child_tree.contains_function_return_value = contains_function_return_value;
 
         new_child_ref
     }
@@ -633,6 +635,46 @@ impl LifetimeInstance {
         false
     }
 
+    pub fn contains_function_return_value(
+        &self,
+        lifetime_tree_ref: LifetimeTreeRef,
+        loop_suppressor: &mut LoopSuppressor,
+    ) -> bool {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+
+        if !loop_suppressor.mark_as_explored(lifetime_tree_ref) {
+            return false;
+        }
+
+        let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
+
+        if lifetime_tree.contains_function_return_value {
+            return true;
+        }
+
+        for borrowed_ref in lifetime_tree.borrow_ref.iter() {
+            if self.contains_static_lifetime(*borrowed_ref, loop_suppressor) {
+                return true;
+            }
+        }
+
+        for alloc_ref in lifetime_tree.alloc_point_ref.iter() {
+            if self.contains_static_lifetime(*alloc_ref, loop_suppressor) {
+                return true;
+            }
+        }
+
+        if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
+            for inserted_ref in inserted_refs.iter() {
+                if self.contains_static_lifetime(*inserted_ref, loop_suppressor) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     pub fn collect_argument_tree_ref(
         &self,
         lifetime_tree_ref: LifetimeTreeRef,
@@ -732,12 +774,98 @@ impl LifetimeInstance {
             );
         }
     }
+
+    fn export_contains_function_return_tree(
+        &self,
+        from: LifetimeTreeRef,
+    ) -> ContainsFunctionReturnTree {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(from);
+        let lifetime_tree = self.lifetime_tree_map.get(&lifetime_tree_ref).unwrap();
+
+        let mut contains_function_return_tree = ContainsFunctionReturnTree {
+            contains_function_return: self
+                .contains_function_return_value(lifetime_tree_ref, &mut LoopSuppressor::new()),
+            children: FxHashMap::default(),
+        };
+
+        for (child_name, child_ref) in lifetime_tree.children.iter() {
+            let child_contains_function_return_tree =
+                self.export_contains_function_return_tree(*child_ref);
+
+            contains_function_return_tree
+                .children
+                .insert(child_name.clone(), child_contains_function_return_tree);
+        }
+
+        contains_function_return_tree
+    }
+
+    fn import_contains_function_return_tree(
+        &mut self,
+        lifetime_tree_ref: LifetimeTreeRef,
+        from: &ContainsFunctionReturnTree,
+        changed_flag: &mut bool,
+        loop_suppressor: &mut LoopSuppressor,
+    ) {
+        let lifetime_tree_ref = self.resolve_lifetime_ref(lifetime_tree_ref);
+
+        if !loop_suppressor.mark_as_explored(lifetime_tree_ref) {
+            return;
+        }
+
+        let lifetime_tree = self.lifetime_tree_map.get_mut(&lifetime_tree_ref).unwrap();
+
+        if from.contains_function_return {
+            if !lifetime_tree.contains_function_return_value {
+                *changed_flag = true;
+
+                lifetime_tree.contains_function_return_value = true;
+            }
+        }
+
+        for borrowed_ref in lifetime_tree.borrow_ref.clone() {
+            self.import_contains_function_return_tree(
+                borrowed_ref,
+                from,
+                changed_flag,
+                loop_suppressor,
+            );
+        }
+
+        if let Some(inserted_ref) = self.insert_ref_map.get(&lifetime_tree_ref).cloned() {
+            for inserted_ref in inserted_ref.iter() {
+                self.import_contains_function_return_tree(
+                    *inserted_ref,
+                    from,
+                    changed_flag,
+                    loop_suppressor,
+                );
+            }
+        }
+
+        for (child_name, contains_function_return_tree) in from.children.iter() {
+            let lifetime_tree_ref = self.get_or_create_child(lifetime_tree_ref, child_name);
+
+            self.import_contains_function_return_tree(
+                lifetime_tree_ref,
+                contains_function_return_tree,
+                changed_flag,
+                loop_suppressor,
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ContainsStaticTree {
     contains_static: bool,
     children: FxHashMap<String, ContainsStaticTree>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContainsFunctionReturnTree {
+    contains_function_return: bool,
+    children: FxHashMap<String, ContainsFunctionReturnTree>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1066,10 +1194,11 @@ impl LifetimeEvaluator {
                             .read()
                             .unwrap();
 
-                        let origin_argument_static_trees = origin_lifetime_source.export_arguments_static_tree();
+                        let origin_argument_static_trees =
+                            origin_lifetime_source.export_arguments_static_tree();
                         for i in 0..lifetime_source.arguments.len() {
                             let argument_ref = lifetime_source.arguments[i];
-                            let origin_static_tree= match origin_argument_static_trees.get(i) {
+                            let origin_static_tree = match origin_argument_static_trees.get(i) {
                                 Some(origin_static_tree) => origin_static_tree,
                                 None => todo!(),
                             };

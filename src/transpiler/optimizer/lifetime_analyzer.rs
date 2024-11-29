@@ -1188,12 +1188,6 @@ impl LifetimeEvaluator {
         self.max_queue_size.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub async fn build_function_equals_map(&self, context: &TranspileContext) {
-        self.function_equals_info
-            .build_function_equals_map(context, &self.queue)
-            .await;
-    }
-
     pub async fn eval(&self, context: &TranspileContext) {
         let num_threads = context.settings.num_threads;
 
@@ -1256,8 +1250,15 @@ impl LifetimeEvaluator {
                         if lifetime_source_map
                             .get(&origin_define.0)
                             .unwrap()
-                            .get(&origin_define.1).is_none() {
-                            println!("none >> {} : {}", &origin_define.0, origin_define.1.get_type_name());
+                            .get(&origin_define.1)
+                            .is_none()
+                        {
+                            println!(
+                                "none >> {} : {} @ {}",
+                                &origin_define.0,
+                                origin_define.1.get_type_name(),
+                                &module_name
+                            );
                         }
 
                         let origin_lifetime_source = lifetime_source_map
@@ -1303,7 +1304,7 @@ impl LifetimeEvaluator {
                             None => define,
                         };
 
-                        println!("{} : {}", &define.0, define.1.get_type_name());
+                        //println!("{} : {}", &define.0, define.1.get_type_name());
                         if define.1.get_type_name() == "catla_parser::parser::Closure" {
                             continue;
                         }
@@ -1674,101 +1675,59 @@ impl GlobalFunctionEqualsInfo {
         self.equals_map.read().unwrap().get(define).cloned()
     }
 
-    async fn build_function_equals_map(
-        &self,
-        context: &TranspileContext,
-        queue: &Mutex<Vec<Arc<String>>>,
-    ) {
-        let num_threads = context.settings.num_threads;
+    pub fn build_function_equals_map(&self) {
+        let mut group_sets: Vec<FxHashSet<_>> = Vec::new();
 
-        let mut equals_map = FxHashMap::default();
-        let futures = (0..num_threads).map(|_| self.build_equals_map(queue));
+        for (left, right) in self.info.read().unwrap().iter() {
+            let left = (
+                left.define_info.module_name.clone(),
+                left.define_info.entity_id,
+            );
+            let right = (
+                right.define_info.module_name.clone(),
+                right.define_info.entity_id,
+            );
 
-        let thread_results = join_all(futures).await;
+            let left_group_index = group_sets.iter().position(|set| set.contains(&left));
+            let right_group_index = group_sets.iter().position(|set| set.contains(&right));
 
-        for result in thread_results {
-            equals_map.extend(result);
+            match (left_group_index, right_group_index) {
+                (Some(left_group_index), Some(right_group_index)) => {
+                    // merge right into left
+                    let mut right_group_swap = FxHashSet::default();
+                    swap(&mut group_sets[right_group_index], &mut right_group_swap);
+
+                    group_sets[left_group_index].extend(right_group_swap);
+                    group_sets.remove(right_group_index);
+                }
+                (Some(group_index), None) | (None, Some(group_index)) => {
+                    let set = &mut group_sets[group_index];
+                    set.insert(left);
+                    set.insert(right);
+                }
+                (None, None) => {
+                    let mut new_set = FxHashSet::default();
+                    new_set.insert(left);
+                    new_set.insert(right);
+                    group_sets.push(new_set);
+                }
+            }
         }
 
         let mut new_equals_map = FxHashMap::default();
 
-        loop {
-            let (key, equals) = match equals_map.iter().next() {
-                Some((key, equals)) => (key.clone(), equals.clone()),
-                None => break,
-            };
+        for group_set in group_sets {
+            let mut group_iter = group_set.into_iter();
 
-            equals_map.remove(&key);
-            for key in equals.iter() {
-                equals_map.remove(key);
-            }
+            let group_first = group_iter.next().unwrap();
+            new_equals_map.insert(group_first.clone(), group_first.clone());
 
-            new_equals_map.insert(key.clone(), key.clone());
-            for eq in equals {
-                new_equals_map.insert(eq, key.clone());
+            for group_element in group_iter {
+                new_equals_map.insert(group_element, group_first.clone());
             }
         }
 
         *self.equals_map.write().unwrap() = new_equals_map;
-    }
-
-    async fn build_equals_map(
-        &self,
-        queue: &Mutex<Vec<Arc<String>>>,
-    ) -> FxHashMap<(Arc<String>, EntityID), FxHashSet<(Arc<String>, EntityID)>> {
-        let info = self.info.read().unwrap();
-
-        let mut completed_modules = Vec::new();
-        let mut equals_map = FxHashMap::default();
-
-        loop {
-            let module_name = match queue.lock().unwrap().pop() {
-                Some(module_name) => module_name,
-                None => break,
-            };
-
-            for (function_0, function_1) in info.iter() {
-                let origin_define_info_0 = function_0.define_info.origin_function.read().unwrap();
-                let func_define_0 = match origin_define_info_0.deref() {
-                    Some(define_info) => (define_info.module_name.clone(), define_info.entity_id),
-                    None => (
-                        function_0.define_info.module_name.clone(),
-                        function_1.define_info.entity_id,
-                    ),
-                };
-
-                let origin_define_info_1 = function_1.define_info.origin_function.read().unwrap();
-                let func_define_1 = match origin_define_info_1.deref() {
-                    Some(define_info) => (define_info.module_name.clone(), define_info.entity_id),
-                    None => (
-                        function_1.define_info.module_name.clone(),
-                        function_1.define_info.entity_id,
-                    ),
-                };
-
-                if &module_name == &func_define_0.0 {
-                    let equals_set = equals_map
-                        .entry(func_define_0.clone())
-                        .or_insert_with(|| FxHashSet::default());
-
-                    equals_set.insert(func_define_1.clone());
-                }
-
-                if &module_name == &func_define_1.0 {
-                    let equals_set = equals_map
-                        .entry(func_define_1)
-                        .or_insert_with(|| FxHashSet::default());
-
-                    equals_set.insert(func_define_0);
-                }
-            }
-
-            completed_modules.push(module_name);
-        }
-
-        queue.lock().unwrap().extend(completed_modules);
-
-        equals_map
     }
 }
 

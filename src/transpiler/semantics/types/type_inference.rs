@@ -1,4 +1,5 @@
 use std::{
+    any::type_name,
     ops::{Deref, Range},
     sync::{Arc, RwLock},
 };
@@ -9,10 +10,10 @@ use ariadne::{sources, Color, ColorGenerator, Fmt, Label, Report, ReportKind, So
 use bumpalo::{collections::CollectIn, Bump};
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, Block, Closure, CompareExpression, Expression,
-    ExpressionEnum, Factor, FunctionCall, Generics, MappingOperator, MappingOperatorKind,
-    MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimarySeparatorKind,
-    Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind, StatementAttributes,
-    UserTypeKindEnum, VariableBinding,
+    ExpressionEnum, Factor, FunctionCall, FunctionDefine, Generics, MappingOperator,
+    MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
+    PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST, StatementAttributeKind,
+    StatementAttributes, UserTypeKindEnum, VariableBinding,
 };
 use either::Either;
 use fxhash::FxHashMap;
@@ -1469,7 +1470,22 @@ impl<'input, 'allocator> TypeEnvironment<'input, 'allocator> {
                 .context
                 .lifetime_evaluator
                 .function_equals_info
-                .add_info(self.function_equals_info.iter().cloned());
+                .add_info(
+                    self.function_equals_info
+                        .iter()
+                        .filter(|(function_0, function_1)| {
+                            let function_0_type_name =
+                                function_0.define_info.entity_id.get_type_name();
+                            let function_1_type_name =
+                                function_1.define_info.entity_id.get_type_name();
+
+                            (function_0_type_name == type_name::<FunctionDefine>()
+                                || function_0_type_name == type_name::<Closure>())
+                                && (function_1_type_name == type_name::<FunctionDefine>()
+                                    || function_1_type_name == type_name::<Closure>())
+                        })
+                        .cloned(),
+                );
         }
 
         self.print_var_type(context);

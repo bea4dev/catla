@@ -4,7 +4,7 @@ use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
     FunctionCall, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr,
-    PrimaryRight, Program, SimplePrimary, StatementAST,
+    PrimaryRight, Program, SimplePrimary, StatementAST, VariableBinding,
 };
 use either::Either;
 
@@ -107,6 +107,10 @@ fn print_program(ast: Program, info: &mut Vec<LifetimeInfo>, context: &Transpile
                 }
             }
             StatementAST::VariableDefine(variable_define) => {
+                if let Ok(binding) = &variable_define.binding {
+                    print_variable_binding(binding, info, context);
+                }
+
                 if let Some(expression) = &variable_define.expression {
                     if let Ok(expression) = expression {
                         print_expression(*expression, info, context);
@@ -138,6 +142,23 @@ fn print_program(ast: Program, info: &mut Vec<LifetimeInfo>, context: &Transpile
             }
             _ => {}
         }
+    }
+}
+
+fn print_variable_binding(
+    ast: &VariableBinding,
+    info: &mut Vec<LifetimeInfo>,
+    context: &TranspileModuleContext,
+) {
+    match &ast.binding {
+        Either::Left(literal) => {
+            info.push(LifetimeInfo::new(EntityID::from(literal), literal.span.clone(), context));
+        },
+        Either::Right(bindings) => {
+            for binding in bindings.iter() {
+                print_variable_binding(binding, info, context);
+            }
+        },
     }
 }
 

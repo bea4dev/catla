@@ -1,11 +1,9 @@
 use std::{
     mem::swap,
-    ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex, RwLock,
     },
-    usize,
 };
 
 use allocator_api2::vec;
@@ -1304,7 +1302,7 @@ impl LifetimeEvaluator {
                             None => define,
                         };
 
-                        //println!("{} : {}", &define.0, define.1.get_type_name());
+                        println!("{} : {}", &define.0, define.1.get_type_name());
                         if define.1.get_type_name() == "catla_parser::parser::Closure" {
                             continue;
                         }

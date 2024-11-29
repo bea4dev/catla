@@ -32,10 +32,15 @@ pub fn print_lifetime_debug_info(ast: Program, context: &TranspileModuleContext)
             AllocationType::Unknown => (Color::Red, "unknown"),
         };
 
+        let contains_static = format!(" [has_static : {}]", info.contains_static);
+
+        let mut text = text.to_string().fg(color).to_string();
+        text += contains_static.as_str();
+
         builder.add_label(
             Label::new((context.module_name.deref(), info.span))
                 .with_color(color)
-                .with_message(text.to_string().fg(color)),
+                .with_message(text),
         );
     }
 
@@ -53,6 +58,7 @@ pub fn print_lifetime_debug_info(ast: Program, context: &TranspileModuleContext)
 struct LifetimeInfo {
     span: Range<usize>,
     alloc_type: AllocationType,
+    contains_static: bool,
 }
 
 impl LifetimeInfo {
@@ -60,20 +66,23 @@ impl LifetimeInfo {
         let lifetime_tree = context
             .context
             .lifetime_evaluator
-            .get_lifetime_tree(&context.module_name, entity_id);
+            .get_lifetime_tree_info(&context.module_name, entity_id);
 
-        let alloc_type = match lifetime_tree {
-            Some(lifetime_tree) => {
-                if lifetime_tree.is_alloc_point {
+
+        let (alloc_type , contains_static)= match lifetime_tree {
+            Some((lifetime_tree, contains_static)) => {
+                let alloc_type = if lifetime_tree.is_alloc_point {
                     AllocationType::Stack
                 } else {
                     AllocationType::Heap
-                }
+                };
+
+                (alloc_type, contains_static)
             }
-            None => AllocationType::Unknown,
+            None => (AllocationType::Unknown, false),
         };
 
-        Self { span, alloc_type }
+        Self { span, alloc_type, contains_static }
     }
 }
 

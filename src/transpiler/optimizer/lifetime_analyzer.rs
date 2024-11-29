@@ -854,6 +854,37 @@ impl LifetimeInstance {
             );
         }
     }
+
+    fn collect_function_return_value_on_heap(
+        &mut self,
+        return_value: LifetimeTreeRef,
+        from: &ContainsFunctionReturnTree,
+        on_heap_trees: &mut FxHashSet<LifetimeTreeRef>,
+        changed_flag: &mut bool,
+        loop_suppressor: &mut LoopSuppressor,
+    ) {
+        let return_value = self.resolve_lifetime_ref(return_value);
+
+        if !loop_suppressor.mark_as_explored(return_value) {
+            return;
+        }
+
+        if from.contains_function_return {
+            on_heap_trees.insert(return_value);
+        }
+
+        for (child_name, child_tree) in from.children.iter() {
+            let child_ref = self.get_or_create_child(return_value, child_name);
+
+            self.collect_function_return_value_on_heap(
+                child_ref,
+                child_tree,
+                on_heap_trees,
+                changed_flag,
+                loop_suppressor,
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1061,6 +1092,41 @@ impl LifetimeSource {
             );
         }
     }
+
+    fn export_function_return_static_tree(&self) -> ContainsStaticTree {
+        self.instance.export_contains_static_tree(self.return_value)
+    }
+
+    fn import_function_return_static_tree(
+        &mut self,
+        from: &ContainsStaticTree,
+        changed_flag: &mut bool,
+    ) {
+        self.instance.import_contains_static_tree(
+            self.return_value,
+            from,
+            changed_flag,
+            &mut LoopSuppressor::new(),
+        );
+    }
+
+    fn export_function_return_tree(&self) -> ContainsFunctionReturnTree {
+        self.instance
+            .export_contains_function_return_tree(self.return_value)
+    }
+
+    fn import_function_return_tree(
+        &mut self,
+        function_return_tree: &ContainsFunctionReturnTree,
+        changed_flag: &mut bool,
+    ) {
+        self.instance.import_contains_function_return_tree(
+            self.return_value,
+            function_return_tree,
+            changed_flag,
+            &mut LoopSuppressor::new(),
+        );
+    }
 }
 
 pub struct LoopSuppressor {
@@ -1176,6 +1242,7 @@ impl LifetimeEvaluator {
                     let lifetime_source = lifetime_source.read().unwrap();
 
                     let mut apply_static_trees = Vec::new();
+                    let mut apply_function_return_tree = None;
 
                     // apply static tree from origin function
                     if let Some(origin_define) = self
@@ -1184,6 +1251,13 @@ impl LifetimeEvaluator {
                     {
                         if origin_define.1.get_type_name() == "catla_parser::parser::Closure" {
                             continue;
+                        }
+
+                        if lifetime_source_map
+                            .get(&origin_define.0)
+                            .unwrap()
+                            .get(&origin_define.1).is_none() {
+                            println!("none >> {} : {}", &origin_define.0, origin_define.1.get_type_name());
                         }
 
                         let origin_lifetime_source = lifetime_source_map
@@ -1205,9 +1279,18 @@ impl LifetimeEvaluator {
 
                             apply_static_trees.push((argument_ref, origin_static_tree.clone()));
                         }
+
+                        apply_function_return_tree =
+                            Some(origin_lifetime_source.export_function_return_tree());
+
+                        apply_static_trees.push((
+                            lifetime_source.return_value,
+                            origin_lifetime_source.export_function_return_static_tree(),
+                        ));
                     }
 
                     let mut expected_add = FxHashSet::default();
+                    let mut function_return_trees = Vec::new();
 
                     for function_call in lifetime_source.instance.function_calls.iter() {
                         let function_define = &function_call.function.define_info;
@@ -1281,6 +1364,11 @@ impl LifetimeEvaluator {
                             apply_static_trees.push((argument_ref, static_tree.clone()));
                         }
 
+                        apply_static_trees.push((
+                            function_call.return_value,
+                            function_lifetime_source.export_function_return_static_tree(),
+                        ));
+
                         let argument_static_trees = function_call
                             .arguments
                             .iter()
@@ -1291,10 +1379,17 @@ impl LifetimeEvaluator {
                             })
                             .collect::<Vec<_>>();
 
+                        let function_return_tree =
+                            function_lifetime_source.export_function_return_tree();
+                        function_return_trees
+                            .push((function_return_tree, function_call.return_value));
+
                         shared_change_list.push((
                             define,
                             FxHashSet::default(),
                             argument_static_trees,
+                            None,
+                            None,
                         ));
                     }
 
@@ -1338,7 +1433,14 @@ impl LifetimeEvaluator {
                         }
                     }
 
-                    change_list.push((entity_id, changed_map, expected_add, apply_static_trees));
+                    change_list.push((
+                        entity_id,
+                        changed_map,
+                        expected_add,
+                        apply_static_trees,
+                        apply_function_return_tree,
+                        function_return_trees,
+                    ));
 
                     if let Some(origin_function) = self
                         .function_equals_info
@@ -1377,11 +1479,17 @@ impl LifetimeEvaluator {
                         );
 
                         let argument_static_trees = lifetime_source.export_arguments_static_tree();
+                        let return_value_static_tree =
+                            lifetime_source.export_function_return_static_tree();
+
+                        let function_return_tree = lifetime_source.export_function_return_tree();
 
                         shared_change_list.push((
                             (origin_function.0.clone(), origin_function.1),
                             expected,
                             argument_static_trees,
+                            Some(return_value_static_tree),
+                            Some(function_return_tree),
                         ));
                     }
                 }
@@ -1389,7 +1497,15 @@ impl LifetimeEvaluator {
 
             // apply changes
             let lifetime_source_module_map = lifetime_source_map.get(&module_name).unwrap();
-            for (entity_id, changed_map, expected_add, apply_static_trees) in change_list {
+            for (
+                entity_id,
+                changed_map,
+                expected_add,
+                apply_static_trees,
+                apply_function_return_tree,
+                function_return_trees,
+            ) in change_list
+            {
                 let lifetime_source = lifetime_source_module_map.get(entity_id).unwrap();
                 let mut lifetime_source = lifetime_source.write().unwrap();
 
@@ -1411,9 +1527,50 @@ impl LifetimeEvaluator {
                         &mut LoopSuppressor::new(),
                     );
                 }
+
+                if let Some(function_return_tree) = &apply_function_return_tree {
+                    lifetime_source
+                        .import_function_return_tree(function_return_tree, &mut is_changed);
+                }
+
+                for (function_return_tree, return_value) in function_return_trees {
+                    let mut on_heap_trees = FxHashSet::default();
+
+                    lifetime_source
+                        .instance
+                        .collect_function_return_value_on_heap(
+                            return_value,
+                            &function_return_tree,
+                            &mut on_heap_trees,
+                            &mut is_changed,
+                            &mut LoopSuppressor::new(),
+                        );
+
+                    for on_heap_tree in on_heap_trees {
+                        let expected = LifetimeExpected {
+                            shorter: STATIC_LIFETIME_REF,
+                            longer: on_heap_tree,
+                        };
+
+                        if !lifetime_source
+                            .instance
+                            .lifetime_expected
+                            .contains(&expected)
+                        {
+                            lifetime_source.instance.lifetime_expected.insert(expected);
+                        }
+                    }
+                }
             }
 
-            for (origin_define, expected, argument_static_trees) in shared_change_list {
+            for (
+                origin_define,
+                expected,
+                argument_static_trees,
+                function_return_static_tree,
+                function_return_tree,
+            ) in shared_change_list
+            {
                 let lifetime_source_module_map = lifetime_source_map.get(&origin_define.0).unwrap();
                 let mut origin_lifetime_source = lifetime_source_module_map
                     .get(&origin_define.1)
@@ -1437,6 +1594,18 @@ impl LifetimeEvaluator {
 
                 origin_lifetime_source
                     .import_arguments_static_tree(&argument_static_trees, &mut is_changed);
+
+                if let Some(function_return_static_tree) = &function_return_static_tree {
+                    origin_lifetime_source.import_function_return_static_tree(
+                        function_return_static_tree,
+                        &mut is_changed,
+                    );
+                }
+
+                if let Some(function_return_tree) = &function_return_tree {
+                    origin_lifetime_source
+                        .import_function_return_tree(function_return_tree, &mut is_changed);
+                }
             }
 
             completed_modules.push(module_name);
@@ -1445,11 +1614,11 @@ impl LifetimeEvaluator {
         (completed_modules, is_changed)
     }
 
-    pub fn get_lifetime_tree(
+    pub fn get_lifetime_tree_info(
         &self,
         module_name: &Arc<String>,
         entity_id: EntityID,
-    ) -> Option<LifetimeTree> {
+    ) -> Option<(LifetimeTree, bool)> {
         let lifetime_source_maps_lock = self.lifetime_source_map.read().unwrap();
 
         let lifetime_source_maps = lifetime_source_maps_lock.get(module_name).unwrap();
@@ -1466,14 +1635,17 @@ impl LifetimeEvaluator {
                 None => continue,
             };
 
-            return Some(
+            return Some((
                 lifetime_source
                     .instance
                     .lifetime_tree_map
                     .get(&lifetime_ref)
                     .unwrap()
                     .clone(),
-            );
+                lifetime_source
+                    .instance
+                    .contains_static_lifetime(lifetime_ref, &mut LoopSuppressor::new()),
+            ));
         }
 
         None

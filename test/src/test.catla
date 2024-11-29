@@ -202,3 +202,10 @@ if true {
 
     object1.field = object2
 }
+
+let arg_0 = new Tree { field: null }
+let arg_1 = new Tree { field: null }
+
+function lifetime_test(arg0: Tree, arg1: Tree) {
+    arg0.field = arg1
+}

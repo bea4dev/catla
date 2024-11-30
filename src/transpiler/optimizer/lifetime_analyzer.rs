@@ -1241,10 +1241,6 @@ impl LifetimeEvaluator {
                         .function_equals_info
                         .resolve(&(module_name.clone(), *entity_id))
                     {
-                        if origin_define.1.get_type_name() == "catla_parser::parser::Closure" {
-                            continue;
-                        }
-
                         if lifetime_source_map
                             .get(&origin_define.0)
                             .unwrap()
@@ -1301,11 +1297,6 @@ impl LifetimeEvaluator {
                             Some(resolved) => resolved,
                             None => define,
                         };
-
-                        println!("{} : {}", &define.0, define.1.get_type_name());
-                        if define.1.get_type_name() == "catla_parser::parser::Closure" {
-                            continue;
-                        }
 
                         let function_lifetime_source = lifetime_source_map
                             .get(&define.0)
@@ -1749,8 +1740,10 @@ pub fn collect_lifetime(
 
     collect_lifetime_program(
         ast,
+        false,
         None,
         return_value_tree_ref,
+        &mut Vec::new(),
         import_element_map,
         name_resolved_map,
         module_user_type_map,

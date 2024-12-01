@@ -105,6 +105,7 @@ impl<'allocator> StackLifetimeScope<'allocator> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct LifetimeInstance {
     lifetime_counter: usize,
     tree_ref_counter: usize,
@@ -918,12 +919,14 @@ pub struct LifetimeTree {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LifetimeTreeRef(usize);
 
+#[derive(Debug, Clone)]
 pub struct FunctionCallLifetime {
     pub arguments: Vec<LifetimeTreeRef>,
     pub return_value: LifetimeTreeRef,
     pub function: Arc<FunctionType>,
 }
 
+#[derive(Debug, Clone)]
 pub struct LifetimeSource {
     instance: LifetimeInstance,
     arguments: Vec<LifetimeTreeRef>,
@@ -936,6 +939,10 @@ impl LifetimeSource {
         self.instance.init_lifetime_expected_relationships();
         self.instance.init_insert_map();
         self
+    }
+
+    pub fn snapshot(&self) -> Self {
+        self.clone()
     }
 
     fn disable_function_return_value_stack_alloc(&mut self, lifetime_ref: LifetimeTreeRef) {
@@ -1008,7 +1015,7 @@ impl LifetimeSource {
     fn create_replace_map(
         before_instance: &LifetimeInstance,
         before_tree_ref: LifetimeTreeRef,
-        after_instance: &LifetimeInstance,
+        after_instance: &mut LifetimeInstance,
         after_tree_ref: LifetimeTreeRef,
         replace_map: &mut FxHashMap<LifetimeTreeRef, LifetimeTreeRef>,
     ) {
@@ -1019,23 +1026,20 @@ impl LifetimeSource {
             .unwrap();
 
         let after_tree_ref = after_instance.resolve_lifetime_ref(after_tree_ref);
-        let after_tree = after_instance
-            .lifetime_tree_map
-            .get(&after_tree_ref)
-            .unwrap();
 
         replace_map.insert(before_tree_ref, after_tree_ref);
 
         for (before_child_name, before_child_ref) in before_tree.children.iter() {
-            if let Some(after_child_ref) = after_tree.children.get(before_child_name) {
-                Self::create_replace_map(
-                    before_instance,
-                    *before_child_ref,
-                    after_instance,
-                    *after_child_ref,
-                    replace_map,
-                );
-            }
+            let after_child_ref =
+                after_instance.get_or_create_child(after_tree_ref, before_child_name);
+
+            Self::create_replace_map(
+                before_instance,
+                *before_child_ref,
+                after_instance,
+                after_child_ref,
+                replace_map,
+            );
         }
     }
 
@@ -1241,20 +1245,6 @@ impl LifetimeEvaluator {
                         .function_equals_info
                         .resolve(&(module_name.clone(), *entity_id))
                     {
-                        if lifetime_source_map
-                            .get(&origin_define.0)
-                            .unwrap()
-                            .get(&origin_define.1)
-                            .is_none()
-                        {
-                            println!(
-                                "none >> {} : {} @ {}",
-                                &origin_define.0,
-                                origin_define.1.get_type_name(),
-                                &module_name
-                            );
-                        }
-
                         let origin_lifetime_source = lifetime_source_map
                             .get(&origin_define.0)
                             .unwrap()
@@ -1284,7 +1274,7 @@ impl LifetimeEvaluator {
                         ));
                     }
 
-                    let mut expected_add = FxHashSet::default();
+                    let mut expected_add = Vec::new();
                     let mut function_return_trees = Vec::new();
 
                     for function_call in lifetime_source.instance.function_calls.iter() {
@@ -1309,38 +1299,11 @@ impl LifetimeEvaluator {
                         let expected =
                             function_lifetime_source.collect_argument_lifetime_expected();
 
-                        let mut replace_map = FxHashMap::default();
-                        for i in 0..function_lifetime_source.arguments.len() {
-                            let define_argument = function_lifetime_source.arguments[i];
-                            let call_argument = match function_call.arguments.get(i) {
-                                Some(argument) => *argument,
-                                None => break,
-                            };
-
-                            LifetimeSource::create_replace_map(
-                                &function_lifetime_source.instance,
-                                define_argument,
-                                &lifetime_source.instance,
-                                call_argument,
-                                &mut replace_map,
-                            );
-                        }
-
-                        let expected = LifetimeSource::convert_argument_lifetime_expected(
-                            &replace_map,
+                        expected_add.push((
                             expected,
-                        );
-
-                        for expected in expected {
-                            if !lifetime_source
-                                .instance
-                                .lifetime_expected
-                                .contains(&expected)
-                            {
-                                expected_add.insert(expected);
-                                is_changed = true;
-                            }
-                        }
+                            function_call.arguments.clone(),
+                            function_lifetime_source.snapshot(),
+                        ));
 
                         let function_argument_static_trees =
                             function_lifetime_source.export_arguments_static_tree();
@@ -1374,13 +1337,7 @@ impl LifetimeEvaluator {
                         function_return_trees
                             .push((function_return_tree, function_call.return_value));
 
-                        shared_change_list.push((
-                            define,
-                            FxHashSet::default(),
-                            argument_static_trees,
-                            None,
-                            None,
-                        ));
+                        shared_change_list.push((define, None, argument_static_trees, None, None));
                     }
 
                     let mut changed_map = FxHashMap::default();
@@ -1446,28 +1403,6 @@ impl LifetimeEvaluator {
 
                         let expected = lifetime_source.collect_argument_lifetime_expected();
 
-                        let mut replace_map = FxHashMap::default();
-                        for i in 0..origin_lifetime_source.arguments.len() {
-                            let origin_argument = origin_lifetime_source.arguments[i];
-                            let argument = match lifetime_source.arguments.get(i) {
-                                Some(argument) => argument,
-                                None => break,
-                            };
-
-                            LifetimeSource::create_replace_map(
-                                &lifetime_source.instance,
-                                *argument,
-                                &origin_lifetime_source.instance,
-                                origin_argument,
-                                &mut replace_map,
-                            );
-                        }
-
-                        let expected = LifetimeSource::convert_argument_lifetime_expected(
-                            &replace_map,
-                            expected,
-                        );
-
                         let argument_static_trees = lifetime_source.export_arguments_static_tree();
                         let return_value_static_tree =
                             lifetime_source.export_function_return_static_tree();
@@ -1476,7 +1411,11 @@ impl LifetimeEvaluator {
 
                         shared_change_list.push((
                             (origin_function.0.clone(), origin_function.1),
-                            expected,
+                            Some((
+                                expected,
+                                lifetime_source.arguments.clone(),
+                                lifetime_source.snapshot(),
+                            )),
                             argument_static_trees,
                             Some(return_value_static_tree),
                             Some(function_return_tree),
@@ -1504,10 +1443,38 @@ impl LifetimeEvaluator {
                     .lifetime_tree_map
                     .extend(changed_map);
 
-                lifetime_source
-                    .instance
-                    .lifetime_expected
-                    .extend(expected_add);
+                for (expected, arguments, origin_source_snapshot) in expected_add {
+                    let mut replace_map = FxHashMap::default();
+                    for i in 0..origin_source_snapshot.arguments.len() {
+                        let define_argument = origin_source_snapshot.arguments[i];
+                        let call_argument = match arguments.get(i) {
+                            Some(argument) => *argument,
+                            None => break,
+                        };
+
+                        LifetimeSource::create_replace_map(
+                            &origin_source_snapshot.instance,
+                            define_argument,
+                            &mut lifetime_source.instance,
+                            call_argument,
+                            &mut replace_map,
+                        );
+                    }
+
+                    let expected =
+                        LifetimeSource::convert_argument_lifetime_expected(&replace_map, expected);
+
+                    for expected in expected {
+                        if !lifetime_source
+                            .instance
+                            .lifetime_expected
+                            .contains(&expected)
+                        {
+                            lifetime_source.instance.lifetime_expected.insert(expected);
+                            is_changed = true;
+                        }
+                    }
+                }
 
                 for (lifetime_ref, static_tree) in apply_static_trees {
                     lifetime_source.instance.import_contains_static_tree(
@@ -1568,17 +1535,39 @@ impl LifetimeEvaluator {
                     .write()
                     .unwrap();
 
-                for expected in expected {
-                    if !origin_lifetime_source
-                        .instance
-                        .lifetime_expected
-                        .contains(&expected)
-                    {
-                        origin_lifetime_source
+                if let Some((expected, arguments, current_lifetime_snapshot)) = expected {
+                    let mut replace_map = FxHashMap::default();
+                    for i in 0..origin_lifetime_source.arguments.len() {
+                        let origin_argument = origin_lifetime_source.arguments[i];
+                        let argument = match arguments.get(i) {
+                            Some(argument) => argument,
+                            None => break,
+                        };
+
+                        LifetimeSource::create_replace_map(
+                            &current_lifetime_snapshot.instance,
+                            *argument,
+                            &mut origin_lifetime_source.instance,
+                            origin_argument,
+                            &mut replace_map,
+                        );
+                    }
+
+                    let expected =
+                        LifetimeSource::convert_argument_lifetime_expected(&replace_map, expected);
+
+                    for expected in expected {
+                        if !origin_lifetime_source
                             .instance
                             .lifetime_expected
-                            .insert(expected);
-                        is_changed = true;
+                            .contains(&expected)
+                        {
+                            origin_lifetime_source
+                                .instance
+                                .lifetime_expected
+                                .insert(expected);
+                            is_changed = true;
+                        }
                     }
                 }
 

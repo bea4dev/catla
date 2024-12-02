@@ -323,20 +323,21 @@ impl LifetimeInstance {
         self.lifetime_expected.insert(expected);
     }
 
-    pub fn init_lifetime_expected_relationships(&mut self) {
-        let mut lifetime_expected = Vec::new();
-
+    pub fn init_lifetime_expected_relationships(&mut self, changed_flag: &mut bool) {
         for (lifetime_ref, lifetime_tree) in self.lifetime_tree_map.iter() {
             for child_ref in lifetime_tree.children.values() {
                 let expected = LifetimeExpected {
                     shorter: *lifetime_ref,
                     longer: *child_ref,
                 };
-                lifetime_expected.push(expected);
+
+                if !self.lifetime_expected.contains(&expected) {
+                    self.lifetime_expected.insert(expected);
+
+                    *changed_flag = true;
+                }
             }
         }
-
-        self.lifetime_expected.extend(lifetime_expected);
     }
 
     pub fn add_insert(&mut self, left: LifetimeTreeRef, right: LifetimeTreeRef) {
@@ -935,8 +936,9 @@ pub struct LifetimeSource {
 
 impl LifetimeSource {
     pub fn finalize(mut self) -> Self {
-        self.disable_function_return_value_stack_alloc(self.return_value);
-        self.instance.init_lifetime_expected_relationships();
+        self.disable_function_return_value_stack_alloc(self.return_value, &mut false);
+        self.instance
+            .init_lifetime_expected_relationships(&mut false);
         self.instance.init_insert_map();
         self
     }
@@ -945,18 +947,33 @@ impl LifetimeSource {
         self.clone()
     }
 
-    fn disable_function_return_value_stack_alloc(&mut self, lifetime_ref: LifetimeTreeRef) {
-        let lifetime_tree = self.instance.get_lifetime_tree(lifetime_ref);
+    fn disable_function_return_value_stack_alloc(
+        &mut self,
+        lifetime_ref: LifetimeTreeRef,
+        changed_flag: &mut bool,
+    ) {
+        if self
+            .instance
+            .contains_function_return_value(lifetime_ref, &mut LoopSuppressor::new())
+        {
+            let expected = LifetimeExpected {
+                shorter: STATIC_LIFETIME_REF,
+                longer: lifetime_ref,
+            };
 
-        if lifetime_tree.contains_function_return_value {
-            lifetime_tree.is_alloc_point = false;
-            lifetime_tree.lifetimes.push(STATIC_LIFETIME);
-            lifetime_tree.alloc_point_ref.clear();
+            if !self.instance.lifetime_expected.contains(&expected) {
+                self.instance.lifetime_expected.insert(expected);
+
+                *changed_flag = true;
+            }
         }
 
-        let children = lifetime_tree.children.values().cloned().collect::<Vec<_>>();
-        for child_ref in children {
-            self.disable_function_return_value_stack_alloc(child_ref);
+        let lifetime_tree = self.instance.get_lifetime_tree(lifetime_ref);
+
+        let children = lifetime_tree.children.clone();
+
+        for child_ref in children.into_values() {
+            self.disable_function_return_value_stack_alloc(child_ref, changed_flag);
         }
     }
 
@@ -1393,14 +1410,6 @@ impl LifetimeEvaluator {
                         .function_equals_info
                         .resolve(&(module_name.clone(), *entity_id))
                     {
-                        let origin_lifetime_source = lifetime_source_map
-                            .get(&origin_function.0)
-                            .unwrap()
-                            .get(&origin_function.1)
-                            .unwrap()
-                            .read()
-                            .unwrap();
-
                         let expected = lifetime_source.collect_argument_lifetime_expected();
 
                         let argument_static_trees = lifetime_source.export_arguments_static_tree();
@@ -1518,6 +1527,15 @@ impl LifetimeEvaluator {
                         }
                     }
                 }
+
+                let return_lifetime_ref = lifetime_source.return_value;
+                lifetime_source.disable_function_return_value_stack_alloc(
+                    return_lifetime_ref,
+                    &mut is_changed,
+                );
+                lifetime_source
+                    .instance
+                    .init_lifetime_expected_relationships(&mut is_changed);
             }
 
             for (

@@ -215,5 +215,9 @@ function lifetime_test(arg0: Tree, arg1: Tree) {
 let captured = new Tree { field: null }
 
 let closure = || => {
-    captured
+    temp = captured
 }
+
+static let temp: Tree? = null
+
+closure()

@@ -10,7 +10,8 @@ use catla_parser::{
         Expression, ExpressionEnum, Factor, FunctionCall, Generics, GenericsDefine, Literal,
         MappingOperatorKind, MulOrDivExpression, Primary, PrimaryLeft, PrimaryLeftExpr,
         PrimaryRight, PrimarySeparatorKind, Program, SimplePrimary, Spanned, StatementAST,
-        TupleTypeInfo, TypeAttributeEnum, TypeInfo, TypeTag, VariableBinding, WhereClause,
+        StatementAttributeKind, StatementAttributes, TupleTypeInfo, TypeAttributeEnum, TypeInfo,
+        TypeTag, VariableBinding, WhereClause,
     },
 };
 use either::Either::{self, Left, Right};
@@ -30,6 +31,7 @@ use super::{
 pub struct DefineWithName {
     pub entity_id: EntityID,
     pub span: Range<usize>,
+    pub is_static_element: bool,
     pub define_kind: DefineKind,
 }
 
@@ -193,6 +195,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                     let define_info = DefineWithName {
                         entity_id,
                         span: element.span.clone(),
+                        is_static_element: false,
                         define_kind: DefineKind::Import,
                     };
 
@@ -214,6 +217,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                     let define_info = DefineWithName {
                         entity_id,
                         span: name.span.clone(),
+                        is_static_element: true,
                         define_kind: DefineKind::Function,
                     };
 
@@ -237,6 +241,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                     let define_info = DefineWithName {
                         entity_id,
                         span: user_type_name.span.clone(),
+                        is_static_element: false,
                         define_kind: DefineKind::UserType,
                     };
 
@@ -258,6 +263,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                     let define_info = DefineWithName {
                         entity_id,
                         span: name.span.clone(),
+                        is_static_element: false,
                         define_kind: DefineKind::UserType,
                     };
 
@@ -270,6 +276,25 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         ));
                     } else {
                         name_environment.set_name_define_info(name.value, define_info);
+                    }
+                }
+            }
+            StatementAST::VariableDefine(variable_define) => {
+                let is_static = variable_define
+                    .attributes
+                    .statement_attributes
+                    .contains_kind(StatementAttributeKind::Static);
+
+                if let Ok(variable_binding) = &variable_define.binding {
+                    if is_static {
+                        let name_environment = &name_environments[current_environment_id];
+
+                        register_variable_binding(
+                            variable_binding,
+                            name_environment,
+                            DefineKind::Variable,
+                            true,
+                        );
                     }
                 }
             }
@@ -357,13 +382,22 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                     );
                 }
 
+                let is_static = variable_define
+                    .attributes
+                    .statement_attributes
+                    .contains_kind(StatementAttributeKind::Static);
+
                 if let Ok(variable_binding) = &variable_define.binding {
-                    let name_environment = &name_environments[current_environment_id];
-                    register_variable_binding(
-                        variable_binding,
-                        name_environment,
-                        DefineKind::Variable,
-                    );
+                    if !is_static {
+                        let name_environment = &name_environments[current_environment_id];
+
+                        register_variable_binding(
+                            variable_binding,
+                            name_environment,
+                            DefineKind::Variable,
+                            false,
+                        );
+                    }
                 }
             }
             StatementAST::FunctionDefine(function_define) => {
@@ -421,6 +455,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         &argument.binding,
                         &name_environment,
                         DefineKind::FunctionArgument,
+                        false,
                     );
                 }
 
@@ -660,6 +695,7 @@ fn name_resolve_generics_define<'input, 'allocator>(
         let define_info = DefineWithName {
             entity_id,
             span: element.span.clone(),
+            is_static_element: false,
             define_kind: DefineKind::Generics,
         };
         name_environments[environment_id].set_name_define_info(element.name.value, define_info);
@@ -773,6 +809,7 @@ fn name_resolve_expression<'input, 'allocator>(
                     let define_info = DefineWithName {
                         entity_id,
                         span: argument.span.clone(),
+                        is_static_element: false,
                         define_kind: DefineKind::ClosureArgument,
                     };
                     name_environment.set_name_define_info(argument.value, define_info);
@@ -785,6 +822,7 @@ fn name_resolve_expression<'input, 'allocator>(
                                     &argument.binding,
                                     &name_environment,
                                     DefineKind::ClosureArgument,
+                                    false,
                                 );
 
                                 name_resolve_type_tag(
@@ -802,6 +840,7 @@ fn name_resolve_expression<'input, 'allocator>(
                                 let define_info = DefineWithName {
                                     entity_id,
                                     span: argument.span.clone(),
+                                    is_static_element: false,
                                     define_kind: DefineKind::ClosureArgument,
                                 };
                                 name_environment.set_name_define_info(argument.value, define_info);
@@ -849,19 +888,26 @@ fn register_variable_binding<'input, 'allocator>(
     ast: &VariableBinding<'input, 'allocator>,
     name_environment: &NameEnvironment<'input, 'allocator>,
     define_kind: DefineKind,
+    is_static_element: bool,
 ) {
     match &ast.binding {
         Left(literal) => {
             let define_info = DefineWithName {
                 entity_id: EntityID::from(literal),
                 span: literal.span.clone(),
+                is_static_element,
                 define_kind,
             };
             name_environment.set_name_define_info(literal.value, define_info);
         }
         Right(bindings) => {
             for binding in bindings.iter() {
-                register_variable_binding(binding, name_environment, define_kind);
+                register_variable_binding(
+                    binding,
+                    name_environment,
+                    define_kind,
+                    is_static_element,
+                );
             }
         }
     }

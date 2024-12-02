@@ -47,7 +47,7 @@ fn should_strict_drop(ty: &Type) -> bool {
 
 #[derive(Debug, Default)]
 pub struct ClosureScope {
-    captured: Vec<EntityID>,
+    captured: Vec<(EntityID, String)>,
 }
 
 pub fn collect_lifetime_program<'allocator>(
@@ -147,6 +147,12 @@ pub fn collect_lifetime_program<'allocator>(
                     lifetime_scope.instance.create_lifetime_tree()
                 };
 
+                let expected = LifetimeExpected {
+                    shorter: left_lifetime_ref,
+                    longer: right_lifetime_ref,
+                };
+                lifetime_scope.instance.lifetime_expected.insert(expected);
+
                 lifetime_scope
                     .instance
                     .add_insert(left_lifetime_ref, right_lifetime_ref);
@@ -227,6 +233,15 @@ pub fn collect_lifetime_program<'allocator>(
                 let mut lifetime_instance = LifetimeInstance::new();
 
                 let mut argument_lifetimes = Vec::new();
+
+                if function_define.args.this_mutability.is_some() {
+                    argument_lifetimes.push(lifetime_instance.this_argument_lifetime_ref);
+
+                    let this_lifetime_tree = lifetime_instance
+                        .get_lifetime_tree(lifetime_instance.this_argument_lifetime_ref);
+                    this_lifetime_tree.is_argument_tree = true;
+                }
+
                 for argument in function_define.args.arguments.iter() {
                     let lifetime_ref = create_lifetime_tree_for_variable_binding(
                         &mut lifetime_instance,
@@ -540,6 +555,12 @@ fn collect_lifetime_expression<'allocator>(
 
             let mut argument_lifetimes = Vec::new();
 
+            argument_lifetimes.push(lifetime_instance.this_argument_lifetime_ref);
+
+            let closure_captured_lifetime_tree =
+                lifetime_instance.get_lifetime_tree(lifetime_instance.this_argument_lifetime_ref);
+            closure_captured_lifetime_tree.is_argument_tree = true;
+
             match &closure.arguments.arguments {
                 Either::Left(literal) => {
                     let lifetime_tree_ref =
@@ -659,7 +680,7 @@ fn collect_lifetime_expression<'allocator>(
             // collect captured
             let closure_scope = closure_scope_stack.pop().unwrap();
 
-            for captured in closure_scope.captured {
+            for (captured, captured_name) in closure_scope.captured {
                 let captured_lifetime_tree_ref = match parent_lifetime_instance
                     .entity_lifetime_ref_map
                     .get(&captured)
@@ -670,12 +691,13 @@ fn collect_lifetime_expression<'allocator>(
                     None => continue,
                 };
 
-                let expected = LifetimeExpected {
-                    shorter: closure_lifetime_tree_ref,
-                    longer: captured_lifetime_tree_ref,
-                };
-
-                parent_lifetime_instance.lifetime_expected.insert(expected);
+                let closure_child_ref = parent_lifetime_instance
+                    .get_or_create_child(closure_lifetime_tree_ref, &captured_name);
+                let closure_child_tree =
+                    parent_lifetime_instance.get_lifetime_tree(closure_child_ref);
+                closure_child_tree
+                    .borrow_ref
+                    .insert(captured_lifetime_tree_ref);
             }
         }
     }
@@ -2019,23 +2041,24 @@ fn collect_lifetime_simple_primary<'allocator>(
             }
         }
         SimplePrimary::Identifier(literal) => {
-            if module_element_type_map.contains_key(literal.value) {
-                // static element
-                let literal_lifetime_ref = lifetime_scope
-                    .instance
-                    .create_entity_lifetime_tree(EntityID::from(literal));
-                let literal_lifetime_tree = lifetime_scope
-                    .instance
-                    .get_lifetime_tree(literal_lifetime_ref);
+            // local variable
+            if let Some(resolved) = name_resolved_map.get(&EntityID::from(literal)) {
+                if resolved.define_info.is_static_element {
+                    // static element
+                    let literal_lifetime_ref = lifetime_scope
+                        .instance
+                        .create_entity_lifetime_tree(EntityID::from(literal));
+                    let literal_lifetime_tree = lifetime_scope
+                        .instance
+                        .get_lifetime_tree(literal_lifetime_ref);
 
-                literal_lifetime_tree.lifetimes.push(STATIC_LIFETIME);
+                    literal_lifetime_tree.lifetimes.push(STATIC_LIFETIME);
 
-                lifetime_scope
-                    .instance
-                    .merge(ast_lifetime_ref, literal_lifetime_ref);
-            } else {
-                // local variable
-                if let Some(resolved) = name_resolved_map.get(&EntityID::from(literal)) {
+                    lifetime_scope
+                        .instance
+                        .merge(ast_lifetime_ref, literal_lifetime_ref);
+                    println!("{} : static", literal.value);
+                } else {
                     // add as captured variable
                     let closure_count = resolved
                         .separators
@@ -2044,14 +2067,32 @@ fn collect_lifetime_simple_primary<'allocator>(
                         .count();
 
                     if closure_count != 0 {
+                        // beyond closure
                         let index = closure_scope_stack
                             .len()
                             .checked_sub(closure_count)
                             .unwrap_or(0);
 
                         let closure_scope = closure_scope_stack.get_mut(index).unwrap();
-                        closure_scope.captured.push(resolved.define_info.entity_id);
+                        closure_scope
+                            .captured
+                            .push((resolved.define_info.entity_id, literal.value.to_string()));
+
+                        let captured_ref = lifetime_scope.instance.get_or_create_child(
+                            lifetime_scope.instance.this_argument_lifetime_ref,
+                            literal.value,
+                        );
+                        let borrowed_ref = lifetime_scope
+                            .instance
+                            .create_entity_lifetime_tree(EntityID::from(literal));
+                        let borrowed_tree = lifetime_scope.instance.get_lifetime_tree(borrowed_ref);
+                        borrowed_tree.borrow_ref.insert(captured_ref);
+
+                        lifetime_scope
+                            .instance
+                            .merge(ast_lifetime_ref, borrowed_ref);
                     } else {
+                        // NOT beyond closure
                         let kind = resolved.define_info.define_kind;
 
                         if kind == DefineKind::Variable || kind == DefineKind::FunctionArgument {
@@ -2130,6 +2171,14 @@ fn collect_lifetime_function_call<'allocator>(
     {
         let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
         let mut arguments = Vec::new();
+
+        if function_info.define_info.is_closure {
+            let closure_lifetime_ref = lifetime_scope
+                .instance
+                .get_entity_lifetime_tree_ref(call_target_entity_id);
+
+            arguments.push(closure_lifetime_ref);
+        }
 
         if function_info.is_extension {
             if let Some(this_lifetime_ref) = this_lifetime_ref {

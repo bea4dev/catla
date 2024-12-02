@@ -206,10 +206,7 @@ if true {
 let arg_0 = new Tree { field: null }
 let arg_1 = new Tree { field: null }
 
-var z = null
-z = arg_0
-
-arg_1.field = arg_0
+arg_1 = arg_0
 
 function lifetime_test(arg0: Tree, arg1: Tree) {
     arg1.field = arg0

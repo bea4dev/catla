@@ -328,6 +328,7 @@ impl LifetimeInstance {
             for child_ref in lifetime_tree.children.values() {
                 let expected = LifetimeExpected {
                     shorter: *lifetime_ref,
+                    should_ignore_insert_on_shorter: false,
                     longer: *child_ref,
                 };
 
@@ -463,6 +464,7 @@ impl LifetimeInstance {
     pub fn collect_lifetimes(
         &self,
         lifetime_tree_ref: LifetimeTreeRef,
+        ignore_insert_on_first_layer: bool,
         lifetimes: &mut Vec<Lifetime>,
         override_map: &FxHashMap<LifetimeTreeRef, LifetimeTree>,
         loop_suppressor: &mut LoopSuppressor,
@@ -490,16 +492,36 @@ impl LifetimeInstance {
         }
 
         for borrowed_ref in lifetime_tree.borrow_ref.iter() {
-            self.collect_lifetimes(*borrowed_ref, lifetimes, override_map, loop_suppressor);
+            self.collect_lifetimes(
+                *borrowed_ref,
+                false,
+                lifetimes,
+                override_map,
+                loop_suppressor,
+            );
         }
 
         for alloc_point_ref in lifetime_tree.alloc_point_ref.iter() {
-            self.collect_lifetimes(*alloc_point_ref, lifetimes, override_map, loop_suppressor);
+            self.collect_lifetimes(
+                *alloc_point_ref,
+                false,
+                lifetimes,
+                override_map,
+                loop_suppressor,
+            );
         }
 
-        if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
-            for inserted_ref in inserted_refs.iter() {
-                self.collect_lifetimes(*inserted_ref, lifetimes, override_map, loop_suppressor);
+        if !ignore_insert_on_first_layer {
+            if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
+                for inserted_ref in inserted_refs.iter() {
+                    self.collect_lifetimes(
+                        *inserted_ref,
+                        false,
+                        lifetimes,
+                        override_map,
+                        loop_suppressor,
+                    );
+                }
             }
         }
     }
@@ -653,20 +675,20 @@ impl LifetimeInstance {
         }
 
         for borrowed_ref in lifetime_tree.borrow_ref.iter() {
-            if self.contains_static_lifetime(*borrowed_ref, loop_suppressor) {
+            if self.contains_function_return_value(*borrowed_ref, loop_suppressor) {
                 return true;
             }
         }
 
         for alloc_ref in lifetime_tree.alloc_point_ref.iter() {
-            if self.contains_static_lifetime(*alloc_ref, loop_suppressor) {
+            if self.contains_function_return_value(*alloc_ref, loop_suppressor) {
                 return true;
             }
         }
 
         if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
             for inserted_ref in inserted_refs.iter() {
-                if self.contains_static_lifetime(*inserted_ref, loop_suppressor) {
+                if self.contains_function_return_value(*inserted_ref, loop_suppressor) {
                     return true;
                 }
             }
@@ -902,6 +924,7 @@ pub struct ContainsFunctionReturnTree {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LifetimeExpected {
     pub shorter: LifetimeTreeRef,
+    pub should_ignore_insert_on_shorter: bool,
     pub longer: LifetimeTreeRef,
 }
 
@@ -936,7 +959,11 @@ pub struct LifetimeSource {
 
 impl LifetimeSource {
     pub fn finalize(mut self) -> Self {
-        self.disable_function_return_value_stack_alloc(self.return_value, &mut false);
+        self.disable_function_return_value_stack_alloc(
+            self.return_value,
+            &mut false,
+            &mut LoopSuppressor::new(),
+        );
         self.instance
             .init_lifetime_expected_relationships(&mut false);
         self.instance.init_insert_map();
@@ -951,13 +978,21 @@ impl LifetimeSource {
         &mut self,
         lifetime_ref: LifetimeTreeRef,
         changed_flag: &mut bool,
+        loop_suppressor: &mut LoopSuppressor,
     ) {
+        let lifetime_ref = self.instance.resolve_lifetime_ref(lifetime_ref);
+
+        if !loop_suppressor.mark_as_explored(lifetime_ref) {
+            return;
+        }
+
         if self
             .instance
             .contains_function_return_value(lifetime_ref, &mut LoopSuppressor::new())
         {
             let expected = LifetimeExpected {
                 shorter: STATIC_LIFETIME_REF,
+                should_ignore_insert_on_shorter: false,
                 longer: lifetime_ref,
             };
 
@@ -970,10 +1005,33 @@ impl LifetimeSource {
 
         let lifetime_tree = self.instance.get_lifetime_tree(lifetime_ref);
 
+        let borrow_ref = lifetime_tree.borrow_ref.clone();
         let children = lifetime_tree.children.clone();
 
+        for borrowed_ref in borrow_ref {
+            self.disable_function_return_value_stack_alloc(
+                borrowed_ref,
+                changed_flag,
+                loop_suppressor,
+            );
+        }
+
         for child_ref in children.into_values() {
-            self.disable_function_return_value_stack_alloc(child_ref, changed_flag);
+            self.disable_function_return_value_stack_alloc(
+                child_ref,
+                changed_flag,
+                loop_suppressor,
+            );
+        }
+
+        if let Some(inserted_refs) = self.instance.insert_ref_map.get(&lifetime_ref).cloned() {
+            for inserted_ref in inserted_refs.iter() {
+                self.disable_function_return_value_stack_alloc(
+                    *inserted_ref,
+                    changed_flag,
+                    loop_suppressor,
+                );
+            }
         }
     }
 
@@ -1005,7 +1063,12 @@ impl LifetimeSource {
 
                     for longer in long_argument_refs.iter().cloned() {
                         for shorter in short_argument_refs.iter().cloned() {
-                            let expected = LifetimeExpected { shorter, longer };
+                            let expected = LifetimeExpected {
+                                shorter,
+                                should_ignore_insert_on_shorter: expected
+                                    .should_ignore_insert_on_shorter,
+                                longer,
+                            };
                             expected_set.insert(expected);
                         }
                     }
@@ -1018,6 +1081,8 @@ impl LifetimeSource {
                     for longer in long_argument_refs {
                         let expected = LifetimeExpected {
                             shorter: STATIC_LIFETIME_REF,
+                            should_ignore_insert_on_shorter: expected
+                                .should_ignore_insert_on_shorter,
                             longer,
                         };
                         expected_set.insert(expected);
@@ -1078,6 +1143,7 @@ impl LifetimeSource {
 
                 LifetimeExpected {
                     shorter: shorter_replaced,
+                    should_ignore_insert_on_shorter: false,
                     longer: longer_replaced,
                 }
             })
@@ -1367,12 +1433,14 @@ impl LifetimeEvaluator {
 
                         lifetime_source.instance.collect_lifetimes(
                             expected.shorter,
+                            expected.should_ignore_insert_on_shorter,
                             &mut shorter_lifetims,
                             &mut changed_map,
                             &mut LoopSuppressor::new(),
                         );
                         lifetime_source.instance.collect_lifetimes(
                             expected.longer,
+                            false,
                             &mut longer_lifetims,
                             &mut changed_map,
                             &mut LoopSuppressor::new(),
@@ -1515,6 +1583,7 @@ impl LifetimeEvaluator {
                     for on_heap_tree in on_heap_trees {
                         let expected = LifetimeExpected {
                             shorter: STATIC_LIFETIME_REF,
+                            should_ignore_insert_on_shorter: false,
                             longer: on_heap_tree,
                         };
 
@@ -1532,6 +1601,7 @@ impl LifetimeEvaluator {
                 lifetime_source.disable_function_return_value_stack_alloc(
                     return_lifetime_ref,
                     &mut is_changed,
+                    &mut LoopSuppressor::new(),
                 );
                 lifetime_source
                     .instance
@@ -1615,7 +1685,7 @@ impl LifetimeEvaluator {
         &self,
         module_name: &Arc<String>,
         entity_id: EntityID,
-    ) -> Option<(LifetimeTree, bool)> {
+    ) -> Option<(LifetimeTree, bool, bool)> {
         let lifetime_source_maps_lock = self.lifetime_source_map.read().unwrap();
 
         let lifetime_source_maps = lifetime_source_maps_lock.get(module_name).unwrap();
@@ -1642,6 +1712,9 @@ impl LifetimeEvaluator {
                 lifetime_source
                     .instance
                     .contains_static_lifetime(lifetime_ref, &mut LoopSuppressor::new()),
+                lifetime_source
+                    .instance
+                    .contains_function_return_value(lifetime_ref, &mut LoopSuppressor::new()),
             ));
         }
 

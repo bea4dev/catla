@@ -206,7 +206,7 @@ if true {
 let arg_0 = new Tree { field: null }
 let arg_1 = new Tree { field: null }
 
-arg_1 = arg_0
+lifetime_test(arg_0, arg_1)
 
 function lifetime_test(arg0: Tree, arg1: Tree) {
     arg1.field = arg0
@@ -221,3 +221,14 @@ let closure = || => {
 static let temp: Tree? = null
 
 closure()
+
+
+function recursive() -> Tree {
+    let temp = recursive()
+    return temp
+}
+
+let ok_temp0 = ok(new Tree { field: null })
+let ok_temp1 = ok(temp)
+
+let i_convert_0 = if true { error(0) } else { temp }

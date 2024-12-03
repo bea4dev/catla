@@ -1,3 +1,4 @@
+use core::panic;
 use std::sync::Arc;
 
 use allocator_api2::vec;
@@ -17,7 +18,8 @@ use crate::transpiler::{
     name_resolver::{DefineKind, EnvironmentSeparatorKind, FoundDefineInfo},
     semantics::types::{
         import_module_collector::get_module_name_from_primary,
-        type_inference::TypeInferenceResultContainer, type_info::Type,
+        type_inference::{ImplicitConvertKind, TypeInferenceResultContainer},
+        type_info::Type,
     },
 };
 
@@ -45,9 +47,50 @@ fn should_strict_drop(ty: &Type) -> bool {
     true
 }
 
+fn apply_implicit_convert(
+    parent_lifetime_ref: LifetimeTreeRef,
+    entity_id: EntityID,
+    lifetime_ref: LifetimeTreeRef,
+    lifetime_instance: &mut LifetimeInstance,
+    type_inference_result: &TypeInferenceResultContainer,
+) {
+    if let Some(convert) = type_inference_result.implicit_convert_map.get(&entity_id) {
+        let parent_lifetime_tree = lifetime_instance.get_lifetime_tree(parent_lifetime_ref);
+        parent_lifetime_tree.is_alloc_point = true;
+
+        let child_name = match convert {
+            ImplicitConvertKind::Some => {
+                lifetime_instance.merge(parent_lifetime_ref, lifetime_ref);
+                return;
+            }
+            ImplicitConvertKind::Ok => "value",
+            ImplicitConvertKind::Error => "error",
+        };
+
+        let child_lifetime_ref =
+            lifetime_instance.get_or_create_child(parent_lifetime_ref, child_name);
+        let child_lifetime_tree = lifetime_instance.get_lifetime_tree(child_lifetime_ref);
+
+        child_lifetime_tree
+            .alloc_point_ref
+            .insert(parent_lifetime_ref);
+
+        lifetime_instance.merge(child_lifetime_ref, lifetime_ref);
+    } else {
+        lifetime_instance.merge(parent_lifetime_ref, lifetime_ref);
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ClosureScope {
     captured: Vec<(EntityID, String)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariableType {
+    LocalVariable,
+    StaticOrCapturedVariable,
+    NotVariable,
 }
 
 pub fn collect_lifetime_program<'allocator>(
@@ -76,6 +119,8 @@ pub fn collect_lifetime_program<'allocator>(
 
         match statement {
             StatementAST::Assignment(assignment) => {
+                let mut left_variable_type = VariableType::NotVariable;
+
                 let left_lifetime_ref = lifetime_scope
                     .instance
                     .create_entity_lifetime_tree(EntityID::from(assignment.left_expr));
@@ -90,6 +135,7 @@ pub fn collect_lifetime_program<'allocator>(
                         Some(left_lifetime_ref),
                         return_value_tree_ref,
                         closure_scope_stack,
+                        &mut left_variable_type,
                         import_element_map,
                         name_resolved_map,
                         module_user_type_map,
@@ -120,6 +166,7 @@ pub fn collect_lifetime_program<'allocator>(
                         Some(expression_lifetime_ref),
                         return_value_tree_ref,
                         closure_scope_stack,
+                        &mut VariableType::NotVariable,
                         import_element_map,
                         name_resolved_map,
                         module_user_type_map,
@@ -147,11 +194,29 @@ pub fn collect_lifetime_program<'allocator>(
                     lifetime_scope.instance.create_lifetime_tree()
                 };
 
-                let expected = LifetimeExpected {
-                    shorter: left_lifetime_ref,
-                    longer: right_lifetime_ref,
-                };
-                lifetime_scope.instance.lifetime_expected.insert(expected);
+                if left_variable_type != VariableType::NotVariable {
+                    // deref borrowed
+                    let left_lifetime_tree =
+                        lifetime_scope.instance.get_lifetime_tree(left_lifetime_ref);
+
+                    let left_lifetime_ref = if left_variable_type == VariableType::LocalVariable {
+                        if left_lifetime_tree.borrow_ref.len() != 1 {
+                            panic!("invalid left lifetime tree");
+                        }
+
+                        left_lifetime_tree.borrow_ref.iter().next().unwrap().clone()
+                    } else {
+                        left_lifetime_ref
+                    };
+
+                    let expected = LifetimeExpected {
+                        shorter: left_lifetime_ref,
+                        should_ignore_insert_on_shorter: left_variable_type
+                            == VariableType::LocalVariable,
+                        longer: right_lifetime_ref,
+                    };
+                    lifetime_scope.instance.lifetime_expected.insert(expected);
+                }
 
                 lifetime_scope
                     .instance
@@ -186,6 +251,7 @@ pub fn collect_lifetime_program<'allocator>(
                                 Some(expression_lifetime_ref),
                                 return_value_tree_ref,
                                 closure_scope_stack,
+                                &mut VariableType::NotVariable,
                                 import_element_map,
                                 name_resolved_map,
                                 module_user_type_map,
@@ -401,6 +467,7 @@ pub fn collect_lifetime_program<'allocator>(
                     expr_bound_tree_ref,
                     return_value_tree_ref,
                     closure_scope_stack,
+                    &mut VariableType::NotVariable,
                     import_element_map,
                     name_resolved_map,
                     module_user_type_map,
@@ -465,6 +532,7 @@ fn collect_lifetime_expression<'allocator>(
     expr_bound_tree_ref: Option<LifetimeTreeRef>,
     return_value_tree_ref: LifetimeTreeRef,
     closure_scope_stack: &mut Vec<ClosureScope>,
+    variable_type: &mut VariableType,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
@@ -486,6 +554,7 @@ fn collect_lifetime_expression<'allocator>(
                 expr_bound_tree_ref,
                 return_value_tree_ref,
                 closure_scope_stack,
+                variable_type,
                 import_element_map,
                 name_resolved_map,
                 module_user_type_map,
@@ -508,6 +577,7 @@ fn collect_lifetime_expression<'allocator>(
                     Some(return_value_tree_ref),
                     return_value_tree_ref,
                     closure_scope_stack,
+                    &mut VariableType::NotVariable,
                     import_element_map,
                     name_resolved_map,
                     module_user_type_map,
@@ -624,6 +694,7 @@ fn collect_lifetime_expression<'allocator>(
                             Some(return_value_tree_ref),
                             return_value_tree_ref,
                             closure_scope_stack,
+                            &mut VariableType::NotVariable,
                             import_element_map,
                             name_resolved_map,
                             module_user_type_map,
@@ -710,6 +781,7 @@ fn collect_lifetime_or_expression<'allocator>(
     expr_bound_tree_ref: Option<LifetimeTreeRef>,
     return_value_tree_ref: LifetimeTreeRef,
     closure_scope_stack: &mut Vec<ClosureScope>,
+    variable_type: &mut VariableType,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
@@ -730,6 +802,7 @@ fn collect_lifetime_or_expression<'allocator>(
             expr_bound_tree_ref,
             return_value_tree_ref,
             closure_scope_stack,
+            variable_type,
             import_element_map,
             name_resolved_map,
             module_user_type_map,
@@ -750,6 +823,7 @@ fn collect_lifetime_or_expression<'allocator>(
             None,
             return_value_tree_ref,
             closure_scope_stack,
+            &mut VariableType::NotVariable,
             import_element_map,
             name_resolved_map,
             module_user_type_map,
@@ -772,6 +846,7 @@ fn collect_lifetime_or_expression<'allocator>(
                     None,
                     return_value_tree_ref,
                     closure_scope_stack,
+                    &mut VariableType::NotVariable,
                     import_element_map,
                     name_resolved_map,
                     module_user_type_map,
@@ -796,6 +871,7 @@ fn collect_lifetime_and_expression<'allocator>(
     expr_bound_tree_ref: Option<LifetimeTreeRef>,
     return_value_tree_ref: LifetimeTreeRef,
     closure_scope_stack: &mut Vec<ClosureScope>,
+    variable_type: &mut VariableType,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
@@ -816,6 +892,7 @@ fn collect_lifetime_and_expression<'allocator>(
             expr_bound_tree_ref,
             return_value_tree_ref,
             closure_scope_stack,
+            variable_type,
             import_element_map,
             name_resolved_map,
             module_user_type_map,
@@ -836,6 +913,7 @@ fn collect_lifetime_and_expression<'allocator>(
             None,
             return_value_tree_ref,
             closure_scope_stack,
+            &mut VariableType::NotVariable,
             import_element_map,
             name_resolved_map,
             module_user_type_map,
@@ -858,6 +936,7 @@ fn collect_lifetime_and_expression<'allocator>(
                     None,
                     return_value_tree_ref,
                     closure_scope_stack,
+                    &mut VariableType::NotVariable,
                     import_element_map,
                     name_resolved_map,
                     module_user_type_map,
@@ -884,6 +963,7 @@ macro_rules! collect_lifetime_for_op2 {
             expr_bound_tree_ref: Option<LifetimeTreeRef>,
             return_value_tree_ref: LifetimeTreeRef,
             closure_scope_stack: &mut Vec<ClosureScope>,
+            variable_type: &mut VariableType,
             import_element_map: &FxHashMap<EntityID, Spanned<String>>,
             name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
             module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
@@ -904,6 +984,7 @@ macro_rules! collect_lifetime_for_op2 {
                     expr_bound_tree_ref,
                     return_value_tree_ref,
                     closure_scope_stack,
+                    variable_type,
                     import_element_map,
                     name_resolved_map,
                     module_user_type_map,
@@ -931,6 +1012,7 @@ macro_rules! collect_lifetime_for_op2 {
                         Some(lifetime_tree_ref),
                         return_value_tree_ref,
                         closure_scope_stack,
+                        &mut VariableType::NotVariable,
                         import_element_map,
                         name_resolved_map,
                         module_user_type_map,
@@ -993,6 +1075,7 @@ macro_rules! collect_lifetime_for_op2 {
                             Some(right_lifetime_tree_ref),
                             return_value_tree_ref,
                             closure_scope_stack,
+                            &mut VariableType::NotVariable,
                             import_element_map,
                             name_resolved_map,
                             module_user_type_map,
@@ -1063,6 +1146,7 @@ fn collect_lifetime_factor<'allocator>(
     expr_bound_tree_ref: Option<LifetimeTreeRef>,
     return_value_tree_ref: LifetimeTreeRef,
     closure_scope_stack: &mut Vec<ClosureScope>,
+    variable_type: &mut VariableType,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
@@ -1084,6 +1168,7 @@ fn collect_lifetime_factor<'allocator>(
                 expr_bound_tree_ref,
                 return_value_tree_ref,
                 closure_scope_stack,
+                variable_type,
                 import_element_map,
                 name_resolved_map,
                 module_user_type_map,
@@ -1114,6 +1199,7 @@ fn collect_lifetime_factor<'allocator>(
                 Some(primary_lifetime_tree_ref),
                 return_value_tree_ref,
                 closure_scope_stack,
+                &mut VariableType::NotVariable,
                 import_element_map,
                 name_resolved_map,
                 module_user_type_map,
@@ -1197,6 +1283,7 @@ fn collect_lifetime_primary<'allocator>(
     expr_bound_tree_ref: Option<LifetimeTreeRef>,
     return_value_tree_ref: LifetimeTreeRef,
     closure_scope_stack: &mut Vec<ClosureScope>,
+    variable_type: &mut VariableType,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
@@ -1285,11 +1372,14 @@ fn collect_lifetime_primary<'allocator>(
             current_chain = count + 1;
         }
     } else {
+        let mut variable_type_temp = VariableType::NotVariable;
+
         let primary_left_lifetime_ref = collect_lifetime_primary_left(
             &ast.left,
             force_be_expression,
             return_value_tree_ref,
             closure_scope_stack,
+            &mut variable_type_temp,
             import_element_map,
             name_resolved_map,
             module_user_type_map,
@@ -1302,6 +1392,10 @@ fn collect_lifetime_primary<'allocator>(
             allocator,
             context,
         );
+
+        if ast.chain.is_empty() && ast.left.mapping_operator.is_none() {
+            *variable_type = variable_type_temp;
+        }
 
         prev_lifetime_tree_ref = primary_left_lifetime_ref;
     }
@@ -1415,6 +1509,7 @@ fn collect_lifetime_primary_left<'allocator>(
     force_be_expression: bool,
     return_value_tree_ref: LifetimeTreeRef,
     closure_scope_stack: &mut Vec<ClosureScope>,
+    variable_type: &mut VariableType,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
@@ -1433,10 +1528,13 @@ fn collect_lifetime_primary_left<'allocator>(
 
     match &ast.first_expr {
         PrimaryLeftExpr::Simple((simple_primary, _, function_call)) => {
+            let mut variable_type_temp = VariableType::NotVariable;
+
             let simple_primary_lifetime_ref = collect_lifetime_simple_primary(
                 simple_primary,
                 return_value_tree_ref,
                 closure_scope_stack,
+                &mut variable_type_temp,
                 import_element_map,
                 name_resolved_map,
                 module_user_type_map,
@@ -1449,6 +1547,10 @@ fn collect_lifetime_primary_left<'allocator>(
                 allocator,
                 context,
             );
+
+            if function_call.is_none() {
+                *variable_type = variable_type_temp;
+            }
 
             let last_lifetime_ref = if let Some(function_call) = function_call {
                 let mut lifetime_scope = LifetimeScope::new(lifetime_scope.instance, allocator);
@@ -1516,6 +1618,7 @@ fn collect_lifetime_primary_left<'allocator>(
                             Some(init_expression_lifetime_ref),
                             return_value_tree_ref,
                             closure_scope_stack,
+                            &mut VariableType::NotVariable,
                             import_element_map,
                             name_resolved_map,
                             module_user_type_map,
@@ -1616,6 +1719,7 @@ fn collect_lifetime_primary_left<'allocator>(
                                 Some(init_expression_ref),
                                 return_value_tree_ref,
                                 closure_scope_stack,
+                                &mut VariableType::NotVariable,
                                 import_element_map,
                                 name_resolved_map,
                                 module_user_type_map,
@@ -1685,6 +1789,7 @@ fn collect_lifetime_primary_left<'allocator>(
                     Some(expression_lifetime_ref),
                     return_value_tree_ref,
                     closure_scope_stack,
+                    &mut VariableType::NotVariable,
                     import_element_map,
                     name_resolved_map,
                     module_user_type_map,
@@ -1748,6 +1853,7 @@ fn collect_lifetime_primary_left<'allocator>(
                             Some(expression_lifetime_ref),
                             return_value_tree_ref,
                             closure_scope_stack,
+                            &mut VariableType::NotVariable,
                             import_element_map,
                             name_resolved_map,
                             module_user_type_map,
@@ -1835,6 +1941,7 @@ fn collect_lifetime_primary_left<'allocator>(
                         None,
                         return_value_tree_ref,
                         closure_scope_stack,
+                        &mut VariableType::NotVariable,
                         import_element_map,
                         name_resolved_map,
                         module_user_type_map,
@@ -1920,6 +2027,7 @@ fn collect_lifetime_simple_primary<'allocator>(
     ast: &'allocator SimplePrimary<'_, 'allocator>,
     return_value_tree_ref: LifetimeTreeRef,
     closure_scope_stack: &mut Vec<ClosureScope>,
+    variable_type: &mut VariableType,
     import_element_map: &FxHashMap<EntityID, Spanned<String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     module_user_type_map: &FxHashMap<String, Arc<FxHashMap<String, Type>>>,
@@ -1959,6 +2067,7 @@ fn collect_lifetime_simple_primary<'allocator>(
                         Some(expression_lifetime_ref),
                         return_value_tree_ref,
                         closure_scope_stack,
+                        &mut VariableType::NotVariable,
                         import_element_map,
                         name_resolved_map,
                         module_user_type_map,
@@ -1997,6 +2106,7 @@ fn collect_lifetime_simple_primary<'allocator>(
                             Some(expression_lifetime_ref),
                             return_value_tree_ref,
                             closure_scope_stack,
+                            &mut VariableType::NotVariable,
                             import_element_map,
                             name_resolved_map,
                             module_user_type_map,
@@ -2058,6 +2168,8 @@ fn collect_lifetime_simple_primary<'allocator>(
                         .instance
                         .merge(ast_lifetime_ref, literal_lifetime_ref);
                     println!("{} : static", literal.value);
+
+                    *variable_type = VariableType::StaticOrCapturedVariable;
                 } else {
                     // add as captured variable
                     let closure_count = resolved
@@ -2091,6 +2203,8 @@ fn collect_lifetime_simple_primary<'allocator>(
                         lifetime_scope
                             .instance
                             .merge(ast_lifetime_ref, borrowed_ref);
+
+                        *variable_type = VariableType::StaticOrCapturedVariable;
                     } else {
                         // NOT beyond closure
                         let kind = resolved.define_info.define_kind;
@@ -2114,6 +2228,8 @@ fn collect_lifetime_simple_primary<'allocator>(
                             lifetime_scope
                                 .instance
                                 .merge(ast_lifetime_ref, variable_borrow_lifetime_ref);
+
+                            *variable_type = VariableType::LocalVariable;
                         }
                     }
                 }
@@ -2202,6 +2318,7 @@ fn collect_lifetime_function_call<'allocator>(
                         Some(argument_lifetime_ref),
                         return_value_tree_ref,
                         closure_scope_stack,
+                        &mut VariableType::NotVariable,
                         import_element_map,
                         name_resolved_map,
                         module_user_type_map,

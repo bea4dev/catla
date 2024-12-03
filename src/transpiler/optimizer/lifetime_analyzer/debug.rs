@@ -32,7 +32,10 @@ pub fn print_lifetime_debug_info(ast: Program, context: &TranspileModuleContext)
             AllocationType::Unknown => (Color::Red, "unknown"),
         };
 
-        let contains_static = format!(" [has_static : {}]", info.contains_static);
+        let contains_static = format!(
+            " [has_static : {}, has_return_value : {}]",
+            info.contains_static, info.has_return_value
+        );
 
         let mut text = text.to_string().fg(color).to_string();
         text += contains_static.as_str();
@@ -59,6 +62,7 @@ struct LifetimeInfo {
     span: Range<usize>,
     alloc_type: AllocationType,
     contains_static: bool,
+    has_return_value: bool,
 }
 
 impl LifetimeInfo {
@@ -68,21 +72,25 @@ impl LifetimeInfo {
             .lifetime_evaluator
             .get_lifetime_tree_info(&context.module_name, entity_id);
 
-
-        let (alloc_type , contains_static)= match lifetime_tree {
-            Some((lifetime_tree, contains_static)) => {
+        let (alloc_type, contains_static, has_return_value) = match lifetime_tree {
+            Some((lifetime_tree, contains_static, has_return_value)) => {
                 let alloc_type = if lifetime_tree.is_alloc_point {
                     AllocationType::Stack
                 } else {
                     AllocationType::Heap
                 };
 
-                (alloc_type, contains_static)
+                (alloc_type, contains_static, has_return_value)
             }
-            None => (AllocationType::Unknown, false),
+            None => (AllocationType::Unknown, false, false),
         };
 
-        Self { span, alloc_type, contains_static }
+        Self {
+            span,
+            alloc_type,
+            contains_static,
+            has_return_value,
+        }
     }
 }
 
@@ -118,6 +126,10 @@ fn print_program(ast: Program, info: &mut Vec<LifetimeInfo>, context: &Transpile
                 }
             }
             StatementAST::FunctionDefine(function_define) => {
+                for argument in function_define.args.arguments.iter() {
+                    print_variable_binding(&argument.binding, info, context);
+                }
+
                 if let Some(block) = &function_define.block_or_semicolon.value {
                     if let Either::Right(block) = block {
                         print_program(block.program, info, context);
@@ -152,13 +164,17 @@ fn print_variable_binding(
 ) {
     match &ast.binding {
         Either::Left(literal) => {
-            info.push(LifetimeInfo::new(EntityID::from(literal), literal.span.clone(), context));
-        },
+            info.push(LifetimeInfo::new(
+                EntityID::from(literal),
+                literal.span.clone(),
+                context,
+            ));
+        }
         Either::Right(bindings) => {
             for binding in bindings.iter() {
                 print_variable_binding(binding, info, context);
             }
-        },
+        }
     }
 }
 

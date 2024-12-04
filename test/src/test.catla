@@ -232,3 +232,6 @@ let ok_temp0 = ok(new Tree { field: null })
 let ok_temp1 = ok(temp)
 
 let i_convert_0 = if true { error(0) } else { temp }
+
+let nullable: Tree??? = null
+let nullable_field = nullable?.?.?.field

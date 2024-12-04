@@ -680,12 +680,6 @@ impl LifetimeInstance {
             }
         }
 
-        for alloc_ref in lifetime_tree.alloc_point_ref.iter() {
-            if self.contains_function_return_value(*alloc_ref, loop_suppressor) {
-                return true;
-            }
-        }
-
         if let Some(inserted_refs) = self.insert_ref_map.get(&lifetime_tree_ref) {
             for inserted_ref in inserted_refs.iter() {
                 if self.contains_function_return_value(*inserted_ref, loop_suppressor) {

@@ -6275,12 +6275,16 @@ fn infer_type_mapping_operator<'input, 'allocator>(
     };
 
     if let Type::Option(_) = &previous_type_resolved {
-        mappings.push(MappingTypeKind::Option)
+        if let MappingOperatorKind::NullPropagation = &ast.value {
+            mappings.push(MappingTypeKind::Option);
+        }
     }
     if let Type::Result { value: _, error } = &previous_type_resolved {
-        mappings.push(MappingTypeKind::Result {
-            error_type: error.as_ref().clone(),
-        })
+        if let MappingOperatorKind::ResultPropagation = &ast.value {
+            mappings.push(MappingTypeKind::Result {
+                error_type: error.as_ref().clone(),
+            });
+        }
     }
 
     if let Err(expected) = &check_result {

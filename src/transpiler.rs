@@ -43,6 +43,7 @@ pub mod optimizer;
 pub mod parse_error;
 pub mod resource;
 pub mod semantics;
+pub mod codegen;
 
 pub struct TranspileError(Box<dyn TranspileReport + Send>, AdviceReport);
 pub struct TranspileWarning(Box<dyn TranspileReport + Send>, AdviceReport);

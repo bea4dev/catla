@@ -28,6 +28,7 @@ fn main() {
         num_threads: num_cpus::get(),
         is_transpiler_debug: true,
         optimization,
+        codegen_dir: "./.catla".to_string()
     };
 
     let mut resource_provider = DefaultSourceCodeProvider::new();

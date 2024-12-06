@@ -136,6 +136,7 @@ pub struct TranspileSettings {
     pub num_threads: usize,
     pub is_transpiler_debug: bool,
     pub optimization: OptimizationSettings,
+    pub codegen_dir: String,
 }
 
 pub struct OptimizationSettings {

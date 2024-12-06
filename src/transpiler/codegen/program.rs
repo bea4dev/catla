@@ -9,8 +9,9 @@ use super::{CodeBuilder, StackAllocCodeBuilder};
 
 pub fn codegen_program<'allocator>(
     ast: Program,
+    force_be_expression: bool,
     type_inference_result: &TypeInferenceResultContainer,
-    top_stack_alloc_builder: Option<&mut StackAllocCodeBuilder<'allocator>>,
+    top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
@@ -37,3 +38,14 @@ pub fn codegen_program<'allocator>(
         }
     }
 }
+
+fn codegen_expression<'allocator>(
+    ast: Program,
+    force_be_expression: bool,
+    type_inference_result: &TypeInferenceResultContainer,
+    top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
+    current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
+    code_builder: &mut CodeBuilder<'allocator>,
+    allocator: &'allocator Bump,
+    context: &TranspileModuleContext,
+) {}

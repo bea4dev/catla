@@ -2,16 +2,16 @@ use std::ops::Range;
 
 use bumpalo::{collections::String, format, Bump};
 use catla_parser::parser::{
-    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp,
-    CompareOpKind, Expression, ExpressionEnum, Factor, MulOrDivExpression, MulOrDivOp,
-    MulOrDivOpKind, OrExpression, Primary, PrimaryRight, Program, StatementAST,
+    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp, CompareOpKind, Expression, ExpressionEnum, Factor, MulOrDivExpression, MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryRight, Program, Spanned, StatementAST
 };
 
 use crate::transpiler::{
     component::EntityID,
     context::TranspileModuleContext,
     semantics::types::{
-        import_module_collector::get_module_name_from_primary, type_inference::{ImplicitConvertKind, TypeInferenceResultContainer}, type_info::Type
+        import_module_collector::get_module_name_from_primary,
+        type_inference::{ImplicitConvertKind, TypeInferenceResultContainer},
+        type_info::Type,
     },
 };
 
@@ -44,6 +44,8 @@ pub fn codegen_program<'allocator>(
     ast: Program,
     result_bind_var_name: Option<&str>,
     type_inference_result: &TypeInferenceResultContainer,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     user_type_field_builder: Option<&mut CodeBuilder<'allocator>>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
@@ -70,6 +72,8 @@ pub fn codegen_program<'allocator>(
                     Some(temp_var_name.as_str()),
                     false,
                     type_inference_result,
+                    import_element_map,
+                    name_resolved_map,
                     &mut top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -82,6 +86,8 @@ pub fn codegen_program<'allocator>(
                     Some(temp_var_name.as_str()),
                     true,
                     type_inference_result,
+                    import_element_map,
+                    name_resolved_map,
                     &mut top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -110,6 +116,8 @@ fn codegen_expression<'allocator>(
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
@@ -132,6 +140,8 @@ fn codegen_expression<'allocator>(
                 result_bind_var_name,
                 as_assign_left,
                 type_inference_result,
+                import_element_map,
+                name_resolved_map,
                 top_stack_alloc_builder,
                 current_tree_alloc_builder,
                 code_builder,
@@ -153,6 +163,8 @@ fn codegen_expression<'allocator>(
                     Some(temp_var_name.as_str()),
                     as_assign_left,
                     type_inference_result,
+                    import_element_map,
+                    name_resolved_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -226,6 +238,8 @@ macro_rules! codegen_for_op2 {
             result_bind_var_name: Option<&str>,
             as_assign_left: bool,
             type_inference_result: &TypeInferenceResultContainer,
+            import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+            name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
             top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
             current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
             code_builder: &mut CodeBuilder<'allocator>,
@@ -238,6 +252,8 @@ macro_rules! codegen_for_op2 {
                     result_bind_var_name,
                     as_assign_left,
                     type_inference_result,
+                    import_element_map,
+                    name_resolved_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -252,6 +268,8 @@ macro_rules! codegen_for_op2 {
                     Some(left_expr_temp_var_name.as_str()),
                     as_assign_left,
                     type_inference_result,
+                    import_element_map,
+                    name_resolved_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -271,6 +289,8 @@ macro_rules! codegen_for_op2 {
                         Some(right_expr_temp_var_name.as_str()),
                         as_assign_left,
                         type_inference_result,
+                        import_element_map,
+                        name_resolved_map,
                         top_stack_alloc_builder,
                         current_tree_alloc_builder,
                         code_builder,
@@ -386,6 +406,8 @@ fn codegen_factor<'allocator>(
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
@@ -400,6 +422,8 @@ fn codegen_factor<'allocator>(
             result_bind_var_name,
             as_assign_left,
             type_inference_result,
+            import_element_map,
+            name_resolved_map,
             top_stack_alloc_builder,
             current_tree_alloc_builder,
             code_builder,
@@ -414,22 +438,24 @@ fn codegen_primary<'allocator>(
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
-    let module_name_result = get_module_name_from_primary(ast, name_resolved_map, import_element_map, context);
+    let module_name_result =
+        get_module_name_from_primary(ast, name_resolved_map, import_element_map, context);
 
     let mut current_primary_index = 0;
 
     if let Some((module_name, primary_index)) = module_name_result {
-        
+        let right_primary = &ast.chain[primary_index];
 
         current_primary_index = primary_index + 1;
     } else {
-        
     }
 }
 
@@ -438,6 +464,8 @@ fn codegen_primary_left<'allocator>(
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
+    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,

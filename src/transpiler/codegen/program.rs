@@ -11,8 +11,7 @@ use crate::transpiler::{
     component::EntityID,
     context::TranspileModuleContext,
     semantics::types::{
-        type_inference::{ImplicitConvertKind, TypeInferenceResultContainer},
-        type_info::Type,
+        import_module_collector::get_module_name_from_primary, type_inference::{ImplicitConvertKind, TypeInferenceResultContainer}, type_info::Type
     },
 };
 
@@ -421,6 +420,17 @@ fn codegen_primary<'allocator>(
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
+    let module_name_result = get_module_name_from_primary(ast, name_resolved_map, import_element_map, context);
+
+    let mut current_primary_index = 0;
+
+    if let Some((module_name, primary_index)) = module_name_result {
+        
+
+        current_primary_index = primary_index + 1;
+    } else {
+        
+    }
 }
 
 fn codegen_primary_left<'allocator>(

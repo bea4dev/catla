@@ -2243,7 +2243,9 @@ fn collect_lifetime_simple_primary<'allocator>(
         SimplePrimary::Identifier(literal) => {
             // local variable
             if let Some(resolved) = name_resolved_map.get(&EntityID::from(literal)) {
-                if resolved.define_info.is_static_element {
+                if resolved.define_info.is_static_element
+                    || resolved.define_info.define_kind == DefineKind::Import
+                {
                     // static element
                     let literal_lifetime_ref = lifetime_scope
                         .instance

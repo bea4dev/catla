@@ -82,6 +82,11 @@ impl<T: CatlaDrop> CatlaRefObject<T> {
     }
 
     #[inline(always)]
+    pub fn drop_as_unique(&self) {
+        self.value.drop();
+    }
+
+    #[inline(always)]
     pub fn lock(&self) {
         loop {
             if self

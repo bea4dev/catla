@@ -1714,6 +1714,62 @@ impl LifetimeEvaluator {
 
         None
     }
+
+    pub fn export_analyze_results(&self, module_name: &Arc<String>) -> LifetimeAnalyzeResults {
+        let mut entity_result_map = FxHashMap::default();
+
+        let lifetime_sources = self.lifetime_source_map.read().unwrap();
+
+        for lifetime_source in lifetime_sources.get(module_name).unwrap().values() {
+            let lifetime_source = lifetime_source.read().unwrap();
+
+            for (entity_id, lifetime_tree_ref) in
+                lifetime_source.instance.entity_lifetime_ref_map.iter()
+            {
+                let lifetime_tree_ref = lifetime_source
+                    .instance
+                    .resolve_lifetime_ref(*lifetime_tree_ref);
+                let lifetime_tree = lifetime_source
+                    .instance
+                    .lifetime_tree_map
+                    .get(&lifetime_tree_ref)
+                    .unwrap();
+
+                let result = LifetimeAnalyzeResult {
+                    is_alloc_point: lifetime_tree.is_alloc_point,
+                    contains_static: lifetime_source
+                        .instance
+                        .contains_static_lifetime(lifetime_tree_ref, &mut LoopSuppressor::new()),
+                };
+
+                entity_result_map.insert(*entity_id, result);
+            }
+        }
+
+        LifetimeAnalyzeResults { entity_result_map }
+    }
+}
+
+pub struct LifetimeAnalyzeResults {
+    entity_result_map: FxHashMap<EntityID, LifetimeAnalyzeResult>,
+}
+
+impl LifetimeAnalyzeResults {
+    pub fn get_result(&self, entity_id: EntityID) -> LifetimeAnalyzeResult {
+        self.entity_result_map
+            .get(&entity_id)
+            .cloned()
+            .unwrap_or(LifetimeAnalyzeResult {
+                is_alloc_point: false,
+                contains_static: true,
+            })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LifetimeAnalyzeResult {
+    pub is_alloc_point: bool,
+    pub contains_static: bool,
 }
 
 pub struct GlobalFunctionEqualsInfo {

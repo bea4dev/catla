@@ -7,7 +7,7 @@ use hashbrown::{DefaultHashBuilder, HashMap};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct EntityID {
-    ptr: usize,
+    pub(crate) ptr: usize,
     type_id: TypeId
 }
 

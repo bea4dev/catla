@@ -1,13 +1,20 @@
 use std::ops::Range;
 
+use allocator_api2::vec::Vec;
 use bumpalo::{collections::String, format, Bump};
 use catla_parser::parser::{
-    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp, CompareOpKind, Expression, ExpressionEnum, Factor, MulOrDivExpression, MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryRight, Program, Spanned, StatementAST
+    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp,
+    CompareOpKind, Expression, ExpressionEnum, Factor, MulOrDivExpression, MulOrDivOp,
+    MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program,
+    SimplePrimary, Spanned, StatementAST,
 };
+use fxhash::FxHashMap;
 
 use crate::transpiler::{
     component::EntityID,
     context::TranspileModuleContext,
+    name_resolver::{DefineKind, FoundDefineInfo},
+    optimizer::lifetime_analyzer::{LifetimeAnalyzeResult, LifetimeAnalyzeResults},
     semantics::types::{
         import_module_collector::get_module_name_from_primary,
         type_inference::{ImplicitConvertKind, TypeInferenceResultContainer},
@@ -20,12 +27,24 @@ use super::{CodeBuilder, StackAllocCodeBuilder};
 fn create_temp_var<'allocator>(
     code_builder: &mut CodeBuilder<'allocator>,
     span: Range<usize>,
+    entity_id: EntityID,
+) -> String<'allocator> {
+    create_temp_var_with_name(code_builder, span, entity_id, "")
+}
+
+fn create_temp_var_with_name<'allocator>(
+    code_builder: &mut CodeBuilder<'allocator>,
+    span: Range<usize>,
+    entity_id: EntityID,
+    name: &str,
 ) -> String<'allocator> {
     let temp_var_name = format!(
         in code_builder.allocator,
-        "temp_{}_{}",
+        "temp_{}_{}_{}_{}",
         span.start,
-        span.end
+        span.end,
+        entity_id.ptr,
+        name,
     );
 
     code_builder.add(format!(in code_builder.allocator, "let {};", &temp_var_name));
@@ -35,16 +54,49 @@ fn create_temp_var<'allocator>(
 
 fn build_drop<'allocator>(
     drop_target: &str,
-    drop_type: &Type,
+    ty: &Type,
+    lifetime_analyze_result: LifetimeAnalyzeResult,
     code_builder: &mut CodeBuilder<'allocator>,
 ) {
+    if let Type::Function {
+        function_info,
+        generics: _,
+    } = ty
+    {
+        if !function_info.define_info.is_closure {
+            return;
+        }
+    }
+
+    if !lifetime_analyze_result.contains_static && !lifetime_analyze_result.is_alloc_point {
+        return;
+    }
+
+    if !ty.is_user_type() {
+        return;
+    }
+
+    let drop_func_name = if lifetime_analyze_result.contains_static {
+        "drop_ref"
+    } else {
+        "drop_as_unique"
+    };
+
+    let code = format!(
+        in code_builder.allocator,
+        "{}.{}();",
+        drop_target,
+        drop_func_name,
+    );
+    code_builder.add(code);
 }
 
 pub fn codegen_program<'allocator>(
     ast: Program,
     result_bind_var_name: Option<&str>,
     type_inference_result: &TypeInferenceResultContainer,
-    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    lifetime_analyze_results: &LifetimeAnalyzeResults,
+    import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     user_type_field_builder: Option<&mut CodeBuilder<'allocator>>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
@@ -65,13 +117,18 @@ pub fn codegen_program<'allocator>(
 
         match statement {
             StatementAST::Assignment(assignment) => {
-                let temp_var_name = create_temp_var(code_builder, assignment.span.clone());
+                let temp_var_name = create_temp_var(
+                    code_builder,
+                    assignment.span.clone(),
+                    EntityID::from(assignment),
+                );
 
                 codegen_expression(
                     assignment.right_expr.as_ref().unwrap(),
                     Some(temp_var_name.as_str()),
                     false,
                     type_inference_result,
+                    lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
                     &mut top_stack_alloc_builder,
@@ -86,6 +143,7 @@ pub fn codegen_program<'allocator>(
                     Some(temp_var_name.as_str()),
                     true,
                     type_inference_result,
+                    lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
                     &mut top_stack_alloc_builder,
@@ -116,7 +174,8 @@ fn codegen_expression<'allocator>(
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
-    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    lifetime_analyze_results: &LifetimeAnalyzeResults,
+    import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
@@ -126,7 +185,12 @@ fn codegen_expression<'allocator>(
 ) {
     let parent_result_bind_var_name = result_bind_var_name;
 
-    let expr_temp_var_name = create_temp_var(code_builder, ast.get_span());
+    let expr_temp_var_name = create_temp_var_with_name(
+        code_builder,
+        ast.get_span(),
+        EntityID::from(ast),
+        "for_convert",
+    );
     let result_bind_var_name = if parent_result_bind_var_name.is_some() {
         Some(expr_temp_var_name.as_str())
     } else {
@@ -140,6 +204,7 @@ fn codegen_expression<'allocator>(
                 result_bind_var_name,
                 as_assign_left,
                 type_inference_result,
+                lifetime_analyze_results,
                 import_element_map,
                 name_resolved_map,
                 top_stack_alloc_builder,
@@ -155,7 +220,11 @@ fn codegen_expression<'allocator>(
                     .add(format!(in allocator, "{} = unreachable!();", result_bind_var_name));
             }
 
-            let temp_var_name = create_temp_var(code_builder, return_expression.span.clone());
+            let temp_var_name = create_temp_var(
+                code_builder,
+                return_expression.span.clone(),
+                EntityID::from(return_expression),
+            );
 
             if let Some(expression) = return_expression.expression {
                 codegen_expression(
@@ -163,6 +232,7 @@ fn codegen_expression<'allocator>(
                     Some(temp_var_name.as_str()),
                     as_assign_left,
                     type_inference_result,
+                    lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
                     top_stack_alloc_builder,
@@ -238,7 +308,8 @@ macro_rules! codegen_for_op2 {
             result_bind_var_name: Option<&str>,
             as_assign_left: bool,
             type_inference_result: &TypeInferenceResultContainer,
-            import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+            lifetime_analyze_results: &LifetimeAnalyzeResults,
+            import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
             name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
             top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
             current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
@@ -252,6 +323,7 @@ macro_rules! codegen_for_op2 {
                     result_bind_var_name,
                     as_assign_left,
                     type_inference_result,
+                    lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
                     top_stack_alloc_builder,
@@ -261,13 +333,14 @@ macro_rules! codegen_for_op2 {
                     context,
                 );
             } else {
-                let left_expr_temp_var_name = create_temp_var(code_builder, ast.left_expr.span.clone());
+                let left_expr_temp_var_name = create_temp_var(code_builder, ast.left_expr.span.clone(), EntityID::from(&ast.left_expr));
 
                 $next_layer_function_name(
                     &ast.left_expr,
                     Some(left_expr_temp_var_name.as_str()),
                     as_assign_left,
                     type_inference_result,
+                    lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
                     top_stack_alloc_builder,
@@ -281,14 +354,15 @@ macro_rules! codegen_for_op2 {
                 for (operator, right_expr) in ast.right_exprs.iter() {
                     let right_expr = right_expr.as_ref().unwrap();
 
-                    let operator_result_var_name = create_temp_var(code_builder, $operator_span_provider(operator));
-                    let right_expr_temp_var_name = create_temp_var(code_builder, right_expr.span.clone());
+                    let operator_result_var_name = create_temp_var_with_name(code_builder, $operator_span_provider(operator), EntityID::from(ast), "operator");
+                    let right_expr_temp_var_name = create_temp_var(code_builder, right_expr.span.clone(), EntityID::from(right_expr));
 
                     $next_layer_function_name(
                         right_expr,
                         Some(right_expr_temp_var_name.as_str()),
                         as_assign_left,
                         type_inference_result,
+                        lifetime_analyze_results,
                         import_element_map,
                         name_resolved_map,
                         top_stack_alloc_builder,
@@ -406,7 +480,8 @@ fn codegen_factor<'allocator>(
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
-    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    lifetime_analyze_results: &LifetimeAnalyzeResults,
+    import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
@@ -422,6 +497,7 @@ fn codegen_factor<'allocator>(
             result_bind_var_name,
             as_assign_left,
             type_inference_result,
+            lifetime_analyze_results,
             import_element_map,
             name_resolved_map,
             top_stack_alloc_builder,
@@ -438,7 +514,8 @@ fn codegen_primary<'allocator>(
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
-    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    lifetime_analyze_results: &LifetimeAnalyzeResults,
+    import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
@@ -451,20 +528,164 @@ fn codegen_primary<'allocator>(
 
     let mut current_primary_index = 0;
 
+    let mut last_result_temp_var = String::new_in(allocator);
+    let mut last_entity_id = EntityID::dummy();
+
     if let Some((module_name, primary_index)) = module_name_result {
         let right_primary = &ast.chain[primary_index];
 
+        if let Some((literal, _, function_call)) = &right_primary.second_expr {
+            if let Some(function_call) = function_call {
+                let mut argument_results = Vec::new_in(allocator);
+
+                if let Ok(arguments) = &function_call.arg_exprs {
+                    for argument_expr in arguments.iter() {
+                        let expr_result_bind_var = create_temp_var(
+                            code_builder,
+                            argument_expr.get_span(),
+                            EntityID::from(*argument_expr),
+                        );
+
+                        codegen_expression(
+                            *argument_expr,
+                            Some(expr_result_bind_var.as_str()),
+                            false,
+                            type_inference_result,
+                            lifetime_analyze_results,
+                            import_element_map,
+                            name_resolved_map,
+                            top_stack_alloc_builder,
+                            current_tree_alloc_builder,
+                            code_builder,
+                            allocator,
+                            context,
+                        );
+
+                        argument_results.push(expr_result_bind_var);
+                    }
+                }
+
+                let is_closure = type_inference_result
+                    .get_entity_type(EntityID::from(literal))
+                    .is_closure();
+
+                let literal_value_temp =
+                    create_temp_var(code_builder, literal.span.clone(), EntityID::from(literal));
+
+                if is_closure {
+                    let code = format!(
+                        in allocator,
+                        "{} = {}::{}.get();",
+                        &literal_value_temp,
+                        &module_name,
+                        literal.value,
+                    );
+                    code_builder.add(code);
+                } else {
+                    let code = format!(
+                        in allocator,
+                        "{} = {}::{};",
+                        &literal_value_temp,
+                        &module_name,
+                        literal.value,
+                    );
+                    code_builder.add(code);
+                }
+
+                let result_temp = create_temp_var(
+                    code_builder,
+                    function_call.span.clone(),
+                    EntityID::from(function_call),
+                );
+
+                let code = format!(
+                    in allocator,
+                    "{} = {}({});",
+                    &result_temp,
+                    literal_value_temp,
+                    argument_results.join(", ")
+                );
+                code_builder.add(code);
+
+                if is_closure {
+                    build_drop(
+                        literal_value_temp.as_str(),
+                        type_inference_result.get_entity_type(EntityID::from(literal)),
+                        lifetime_analyze_results.get_result(EntityID::from(literal)),
+                        code_builder,
+                    );
+                }
+
+                last_result_temp_var = result_temp;
+                last_entity_id = EntityID::from(function_call);
+            } else {
+                let result_temp =
+                    create_temp_var(code_builder, literal.span.clone(), EntityID::from(literal));
+
+                let code = format!(
+                    in allocator,
+                    "{} = {}::{}.get();",
+                    &result_temp,
+                    &module_name,
+                    literal.value,
+                );
+
+                code_builder.add(code);
+
+                last_result_temp_var = result_temp;
+                last_entity_id = EntityID::from(literal);
+            }
+        }
+
+        // TODO : mapping operator
+
         current_primary_index = primary_index + 1;
     } else {
+        let result_temp = create_temp_var(
+            code_builder,
+            ast.left.span.clone(),
+            EntityID::from(&ast.left),
+        );
+
+        codegen_primary_left(
+            &ast.left,
+            Some(result_temp.as_str()),
+            false,
+            type_inference_result,
+            lifetime_analyze_results,
+            import_element_map,
+            name_resolved_map,
+            top_stack_alloc_builder,
+            current_tree_alloc_builder,
+            code_builder,
+            allocator,
+            context,
+        );
+
+        last_result_temp_var = result_temp;
+        last_entity_id = EntityID::from(&ast.left);
+    }
+
+    loop {
+        if current_primary_index >= ast.chain.len() {
+            break;
+        }
+
+        let primary_right = &ast.chain[current_primary_index];
+
+        if let Some((literal, _, function_call)) = &primary_right.second_expr {
+            
+        }
     }
 }
 
 fn codegen_primary_left<'allocator>(
-    ast: &PrimaryRight,
+    ast: &PrimaryLeft,
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
-    import_element_map: &FxHashMap<EntityID, Spanned<String>>,
+    lifetime_analyze_results: &LifetimeAnalyzeResults,
+    import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
@@ -472,4 +693,122 @@ fn codegen_primary_left<'allocator>(
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
+    match &ast.first_expr {
+        PrimaryLeftExpr::Simple((simple_primary, _, function_call)) => {
+            let simple_primary_result_temp = create_temp_var(
+                code_builder,
+                simple_primary.get_span(),
+                EntityID::from(simple_primary),
+            );
+
+            match simple_primary {
+                SimplePrimary::Expressions {
+                    expressions,
+                    error_tokens: _,
+                    span: _,
+                } => {
+                    let mut expression_results = Vec::new_in(allocator);
+
+                    for expression in expressions.iter() {
+                        let expression_result_temp = create_temp_var(
+                            code_builder,
+                            expression.get_span(),
+                            EntityID::from(*expression),
+                        );
+
+                        codegen_expression(
+                            *expression,
+                            Some(expression_result_temp.as_str()),
+                            false,
+                            type_inference_result,
+                            lifetime_analyze_results,
+                            import_element_map,
+                            name_resolved_map,
+                            top_stack_alloc_builder,
+                            current_tree_alloc_builder,
+                            code_builder,
+                            allocator,
+                            context,
+                        );
+
+                        expression_results.push(expression_result_temp);
+                    }
+
+                    let code = format!(
+                        in allocator,
+                        "{} = ({});",
+                        &simple_primary_result_temp,
+                        expression_results.join(", "),
+                    );
+                    code_builder.add(code);
+                }
+                SimplePrimary::Identifier(literal) => {
+                    let lifetime_analyze_result = lifetime_analyze_results.get_result(EntityID::from(literal));
+
+                    if lifetime_analyze_result.contains_static {
+                        let code = format!(
+                            in allocator,
+                            "{} = {}.get();",
+                            &simple_primary_result_temp,
+                            literal.value,
+                        );
+                        code_builder.add(code);
+                    } else {
+                        let code = format!(
+                            in allocator,
+                            "{} = {};",
+                            &simple_primary_result_temp,
+                            literal.value,
+                        );
+                        code_builder.add(code);
+                    }
+                }
+                SimplePrimary::NullKeyword(_) => {
+                    let code = format!(
+                        in allocator,
+                        "{} = None;",
+                        &simple_primary_result_temp,
+                    );
+                    code_builder.add(code);
+                },
+                SimplePrimary::TrueKeyword(_) => {
+                    let code = format!(
+                        in allocator,
+                        "{} = true;",
+                        &simple_primary_result_temp,
+                    );
+                    code_builder.add(code);
+                },
+                SimplePrimary::FalseKeyword(_) => {
+                    let code = format!(
+                        in allocator,
+                        "{} = false;",
+                        &simple_primary_result_temp,
+                    );
+                    code_builder.add(code);
+                },
+                SimplePrimary::ThisKeyword(_) => {
+                    let code = format!(
+                        in allocator,
+                        "{} = self;",
+                        &simple_primary_result_temp,
+                    );
+                    code_builder.add(code);
+                },
+                SimplePrimary::LargeThisKeyword(_) => {
+                    let code = format!(
+                        in allocator,
+                        "{} = This;",
+                        &simple_primary_result_temp,
+                    );
+                    code_builder.add(code);
+                },
+            }
+        }
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {}
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {}
+        PrimaryLeftExpr::NewExpression(new_expression) => {}
+        PrimaryLeftExpr::IfExpression(if_expression) => {}
+        PrimaryLeftExpr::LoopExpression(loop_expression) => {}
+    }
 }

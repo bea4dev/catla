@@ -875,16 +875,12 @@ impl Type {
     }
 
     pub fn is_closure(&self) -> bool {
-        if let Type::Function { function_info, generics: _ } = self {
+        if let Type::Function {
+            function_info,
+            generics: _,
+        } = self
+        {
             function_info.define_info.is_closure
-        } else {
-            false
-        }
-    }
-
-    pub fn is_user_type(&self) -> bool {
-        if let Type::UserType { user_type_info: _, generics: _, generics_span: _ } = self {
-            true
         } else {
             false
         }

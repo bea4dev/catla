@@ -4,9 +4,9 @@ use allocator_api2::vec::Vec;
 use bumpalo::{collections::String, format, Bump};
 use catla_parser::parser::{
     AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp,
-    CompareOpKind, Expression, ExpressionEnum, Factor, MulOrDivExpression, MulOrDivOp,
-    MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program,
-    SimplePrimary, Spanned, StatementAST,
+    CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression,
+    MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
+    Program, SimplePrimary, Spanned, StatementAST,
 };
 use fxhash::FxHashMap;
 
@@ -69,10 +69,6 @@ fn build_drop<'allocator>(
     }
 
     if !lifetime_analyze_result.contains_static && !lifetime_analyze_result.is_alloc_point {
-        return;
-    }
-
-    if !ty.is_user_type() {
         return;
     }
 
@@ -536,43 +532,17 @@ fn codegen_primary<'allocator>(
 
         if let Some((literal, _, function_call)) = &right_primary.second_expr {
             if let Some(function_call) = function_call {
-                let mut argument_results = Vec::new_in(allocator);
-
-                if let Ok(arguments) = &function_call.arg_exprs {
-                    for argument_expr in arguments.iter() {
-                        let expr_result_bind_var = create_temp_var(
-                            code_builder,
-                            argument_expr.get_span(),
-                            EntityID::from(*argument_expr),
-                        );
-
-                        codegen_expression(
-                            *argument_expr,
-                            Some(expr_result_bind_var.as_str()),
-                            false,
-                            type_inference_result,
-                            lifetime_analyze_results,
-                            import_element_map,
-                            name_resolved_map,
-                            top_stack_alloc_builder,
-                            current_tree_alloc_builder,
-                            code_builder,
-                            allocator,
-                            context,
-                        );
-
-                        argument_results.push(expr_result_bind_var);
-                    }
-                }
-
                 let is_closure = type_inference_result
                     .get_entity_type(EntityID::from(literal))
                     .is_closure();
 
-                let literal_value_temp =
-                    create_temp_var(code_builder, literal.span.clone(), EntityID::from(literal));
+                let literal_value_temp = if is_closure {
+                    let literal_value_temp = create_temp_var(
+                        code_builder,
+                        literal.span.clone(),
+                        EntityID::from(literal),
+                    );
 
-                if is_closure {
                     let code = format!(
                         in allocator,
                         "{} = {}::{}.get();",
@@ -581,16 +551,24 @@ fn codegen_primary<'allocator>(
                         literal.value,
                     );
                     code_builder.add(code);
+
+                    literal_value_temp
                 } else {
-                    let code = format!(
-                        in allocator,
-                        "{} = {}::{};",
-                        &literal_value_temp,
-                        &module_name,
-                        literal.value,
-                    );
-                    code_builder.add(code);
-                }
+                    format!(in allocator, "{}::{}", &module_name, literal.value)
+                };
+
+                let (argument_results, argument_drop_info) = codegen_function_call_arguments(
+                    function_call,
+                    type_inference_result,
+                    lifetime_analyze_results,
+                    import_element_map,
+                    name_resolved_map,
+                    top_stack_alloc_builder,
+                    current_tree_alloc_builder,
+                    code_builder,
+                    allocator,
+                    context,
+                );
 
                 let result_temp = create_temp_var(
                     code_builder,
@@ -598,14 +576,31 @@ fn codegen_primary<'allocator>(
                     EntityID::from(function_call),
                 );
 
+                let mut arguments = String::new_in(allocator);
+                for argument_result in argument_results.iter() {
+                    arguments += argument_result.as_str();
+                    arguments += ", ";
+                }
+
                 let code = format!(
                     in allocator,
                     "{} = {}({});",
                     &result_temp,
                     literal_value_temp,
-                    argument_results.join(", ")
+                    arguments,
                 );
                 code_builder.add(code);
+
+                for (argument_expr_result, (ty, lifetime_analyze_result)) in
+                    argument_results.iter().zip(argument_drop_info.iter()).rev()
+                {
+                    build_drop(
+                        argument_expr_result.as_str(),
+                        *ty,
+                        lifetime_analyze_result.clone(),
+                        code_builder,
+                    );
+                }
 
                 if is_closure {
                     build_drop(
@@ -622,15 +617,40 @@ fn codegen_primary<'allocator>(
                 let result_temp =
                     create_temp_var(code_builder, literal.span.clone(), EntityID::from(literal));
 
-                let code = format!(
-                    in allocator,
-                    "{} = {}::{}.get();",
-                    &result_temp,
-                    &module_name,
-                    literal.value,
-                );
+                let is_static_var = if let Type::Function {
+                    function_info,
+                    generics: _,
+                } =
+                    type_inference_result.get_entity_type(EntityID::from(literal))
+                {
+                    if function_info.define_info.is_closure {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    true
+                };
 
-                code_builder.add(code);
+                if is_static_var {
+                    let code = format!(
+                        in allocator,
+                        "{} = {}::{}.get();",
+                        &result_temp,
+                        &module_name,
+                        literal.value,
+                    );
+                    code_builder.add(code);
+                } else {
+                    let code = format!(
+                        in allocator,
+                        "{} = {}::{};",
+                        &result_temp,
+                        &module_name,
+                        literal.value,
+                    );
+                    code_builder.add(code);
+                }
 
                 last_result_temp_var = result_temp;
                 last_entity_id = EntityID::from(literal);
@@ -674,9 +694,215 @@ fn codegen_primary<'allocator>(
         let primary_right = &ast.chain[current_primary_index];
 
         if let Some((literal, _, function_call)) = &primary_right.second_expr {
-            
+            if let Some(function_call) = function_call {
+                let is_closure = type_inference_result
+                    .get_entity_type(EntityID::from(literal))
+                    .is_closure();
+
+                let literal_value_temp = if is_closure {
+                    let literal_value_temp = create_temp_var(
+                        code_builder,
+                        literal.span.clone(),
+                        EntityID::from(literal),
+                    );
+
+                    let contains_static = lifetime_analyze_results
+                        .get_result(EntityID::from(literal))
+                        .contains_static;
+
+                    let getter_name = if contains_static { "get" } else { "borrow" };
+
+                    let code = format!(
+                        in allocator,
+                        "{} = {}.{}{}();",
+                        &literal_value_temp,
+                        getter_name,
+                        &last_result_temp_var,
+                        literal.value,
+                    );
+                    code_builder.add(code);
+
+                    literal_value_temp
+                } else {
+                    format!(
+                        in allocator,
+                        "{}.{}",
+                        &last_result_temp_var,
+                        literal.value,
+                    )
+                };
+
+                let (argument_results, argument_drop_info) = codegen_function_call_arguments(
+                    function_call,
+                    type_inference_result,
+                    lifetime_analyze_results,
+                    import_element_map,
+                    name_resolved_map,
+                    top_stack_alloc_builder,
+                    current_tree_alloc_builder,
+                    code_builder,
+                    allocator,
+                    context,
+                );
+
+                let result_temp = create_temp_var(
+                    code_builder,
+                    function_call.span.clone(),
+                    EntityID::from(function_call),
+                );
+
+                let mut arguments = String::new_in(allocator);
+                for argument_result in argument_results.iter() {
+                    arguments += argument_result.as_str();
+                    arguments += ", ";
+                }
+
+                let code = format!(
+                    in allocator,
+                    "{} = {}({});",
+                    &result_temp,
+                    literal_value_temp,
+                    arguments,
+                );
+                code_builder.add(code);
+
+                for (argument_expr_result, (ty, lifetime_analyze_result)) in
+                    argument_results.iter().zip(argument_drop_info.iter()).rev()
+                {
+                    build_drop(
+                        argument_expr_result.as_str(),
+                        *ty,
+                        lifetime_analyze_result.clone(),
+                        code_builder,
+                    );
+                }
+
+                if is_closure {
+                    build_drop(
+                        literal_value_temp.as_str(),
+                        type_inference_result.get_entity_type(EntityID::from(literal)),
+                        lifetime_analyze_results.get_result(EntityID::from(literal)),
+                        code_builder,
+                    );
+                }
+
+                build_drop(
+                    &last_result_temp_var,
+                    type_inference_result.get_entity_type(last_entity_id),
+                    lifetime_analyze_results.get_result(last_entity_id),
+                    code_builder,
+                );
+
+                last_result_temp_var = result_temp;
+                last_entity_id = EntityID::from(function_call);
+            } else {
+                let literal_value_temp = create_temp_var(
+                    code_builder,
+                    literal.span.clone(),
+                    EntityID::from(literal),
+                );
+
+                let contains_static = lifetime_analyze_results
+                    .get_result(EntityID::from(literal))
+                    .contains_static;
+
+                let getter_name = if contains_static { "get" } else { "borrow" };
+
+                let code = format!(
+                    in allocator,
+                    "{} = {}.{}{}();",
+                    &literal_value_temp,
+                    getter_name,
+                    &last_result_temp_var,
+                    literal.value,
+                );
+                code_builder.add(code);
+
+                build_drop(
+                    &last_result_temp_var,
+                    type_inference_result.get_entity_type(last_entity_id),
+                    lifetime_analyze_results.get_result(last_entity_id),
+                    code_builder,
+                );
+
+                last_result_temp_var = literal_value_temp;
+                last_entity_id = EntityID::from(literal);
+            }
         }
     }
+
+    if let Some(result_bind_var_name) = result_bind_var_name {
+        let code = format!(
+            in allocator,
+            "{} = {};",
+            result_bind_var_name,
+            last_result_temp_var,
+        );
+        code_builder.add(code);
+    } else {
+        if !as_assign_left {
+            build_drop(
+                &last_result_temp_var,
+                type_inference_result.get_entity_type(last_entity_id),
+                lifetime_analyze_results.get_result(last_entity_id),
+                code_builder,
+            );
+        }
+    }
+}
+
+fn codegen_function_call_arguments<'allocator, 'ty>(
+    ast: &FunctionCall,
+    type_inference_result: &'ty TypeInferenceResultContainer,
+    lifetime_analyze_results: &LifetimeAnalyzeResults,
+    import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
+    current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
+    code_builder: &mut CodeBuilder<'allocator>,
+    allocator: &'allocator Bump,
+    context: &TranspileModuleContext,
+) -> (
+    Vec<String<'allocator>, &'allocator Bump>,
+    Vec<(&'ty Type, LifetimeAnalyzeResult), &'allocator Bump>,
+) {
+    let mut argument_results = Vec::new_in(allocator);
+    let mut argument_drop_info = Vec::new_in(allocator);
+
+    if let Ok(arguments) = &ast.arg_exprs {
+        for argument_expr in arguments.iter() {
+            let expr_result_bind_var = create_temp_var(
+                code_builder,
+                argument_expr.get_span(),
+                EntityID::from(*argument_expr),
+            );
+
+            codegen_expression(
+                *argument_expr,
+                Some(expr_result_bind_var.as_str()),
+                false,
+                type_inference_result,
+                lifetime_analyze_results,
+                import_element_map,
+                name_resolved_map,
+                top_stack_alloc_builder,
+                current_tree_alloc_builder,
+                code_builder,
+                allocator,
+                context,
+            );
+
+            argument_results.push(expr_result_bind_var);
+
+            let ty = type_inference_result.get_entity_type(EntityID::from(*argument_expr));
+            let lifetime_analyze_result =
+                lifetime_analyze_results.get_result(EntityID::from(*argument_expr));
+
+            argument_drop_info.push((ty, lifetime_analyze_result));
+        }
+    }
+
+    (argument_results, argument_drop_info)
 }
 
 fn codegen_primary_left<'allocator>(
@@ -743,9 +969,27 @@ fn codegen_primary_left<'allocator>(
                     code_builder.add(code);
                 }
                 SimplePrimary::Identifier(literal) => {
-                    let lifetime_analyze_result = lifetime_analyze_results.get_result(EntityID::from(literal));
+                    let resolved = name_resolved_map.get(&EntityID::from(literal)).unwrap();
 
-                    if lifetime_analyze_result.contains_static {
+                    let is_static_element = resolved.define_info.is_static_element
+                        || resolved.define_info.define_kind == DefineKind::Import;
+
+                    let has_ref_count = if let Type::Function {
+                        function_info,
+                        generics: _,
+                    } =
+                        type_inference_result.get_entity_type(EntityID::from(literal))
+                    {
+                        if function_info.define_info.is_closure {
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        is_static_element
+                    };
+
+                    if has_ref_count {
                         let code = format!(
                             in allocator,
                             "{} = {}.get();",
@@ -770,7 +1014,7 @@ fn codegen_primary_left<'allocator>(
                         &simple_primary_result_temp,
                     );
                     code_builder.add(code);
-                },
+                }
                 SimplePrimary::TrueKeyword(_) => {
                     let code = format!(
                         in allocator,
@@ -778,7 +1022,7 @@ fn codegen_primary_left<'allocator>(
                         &simple_primary_result_temp,
                     );
                     code_builder.add(code);
-                },
+                }
                 SimplePrimary::FalseKeyword(_) => {
                     let code = format!(
                         in allocator,
@@ -786,7 +1030,7 @@ fn codegen_primary_left<'allocator>(
                         &simple_primary_result_temp,
                     );
                     code_builder.add(code);
-                },
+                }
                 SimplePrimary::ThisKeyword(_) => {
                     let code = format!(
                         in allocator,
@@ -794,7 +1038,7 @@ fn codegen_primary_left<'allocator>(
                         &simple_primary_result_temp,
                     );
                     code_builder.add(code);
-                },
+                }
                 SimplePrimary::LargeThisKeyword(_) => {
                     let code = format!(
                         in allocator,
@@ -802,7 +1046,7 @@ fn codegen_primary_left<'allocator>(
                         &simple_primary_result_temp,
                     );
                     code_builder.add(code);
-                },
+                }
             }
         }
         PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {}

@@ -1,4 +1,4 @@
-
+import std::string::String
 
 class TestClazz<T> {
     let field: T?

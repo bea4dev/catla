@@ -37,10 +37,49 @@ pub fn parse_statement<'input, 'allocator>(
     if let Some(expression) = parse_expression(cursor) {
         return Ok(StatementAST::Expression(expression));
     }
+    if let Some(transpiler_tag) = parse_transpiler_tag(cursor) {
+        return Ok(StatementAST::TranspilerTag(transpiler_tag));
+    }
 
     return Err(ASTParseError::UnexpectedToken(
         vec![in cursor.allocator; cursor.next().unwrap().clone(); 1],
     ));
+}
+
+fn parse_transpiler_tag<'input, 'allocator>(
+    cursor: &mut TokenCursor<'input, 'allocator>,
+) -> Option<TranspilerTag<'input, 'allocator>> {
+    let start_position = cursor.current_position;
+    let span = Span::start(cursor);
+
+    if cursor.next().get_kind() != TokenKind::Hash {
+        cursor.current_position = start_position;
+        return None;
+    }
+
+    if cursor.next().get_kind() != TokenKind::BracketLeft {
+        cursor.current_position = start_position;
+        return None;
+    }
+
+    let literal = parse_literal_result(cursor);
+
+    let error_tokens = recover_until_token_found(cursor, &[TokenKind::BracketRight]);
+
+    let bracket_right = cursor.current().get_kind();
+    let bracket_right = if bracket_right == TokenKind::BracketRight {
+        cursor.next();
+        Ok(())
+    } else {
+        Err(unexpected_token_error(cursor.allocator, cursor.current()))
+    };
+
+    Some(TranspilerTag {
+        literal,
+        error_tokens,
+        bracket_right,
+        span: span.elapsed(cursor),
+    })
 }
 
 fn parse_assignment<'input, 'allocator>(

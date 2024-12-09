@@ -498,6 +498,9 @@ fn parse_simple_primary<'input, 'allocator>(
             })
         }
         TokenKind::Literal => Some(SimplePrimary::Identifier(parse_literal(cursor).unwrap())),
+        TokenKind::StringLiteral => Some(SimplePrimary::StringLiteral(
+            parse_as_literal(cursor).unwrap(),
+        )),
         TokenKind::Null => Some(SimplePrimary::NullKeyword(
             cursor.next().unwrap().span.clone(),
         )),

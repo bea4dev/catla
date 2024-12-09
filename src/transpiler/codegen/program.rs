@@ -6,9 +6,11 @@ use catla_parser::parser::{
     AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp,
     CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression,
     MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
-    Program, SimplePrimary, Spanned, StatementAST,
+    Program, SimplePrimary, Spanned, StatementAST, TranspilerTag,
 };
-use fxhash::FxHashMap;
+use either::Either;
+use fxhash::{FxHashMap, FxHashSet};
+use regex::Regex;
 
 use crate::transpiler::{
     component::EntityID,
@@ -20,9 +22,13 @@ use crate::transpiler::{
         type_inference::{ImplicitConvertKind, TypeInferenceResultContainer},
         type_info::Type,
     },
+    TranspileError,
 };
 
-use super::{CodeBuilder, StackAllocCodeBuilder};
+use super::{
+    custom::rust_codegen::{rust_codegen_function, rust_codegen_user_type},
+    CodeBuilder, StackAllocCodeBuilder,
+};
 
 fn create_temp_var<'allocator>(
     code_builder: &mut CodeBuilder<'allocator>,
@@ -87,7 +93,73 @@ fn build_drop<'allocator>(
     code_builder.add(code);
 }
 
-pub fn codegen_program<'allocator>(
+pub const RUST_CODEGEN_TAG: &str = "rust_codegen";
+
+fn contains_rust_codegen_tag(tags: &Vec<&TranspilerTag, &Bump>) -> bool {
+    for tag in tags.iter() {
+        if let Ok(literal) = &tag.literal {
+            if literal.value == RUST_CODEGEN_TAG {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub(crate) fn add_auto_import<'allocator>(
+    code_builder: &mut CodeBuilder<'allocator>,
+    allocator: &'allocator Bump,
+    context: &TranspileModuleContext,
+) {
+    let mut module_element_map = FxHashMap::default();
+
+    for module_name in context.context.auto_import.auto_import_modules.iter() {
+        module_element_map.insert(module_name.clone(), FxHashSet::default());
+    }
+
+    for (element_name, module_name) in context.context.auto_import.auto_import_elements.iter() {
+        let set = module_element_map
+            .entry(module_name.clone())
+            .or_insert_with(|| FxHashSet::default());
+        set.insert(element_name.clone());
+    }
+
+    let regex = Regex::new(r"^std::").unwrap();
+
+    for (module_name, element_names) in module_element_map {
+        let replace = if context.module_name.starts_with("std::") {
+            "crate::"
+        } else {
+            "catla_std::"
+        };
+
+        let module_name = regex.replace(module_name.as_str(), replace).to_string();
+
+        if element_names.is_empty() {
+            let code = format!(
+                in allocator,
+                "use {};",
+                module_name,
+            );
+            code_builder.add(code);
+        } else {
+            let code = format!(
+                in allocator,
+                "use {}::{{{}}};",
+                module_name,
+                element_names.into_iter().collect::<Vec<_>>().join(", "),
+            );
+            code_builder.add(code);
+        }
+    }
+
+    code_builder.add(String::from_str_in(
+        "use catla_transpile_std::memory::CatlaRefObject;",
+        allocator,
+    ));
+}
+
+pub(crate) fn codegen_program<'allocator>(
     ast: Program,
     result_bind_var_name: Option<&str>,
     type_inference_result: &TypeInferenceResultContainer,
@@ -97,19 +169,18 @@ pub fn codegen_program<'allocator>(
     user_type_field_builder: Option<&mut CodeBuilder<'allocator>>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
-    code_builder: &mut CodeBuilder<'allocator>,
+    mut code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
+    errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext,
 ) {
+    let mut transpiler_tags = Vec::new_in(allocator);
+
     for statement in ast.statements.iter() {
         let statement = match statement {
             Ok(statement) => statement,
             Err(_) => continue,
         };
-
-        let mut top_stack_alloc_code_builder = code_builder.fork();
-        let mut top_stack_alloc_builder =
-            StackAllocCodeBuilder::new(&mut top_stack_alloc_code_builder);
 
         match statement {
             StatementAST::Assignment(assignment) => {
@@ -127,10 +198,11 @@ pub fn codegen_program<'allocator>(
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
-                    &mut top_stack_alloc_builder,
+                    top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
                     allocator,
+                    errors,
                     context,
                 );
 
@@ -142,26 +214,139 @@ pub fn codegen_program<'allocator>(
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
-                    &mut top_stack_alloc_builder,
+                    top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
                     allocator,
+                    errors,
                     context,
                 );
             }
             StatementAST::Exchange(exchange) => {}
             StatementAST::Import(import) => {}
             StatementAST::StatementAttributes(_) => { /* do nothing */ }
-            StatementAST::VariableDefine(variable_define) => todo!(),
-            StatementAST::FunctionDefine(function_define) => todo!(),
-            StatementAST::UserTypeDefine(user_type_define) => todo!(),
-            StatementAST::TypeDefine(type_define) => todo!(),
-            StatementAST::Implements(implements) => todo!(),
-            StatementAST::DropStatement(drop_statement) => todo!(),
-            StatementAST::Expression(_) => todo!(),
+            StatementAST::VariableDefine(variable_define) => {}
+            StatementAST::FunctionDefine(function_define) => {
+                if contains_rust_codegen_tag(&transpiler_tags) {
+                    rust_codegen_function(
+                        function_define,
+                        &transpiler_tags,
+                        result_bind_var_name,
+                        type_inference_result,
+                        lifetime_analyze_results,
+                        import_element_map,
+                        name_resolved_map,
+                        top_stack_alloc_builder,
+                        current_tree_alloc_builder,
+                        code_builder,
+                        allocator,
+                        errors,
+                        context,
+                    );
+                } else {
+                    // TODO : add arguments, return type, etc...
+                    let code = format!(
+                        in allocator,
+                        "pub fn {}() {{",
+                        function_define.name.as_ref().unwrap().value,
+                    );
+                    code_builder.add(code);
+
+                    if let Either::Right(block) =
+                        function_define.block_or_semicolon.value.as_ref().unwrap()
+                    {
+                        let parent_code_builder = &mut code_builder;
+                        let mut code_builder = parent_code_builder.fork();
+
+                        code_builder.push_indent();
+
+                        let mut stack_alloc_code_builder = code_builder.fork();
+                        let mut top_stack_alloc_builder =
+                            StackAllocCodeBuilder::new(&mut stack_alloc_code_builder);
+
+                        let mut current_tree_alloc_code_builder = code_builder.fork();
+                        let mut current_tree_alloc_builder =
+                            StackAllocCodeBuilder::new(&mut current_tree_alloc_code_builder);
+
+                        codegen_program(
+                            block.program,
+                            None,
+                            type_inference_result,
+                            lifetime_analyze_results,
+                            import_element_map,
+                            name_resolved_map,
+                            None,
+                            &mut top_stack_alloc_builder,
+                            &mut current_tree_alloc_builder,
+                            &mut code_builder,
+                            allocator,
+                            errors,
+                            context,
+                        );
+
+                        code_builder.pull(current_tree_alloc_code_builder);
+                        code_builder.pull(stack_alloc_code_builder);
+
+                        parent_code_builder.pull(code_builder);
+                    }
+
+                    code_builder.add(String::from_str_in("}", allocator));
+                }
+            }
+            StatementAST::UserTypeDefine(user_type_define) => {
+                if contains_rust_codegen_tag(&transpiler_tags) {
+                    rust_codegen_user_type(
+                        user_type_define,
+                        &transpiler_tags,
+                        result_bind_var_name,
+                        type_inference_result,
+                        lifetime_analyze_results,
+                        import_element_map,
+                        name_resolved_map,
+                        top_stack_alloc_builder,
+                        current_tree_alloc_builder,
+                        code_builder,
+                        allocator,
+                        errors,
+                        context,
+                    );
+                }
+            }
+            StatementAST::TypeDefine(type_define) => {}
+            StatementAST::Implements(implements) => {}
+            StatementAST::DropStatement(drop_statement) => {}
+            StatementAST::Expression(expression) => {
+                let mut current_tree_alloc_code_builder = code_builder.fork();
+                let mut current_tree_alloc_builder =
+                    StackAllocCodeBuilder::new(&mut current_tree_alloc_code_builder);
+
+                codegen_expression(
+                    expression,
+                    None,
+                    false,
+                    type_inference_result,
+                    lifetime_analyze_results,
+                    import_element_map,
+                    name_resolved_map,
+                    top_stack_alloc_builder,
+                    &mut current_tree_alloc_builder,
+                    code_builder,
+                    allocator,
+                    errors,
+                    context,
+                );
+
+                code_builder.pull(current_tree_alloc_code_builder);
+            }
+            StatementAST::TranspilerTag(transpiler_tag) => {
+                transpiler_tags.push(transpiler_tag);
+            }
         }
 
-        code_builder.pull(top_stack_alloc_code_builder);
+        if let StatementAST::TranspilerTag(_) = statement {
+        } else {
+            transpiler_tags.clear();
+        }
     }
 }
 
@@ -177,6 +362,7 @@ fn codegen_expression<'allocator>(
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
+    errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext,
 ) {
     let parent_result_bind_var_name = result_bind_var_name;
@@ -207,6 +393,7 @@ fn codegen_expression<'allocator>(
                 current_tree_alloc_builder,
                 code_builder,
                 allocator,
+                errors,
                 context,
             );
         }
@@ -235,6 +422,7 @@ fn codegen_expression<'allocator>(
                     current_tree_alloc_builder,
                     code_builder,
                     allocator,
+                    errors,
                     context,
                 );
             } else {
@@ -311,6 +499,7 @@ macro_rules! codegen_for_op2 {
             current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
             code_builder: &mut CodeBuilder<'allocator>,
             allocator: &'allocator Bump,
+            errors: &mut Vec<TranspileError>,
             context: &TranspileModuleContext,
         ) {
             if ast.right_exprs.is_empty() {
@@ -326,6 +515,7 @@ macro_rules! codegen_for_op2 {
                     current_tree_alloc_builder,
                     code_builder,
                     allocator,
+                    errors,
                     context,
                 );
             } else {
@@ -343,6 +533,7 @@ macro_rules! codegen_for_op2 {
                     current_tree_alloc_builder,
                     code_builder,
                     allocator,
+                    errors,
                     context,
                 );
 
@@ -365,6 +556,7 @@ macro_rules! codegen_for_op2 {
                         current_tree_alloc_builder,
                         code_builder,
                         allocator,
+                        errors,
                         context,
                     );
 
@@ -483,6 +675,7 @@ fn codegen_factor<'allocator>(
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
+    errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext,
 ) {
     // TODO : impl negative interface
@@ -500,6 +693,7 @@ fn codegen_factor<'allocator>(
             current_tree_alloc_builder,
             code_builder,
             allocator,
+            errors,
             context,
         );
     }
@@ -517,6 +711,7 @@ fn codegen_primary<'allocator>(
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
+    errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext,
 ) {
     let module_name_result =
@@ -567,6 +762,7 @@ fn codegen_primary<'allocator>(
                     current_tree_alloc_builder,
                     code_builder,
                     allocator,
+                    errors,
                     context,
                 );
 
@@ -669,7 +865,7 @@ fn codegen_primary<'allocator>(
 
         codegen_primary_left(
             &ast.left,
-            Some(result_temp.as_str()),
+            result_temp.as_str(),
             false,
             type_inference_result,
             lifetime_analyze_results,
@@ -679,6 +875,7 @@ fn codegen_primary<'allocator>(
             current_tree_alloc_builder,
             code_builder,
             allocator,
+            errors,
             context,
         );
 
@@ -714,10 +911,10 @@ fn codegen_primary<'allocator>(
 
                     let code = format!(
                         in allocator,
-                        "{} = {}.{}{}();",
+                        "{} = {}.{}_{}();",
                         &literal_value_temp,
-                        getter_name,
                         &last_result_temp_var,
+                        getter_name,
                         literal.value,
                     );
                     code_builder.add(code);
@@ -742,6 +939,7 @@ fn codegen_primary<'allocator>(
                     current_tree_alloc_builder,
                     code_builder,
                     allocator,
+                    errors,
                     context,
                 );
 
@@ -796,11 +994,8 @@ fn codegen_primary<'allocator>(
                 last_result_temp_var = result_temp;
                 last_entity_id = EntityID::from(function_call);
             } else {
-                let literal_value_temp = create_temp_var(
-                    code_builder,
-                    literal.span.clone(),
-                    EntityID::from(literal),
-                );
+                let literal_value_temp =
+                    create_temp_var(code_builder, literal.span.clone(), EntityID::from(literal));
 
                 let contains_static = lifetime_analyze_results
                     .get_result(EntityID::from(literal))
@@ -810,10 +1005,10 @@ fn codegen_primary<'allocator>(
 
                 let code = format!(
                     in allocator,
-                    "{} = {}.{}{}();",
+                    "{} = {}.{}_{}();",
                     &literal_value_temp,
-                    getter_name,
                     &last_result_temp_var,
+                    getter_name,
                     literal.value,
                 );
                 code_builder.add(code);
@@ -829,6 +1024,8 @@ fn codegen_primary<'allocator>(
                 last_entity_id = EntityID::from(literal);
             }
         }
+
+        current_primary_index += 1;
     }
 
     if let Some(result_bind_var_name) = result_bind_var_name {
@@ -861,6 +1058,7 @@ fn codegen_function_call_arguments<'allocator, 'ty>(
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
+    errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext,
 ) -> (
     Vec<String<'allocator>, &'allocator Bump>,
@@ -889,6 +1087,7 @@ fn codegen_function_call_arguments<'allocator, 'ty>(
                 current_tree_alloc_builder,
                 code_builder,
                 allocator,
+                errors,
                 context,
             );
 
@@ -907,7 +1106,7 @@ fn codegen_function_call_arguments<'allocator, 'ty>(
 
 fn codegen_primary_left<'allocator>(
     ast: &PrimaryLeft,
-    result_bind_var_name: Option<&str>,
+    result_bind_var_name: &str,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_analyze_results: &LifetimeAnalyzeResults,
@@ -917,6 +1116,7 @@ fn codegen_primary_left<'allocator>(
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
+    errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext,
 ) {
     match &ast.first_expr {
@@ -954,6 +1154,7 @@ fn codegen_primary_left<'allocator>(
                             current_tree_alloc_builder,
                             code_builder,
                             allocator,
+                            errors,
                             context,
                         );
 
@@ -969,43 +1170,93 @@ fn codegen_primary_left<'allocator>(
                     code_builder.add(code);
                 }
                 SimplePrimary::Identifier(literal) => {
-                    let resolved = name_resolved_map.get(&EntityID::from(literal)).unwrap();
+                    if let Some(resolved) = name_resolved_map.get(&EntityID::from(literal)) {
+                        let is_static_element = resolved.define_info.is_static_element
+                            || resolved.define_info.define_kind == DefineKind::Import;
 
-                    let is_static_element = resolved.define_info.is_static_element
-                        || resolved.define_info.define_kind == DefineKind::Import;
-
-                    let has_ref_count = if let Type::Function {
-                        function_info,
-                        generics: _,
-                    } =
-                        type_inference_result.get_entity_type(EntityID::from(literal))
-                    {
-                        if function_info.define_info.is_closure {
-                            true
+                        let has_ref_count = if let Type::Function {
+                            function_info,
+                            generics: _,
+                        } =
+                            type_inference_result.get_entity_type(EntityID::from(&ast.first_expr))
+                        {
+                            if function_info.define_info.is_closure {
+                                true
+                            } else {
+                                false
+                            }
                         } else {
-                            false
+                            is_static_element
+                        };
+
+                        if has_ref_count {
+                            let code = format!(
+                                in allocator,
+                                "{} = {}.get();",
+                                &simple_primary_result_temp,
+                                literal.value,
+                            );
+                            code_builder.add(code);
+                        } else {
+                            let code = format!(
+                                in allocator,
+                                "{} = {};",
+                                &simple_primary_result_temp,
+                                literal.value,
+                            );
+                            code_builder.add(code);
                         }
                     } else {
-                        is_static_element
-                    };
-
-                    if has_ref_count {
-                        let code = format!(
-                            in allocator,
-                            "{} = {}.get();",
-                            &simple_primary_result_temp,
-                            literal.value,
-                        );
-                        code_builder.add(code);
-                    } else {
-                        let code = format!(
-                            in allocator,
-                            "{} = {};",
-                            &simple_primary_result_temp,
-                            literal.value,
-                        );
-                        code_builder.add(code);
+                        if let Some(module_name) = context
+                            .context
+                            .auto_import
+                            .auto_import_elements
+                            .get(literal.value)
+                        {
+                            let code = format!(
+                                in allocator,
+                                "{} = {}::{};",
+                                &simple_primary_result_temp,
+                                module_name,
+                                literal.value,
+                            );
+                            code_builder.add(code);
+                        } else {
+                            let code = format!(
+                                in allocator,
+                                "{} = {};",
+                                &simple_primary_result_temp,
+                                literal.value,
+                            );
+                            code_builder.add(code);
+                        }
                     }
+                }
+                SimplePrimary::StringLiteral(literal) => {
+                    const STRING_TYPE: &str = "catla_transpile_std::rust_codegen::string::String";
+                    const LAZY_LOCK_TYPE: &str = "std::sync::LazyLock";
+
+                    let code = format!(
+                        in allocator,
+                        "static STRING_{}_{}: {}<&'static CatlaRefObject<{}>> = {}::new(|| {{ let str = {}::from_str({}); str.to_mutex(); str }});",
+                        literal.span.start,
+                        literal.span.end,
+                        LAZY_LOCK_TYPE,
+                        STRING_TYPE,
+                        LAZY_LOCK_TYPE,
+                        STRING_TYPE,
+                        literal.value,
+                    );
+                    code_builder.add(code);
+
+                    let code = format!(
+                        in allocator,
+                        "let str = &*STRING_{}_{}; str.clone_ref(); {} = str;",
+                        literal.span.start,
+                        literal.span.end,
+                        &simple_primary_result_temp,
+                    );
+                    code_builder.add(code);
                 }
                 SimplePrimary::NullKeyword(_) => {
                     let code = format!(
@@ -1039,14 +1290,83 @@ fn codegen_primary_left<'allocator>(
                     );
                     code_builder.add(code);
                 }
-                SimplePrimary::LargeThisKeyword(_) => {
-                    let code = format!(
-                        in allocator,
-                        "{} = This;",
-                        &simple_primary_result_temp,
-                    );
-                    code_builder.add(code);
+                SimplePrimary::LargeThisKeyword(_) => unreachable!(),
+            }
+
+            if let Some(function_call) = function_call {
+                let (argument_results, argument_drop_info) = codegen_function_call_arguments(
+                    function_call,
+                    type_inference_result,
+                    lifetime_analyze_results,
+                    import_element_map,
+                    name_resolved_map,
+                    top_stack_alloc_builder,
+                    current_tree_alloc_builder,
+                    code_builder,
+                    allocator,
+                    errors,
+                    context,
+                );
+
+                let result_temp = create_temp_var(
+                    code_builder,
+                    function_call.span.clone(),
+                    EntityID::from(function_call),
+                );
+
+                let mut arguments = String::new_in(allocator);
+                for argument_result in argument_results.iter() {
+                    arguments += argument_result.as_str();
+                    arguments += ", ";
                 }
+
+                let code = format!(
+                    in allocator,
+                    "{} = {}({});",
+                    &result_temp,
+                    &simple_primary_result_temp,
+                    arguments,
+                );
+                code_builder.add(code);
+
+                for (argument_expr_result, (ty, lifetime_analyze_result)) in
+                    argument_results.iter().zip(argument_drop_info.iter()).rev()
+                {
+                    build_drop(
+                        argument_expr_result.as_str(),
+                        *ty,
+                        lifetime_analyze_result.clone(),
+                        code_builder,
+                    );
+                }
+
+                if type_inference_result
+                    .get_entity_type(EntityID::from(simple_primary))
+                    .is_closure()
+                {
+                    build_drop(
+                        simple_primary_result_temp.as_str(),
+                        type_inference_result.get_entity_type(EntityID::from(simple_primary)),
+                        lifetime_analyze_results.get_result(EntityID::from(simple_primary)),
+                        code_builder,
+                    );
+                }
+
+                let code = format!(
+                    in allocator,
+                    "{} = {};",
+                    result_bind_var_name,
+                    &result_temp
+                );
+                code_builder.add(code);
+            } else {
+                let code = format!(
+                    in allocator,
+                    "{} = {};",
+                    result_bind_var_name,
+                    &simple_primary_result_temp
+                );
+                code_builder.add(code);
             }
         }
         PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {}

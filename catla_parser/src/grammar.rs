@@ -11,16 +11,20 @@ bnf_rules! {
 
     program             ::= [ statement ] { end_of_statement [ statement ] }
 
-    statement           ::= assignment
-                            | exchange_statement
-                            | import_statement
-                            | define_with_attr
-                            | drop_statement
-                            | expression
-                            | impl_interface
-                            | type_define
+    statement           ::= { transpiler_tag } (
+                                assignment
+                                | exchange_statement
+                                | import_statement
+                                | define_with_attr
+                                | drop_statement
+                                | expression
+                                | impl_interface
+                                | type_define
+                            )
 
     define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define )
+
+    transpiler_tag      ::= "#" "[" literal "]"
 
     function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments
                             [ function_type_tag ] [ line_feed ] [ where_clause ] ( block | ";" )
@@ -136,43 +140,26 @@ bnf_rules! {
     type_attribute      ::= "?" | ( "!" [ generics_info ] )
     generics_info       ::= "<" [ line_feed ] [ type_info [ line_feed ] ] { "," [ line_feed ] [ type_info [ line_feed ] ] } ">"
 
-    literal             ::= fn (literal_tokenizer) // r"\w+"
+    literal             ::= fn (literal_tokenizer) // \w+
     end_of_statement    ::= line_feed | ";"
-    line_feed           ::= fn (line_feed_tokenizer) // r"\n+"
+    line_feed           ::= fn (line_feed_tokenizer) // \n+
+
+    string_literal      ::= fn (string_literal_tokenizer) // ".*"
 }
 
 regex!(pub number_literal_regex r"^\d+(\.\d+)?$");
 
 #[allow(dead_code)]
-fn literal_tokenizer(source: &Vec<char>, mut current_position: usize) -> usize {
-    let mut iteration_count = 0;
-    loop {
-        let current_char = match source.get(current_position) {
-            Some(ch) => ch.clone(),
-            _ => break,
-        };
-        if !(current_char == '_' || current_char.is_alphanumeric()) {
-            break;
-        }
-        iteration_count += 1;
-        current_position += 1;
-    }
-    return iteration_count;
+fn literal_tokenizer(_: &Vec<char>, _: usize) -> usize {
+    unreachable!()
 }
 
 #[allow(dead_code)]
-fn line_feed_tokenizer(source: &Vec<char>, mut current_position: usize) -> usize {
-    let mut iteration_count = 0;
-    loop {
-        let current_char = match source.get(current_position) {
-            Some(ch) => ch.clone(),
-            _ => break,
-        };
-        if !(current_char == '\n' || current_char == '\r') {
-            break;
-        }
-        iteration_count += 1;
-        current_position += 1;
-    }
-    return iteration_count;
+fn line_feed_tokenizer(_: &Vec<char>, _: usize) -> usize {
+    unreachable!()
+}
+
+#[allow(dead_code)]
+fn string_literal_tokenizer(_: &Vec<char>, _: usize) -> usize {
+    unreachable!()
 }

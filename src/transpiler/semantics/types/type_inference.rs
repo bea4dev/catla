@@ -4630,7 +4630,7 @@ fn infer_type_primary_left<'input, 'allocator>(
                         let ty = if let Some(auto_import_module_name) =
                             context.context.auto_import.auto_import_elements.get(text)
                         {
-                            module_user_type_map
+                            module_element_type_maps
                                 .get(auto_import_module_name)
                                 .expect(
                                     format!(
@@ -4709,6 +4709,29 @@ fn infer_type_primary_left<'input, 'allocator>(
                             },
                         );
                     }
+                }
+                SimplePrimary::StringLiteral(literal) => {
+                    const STD_STRING_MODULE: &str = "std::string";
+                    const STD_STRING: &str = "String";
+
+                    let ty = module_user_type_map
+                        .get(STD_STRING_MODULE)
+                        .expect(
+                            format!("Not found auto import module : {}", STD_STRING_MODULE)
+                                .as_str(),
+                        )
+                        .get(STD_STRING)
+                        .expect(format!("Not found auto import element : {}", STD_STRING).as_str())
+                        .clone();
+
+                    type_environment.set_entity_type(
+                        EntityID::from(&simple.0),
+                        WithDefineInfo {
+                            value: ty,
+                            module_name: context.module_name.clone(),
+                            span: literal.span.clone(),
+                        },
+                    );
                 }
                 SimplePrimary::NullKeyword(null_keyword_span) => {
                     let generic_id = type_environment.new_local_generic_id(

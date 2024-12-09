@@ -2327,6 +2327,10 @@ fn collect_lifetime_simple_primary<'allocator>(
                 }
             }
         }
+        SimplePrimary::StringLiteral(_) => {
+            let ast_lifetime_tree = lifetime_scope.instance.get_lifetime_tree(ast_lifetime_ref);
+            ast_lifetime_tree.lifetimes.push(STATIC_LIFETIME);
+        }
         SimplePrimary::ThisKeyword(literal) => {
             let this_lifetime_ref = lifetime_scope.instance.this_argument_lifetime_ref;
 

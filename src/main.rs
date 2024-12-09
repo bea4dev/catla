@@ -46,10 +46,12 @@ fn main() {
     auto_import.add_module("std::operator::div");
     auto_import.add_module("std::compare::equal");
     auto_import.add_module("std::compare::order");
+    auto_import.add_module("std::string");
+    auto_import.add_element("print", "std::console");
 
     let context = TranspileContext::new(settings, auto_import, resource_provider);
 
-    transpile("test::test".to_string(), context.clone()).unwrap();
+    transpile("test::main".to_string(), context.clone()).unwrap();
 
     context.print_report();
 }

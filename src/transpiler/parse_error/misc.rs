@@ -98,6 +98,7 @@ pub(crate) enum Expected {
     ParenthesisRight,
     BraceLeft,
     BraceRight,
+    BracketRight,
     VariableName,
     FunctionName,
     FunctionArgument,
@@ -117,6 +118,7 @@ pub(crate) enum Expected {
     FieldAssign,
     This,
     Semicolon,
+    TagName,
 }
 
 impl Expected {
@@ -132,6 +134,7 @@ impl Expected {
                 Expected::ParenthesisRight => "parenthesis_right",
                 Expected::BraceLeft => "brace_left",
                 Expected::BraceRight => "brace_right",
+                Expected::BracketRight => "bracket_right",
                 Expected::VariableName => "variable_name",
                 Expected::FunctionName => "function_name",
                 Expected::FunctionArgument => "function_argument",
@@ -151,6 +154,7 @@ impl Expected {
                 Expected::FieldAssign => "field_assign",
                 Expected::This => "this",
                 Expected::Semicolon => "semicolon",
+                Expected::TagName => "tag_name",
             }
         );
     }
@@ -184,6 +188,7 @@ pub(crate) fn unexpected_token_error(
         Expected::ParenthesisRight => Some(")"),
         Expected::BraceLeft => Some("{"),
         Expected::BraceRight => Some("}"),
+        Expected::BracketRight => Some("]"),
         Expected::VariableName => Some("name_here"),
         Expected::FunctionName => Some("name_here"),
         Expected::FunctionArgument => None,
@@ -203,6 +208,7 @@ pub(crate) fn unexpected_token_error(
         Expected::FieldAssign => None,
         Expected::This => Some("this"),
         Expected::Semicolon => Some(";"),
+        Expected::TagName => Some("tag_name_here"),
     };
 
     if !unexpected_tokens.is_empty() {

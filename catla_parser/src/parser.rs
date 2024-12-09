@@ -139,6 +139,15 @@ pub enum StatementAST<'input, 'allocator> {
     Implements(Implements<'input, 'allocator>),
     DropStatement(DropStatement<'input, 'allocator>),
     Expression(Expression<'input, 'allocator>),
+    TranspilerTag(TranspilerTag<'input, 'allocator>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranspilerTag<'input, 'allocator> {
+    pub literal: LiteralResult<'input, 'allocator>,
+    pub error_tokens: Vec<Token<'input>, &'allocator Bump>,
+    pub bracket_right: ParseResult<'allocator, 'input, ()>,
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -605,6 +614,7 @@ pub enum SimplePrimary<'input, 'allocator> {
         span: Range<usize>,
     },
     Identifier(Literal<'input>),
+    StringLiteral(Literal<'input>),
     NullKeyword(Range<usize>),
     TrueKeyword(Range<usize>),
     FalseKeyword(Range<usize>),
@@ -621,6 +631,7 @@ impl SimplePrimary<'_, '_> {
                 span,
             } => span.clone(),
             SimplePrimary::Identifier(literal) => literal.span.clone(),
+            SimplePrimary::StringLiteral(literal) => literal.span.clone(),
             SimplePrimary::NullKeyword(span) => span.clone(),
             SimplePrimary::TrueKeyword(span) => span.clone(),
             SimplePrimary::FalseKeyword(span) => span.clone(),

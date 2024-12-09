@@ -6,6 +6,7 @@ use ariadne::Color;
 use async_recursion::async_recursion;
 use bumpalo::Bump;
 use catla_parser::parser::{parse_source, Spanned};
+use codegen::{cargo::generate_cargo_toml, codegen};
 use either::Either;
 use error::SimpleError;
 use fxhash::FxHashMap;
@@ -34,6 +35,7 @@ use self::{
 };
 
 pub mod advice;
+pub mod codegen;
 pub mod component;
 pub mod context;
 pub mod error;
@@ -43,7 +45,6 @@ pub mod optimizer;
 pub mod parse_error;
 pub mod resource;
 pub mod semantics;
-pub mod codegen;
 
 pub struct TranspileError(Box<dyn TranspileReport + Send>, AdviceReport);
 pub struct TranspileWarning(Box<dyn TranspileReport + Send>, AdviceReport);
@@ -115,7 +116,9 @@ pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> R
         if transpile_context.settings.optimization.lifetime_analyzer {
             let lifetime_evaluator = &transpile_context.lifetime_evaluator;
 
-            lifetime_evaluator.function_equals_info.build_function_equals_map();
+            lifetime_evaluator
+                .function_equals_info
+                .build_function_equals_map();
             lifetime_evaluator.eval(&transpile_context).await;
         }
 
@@ -131,6 +134,9 @@ pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> R
             .phase(TRANSPILE_PHASE_CODE_GEN)
             .future()
             .await;
+
+        // generate Cargo.toml
+        generate_cargo_toml(&transpile_context).unwrap();
     });
 
     Ok(())
@@ -165,6 +171,7 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
             &mut name_resolved_map,
             &mut errors,
             &mut warnings,
+            &module_context,
             &allocator,
         );
     }
@@ -400,11 +407,23 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         print_lifetime_debug_info(ast, &module_context);
     }
 
+    let lifetime_analyze_results = context
+        .lifetime_evaluator
+        .export_analyze_results(&module_context.module_name);
+
+    codegen(
+        ast,
+        &type_inference_results,
+        &lifetime_analyze_results,
+        &import_element_map,
+        &name_resolved_map,
+        &mut errors,
+        &module_context,
+    );
+
     module_context
         .context
         .add_error_and_warning(module_name, errors, warnings);
-
-    // TODO : Code gen
 
     module_context
         .context

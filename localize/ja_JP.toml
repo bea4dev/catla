@@ -6,6 +6,7 @@ import_elements = "ここではインポートする要素を指定すること�
 parenthesis_left = "'('が必要です"
 parenthesis_right = "括弧を')'で閉じる必要があります"
 brace_right = "括弧を'}'で閉じる必要があります"
+bracket_right = "括弧を']'で閉じる必要があります"
 variable_name = "'let'もしくは'var'の後には変数名が必要です"
 function_name = "'function'の後には関数名が必要です"
 function_argument = "ここでは関数の引数を定義することができます"
@@ -26,6 +27,7 @@ greater_than = "括弧を'>'で閉じる必要があります"
 field_assign = "フィールドの初期化式が必要です"
 this = "'let'もしくは'var'の後には'this'が必要です"
 semicolon = "';'が必要です"
+tag_name = "タグの名称を表すリテラルが必要です"
 
 [advice]
 message = "以下のように修正すると解決できるかもしれません"
@@ -347,3 +349,9 @@ label_1 = "ここでタプル型として変数束縛しようとしています
 [error.0080]
 message = "フィールドもしくはstatic変数上で構造化束縛は使用できません"
 label_0 = "ローカル変数上でのみ有効です"
+[error.0081]
+message = "トランスパイラタグの記述方法が正しくありません"
+label_0 = ""
+[error.0082]
+message = "トランスパイラタグ'%0'はユーザーコード内では使用できません"
+label_0 = "ここでは使用できません"

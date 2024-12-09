@@ -7,12 +7,21 @@ use std::{
 
 use allocator_api2::vec::Vec;
 use bumpalo::{collections::String, format, Bump};
+use catla_parser::parser::{Program, Spanned};
 use either::Either;
+use fxhash::FxHashMap;
+use program::{add_auto_import, codegen_program};
 
-use super::context::TranspileModuleContext;
+use super::{
+    component::EntityID, context::TranspileModuleContext, name_resolver::FoundDefineInfo,
+    optimizer::lifetime_analyzer::LifetimeAnalyzeResults,
+    semantics::types::type_inference::TypeInferenceResultContainer, TranspileError,
+};
 
+pub mod custom;
 pub mod program;
 pub mod user_type;
+pub mod cargo;
 
 const INDENT: &str = "    ";
 
@@ -63,10 +72,19 @@ impl<'allocator> CodeBuilder<'allocator> {
     }
 
     pub fn build(self, context: &TranspileModuleContext) -> io::Result<()> {
+        let entry_name = context.module_name.split("::").next().unwrap();
+
+        let out_entry_name = if entry_name == "std" {
+            "catla_std"
+        } else {
+            entry_name
+        };
+
         let path = std::format!(
-            "{}/src/{}.rs",
+            "{}/{}/src/{}.rs",
             &context.context.settings.codegen_dir,
-            context.module_name.replace("::", "/")
+            out_entry_name,
+            (&context.module_name[(entry_name.len() + 2)..]).replace("::", "/")
         );
 
         let dir = Path::new(path.as_str());
@@ -130,4 +148,38 @@ impl<'allocator> StackAllocCodeBuilder<'allocator> {
 
         name
     }
+}
+
+pub fn codegen(
+    ast: Program,
+    type_inference_result: &TypeInferenceResultContainer,
+    lifetime_analyze_results: &LifetimeAnalyzeResults,
+    import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
+    name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    errors: &mut Vec<TranspileError>,
+    context: &TranspileModuleContext,
+) {
+    let allocator = Bump::new();
+
+    let mut code_builder = CodeBuilder::new(&allocator);
+
+    add_auto_import(&mut code_builder, &allocator, context);
+
+    codegen_program(
+        ast,
+        None,
+        type_inference_result,
+        lifetime_analyze_results,
+        import_element_map,
+        name_resolved_map,
+        None,
+        &mut StackAllocCodeBuilder::new(&mut code_builder),
+        &mut StackAllocCodeBuilder::new(&mut code_builder),
+        &mut code_builder,
+        &allocator,
+        errors,
+        context,
+    );
+
+    code_builder.build(context).unwrap();
 }

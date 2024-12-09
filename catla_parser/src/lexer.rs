@@ -18,6 +18,7 @@ pub enum TokenKind {
     BraceRight,
     BracketLeft,
     BracketRight,
+    Hash,
     Class,
     Struct,
     Interface,
@@ -65,6 +66,7 @@ pub enum TokenKind {
     FatArrow,
     ThinArrow,
     Literal,
+    StringLiteral,
     Semicolon,
     LineFeed,
     Whitespace,
@@ -123,6 +125,7 @@ static TOKENIZERS: &[Tokenizer] = &[
     Tokenizer::Keyword(TokenKind::BraceRight, "}"),
     Tokenizer::Keyword(TokenKind::BracketLeft, "["),
     Tokenizer::Keyword(TokenKind::BracketRight, "]"),
+    Tokenizer::Keyword(TokenKind::Hash, "#"),
     Tokenizer::Keyword(TokenKind::Class, "class"),
     Tokenizer::Keyword(TokenKind::Struct, "struct"),
     Tokenizer::Keyword(TokenKind::Interface, "interface"),
@@ -169,6 +172,7 @@ static TOKENIZERS: &[Tokenizer] = &[
     Tokenizer::Keyword(TokenKind::FatArrow, "=>"),
     Tokenizer::Keyword(TokenKind::ThinArrow, "->"),
     Tokenizer::Functional(TokenKind::Literal, literal_tokenizer),
+    Tokenizer::Functional(TokenKind::StringLiteral, string_literal_tokenizer),
     Tokenizer::Keyword(TokenKind::Semicolon, ";"),
     Tokenizer::Keyword(TokenKind::LineFeed, "\r"),
     Tokenizer::Keyword(TokenKind::LineFeed, "\n"),
@@ -228,6 +232,31 @@ fn whitespace_tokenizer(current_input: &str) -> usize {
             break;
         }
         current_byte_length += current_char.len_utf8();
+    }
+
+    current_byte_length
+}
+
+fn string_literal_tokenizer(current_input: &str) -> usize {
+    let mut input_chars = current_input.chars();
+    let mut current_byte_length = 1;
+
+    match input_chars.next() {
+        Some('"') => {},
+        _ => return 0
+    }
+
+    loop {
+        let current_char = match input_chars.next() {
+            Some(c) => c,
+            _ => break,
+        };
+
+        current_byte_length += current_char.len_utf8();
+
+        if current_char == '"' {
+            break;
+        }
     }
 
     current_byte_length

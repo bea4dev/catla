@@ -163,6 +163,8 @@ impl AutoImport {
     pub fn add_element(&mut self, element_name: impl ToString, module_name: impl ToString) {
         let element_name = element_name.to_string();
 
+        self.add_module(module_name.to_string());
+
         if self.auto_import_elements.contains_key(&element_name) {
             panic!("duplicated element : {}", element_name);
         }

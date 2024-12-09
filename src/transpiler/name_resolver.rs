@@ -22,6 +22,7 @@ use crate::localize::localizer::LocalizedText;
 
 use super::{
     component::{ComponentContainer, EntityID},
+    context::TranspileModuleContext,
     error::{ErrorMessageKey, ErrorMessageType, TranspileReport},
     semantics::types::type_info::PRIMITIVE_TYPE_NAMES,
     TranspileError, TranspileWarning,
@@ -169,6 +170,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     let current_environment_id = EntityID::from(ast);
@@ -317,6 +319,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
 
@@ -328,6 +331,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -340,6 +344,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
 
@@ -351,6 +356,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -365,6 +371,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                             resolved_map,
                             errors,
                             warnings,
+                            context,
                             allocator,
                         );
                     }
@@ -378,6 +385,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -424,6 +432,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -436,6 +445,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -448,6 +458,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
 
@@ -467,6 +478,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -484,6 +496,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                             resolved_map,
                             errors,
                             warnings,
+                            context,
                             allocator,
                         );
                     }
@@ -507,6 +520,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -520,6 +534,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                             resolved_map,
                             errors,
                             warnings,
+                            context,
                             allocator,
                         );
                     }
@@ -533,6 +548,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -546,6 +562,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -568,6 +585,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -580,6 +598,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -602,6 +621,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -613,6 +633,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -624,6 +645,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -635,6 +657,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -648,6 +671,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -661,6 +685,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -673,6 +698,7 @@ pub(crate) fn name_resolve_program<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
             }
@@ -688,6 +714,7 @@ fn name_resolve_generics_define<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     for element in ast.elements.iter() {
@@ -708,6 +735,7 @@ fn name_resolve_generics_define<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -721,6 +749,7 @@ fn name_resolve_where_clause<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     for element in ast.elements.iter() {
@@ -731,6 +760,7 @@ fn name_resolve_where_clause<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
         for bound in element.bounds.iter() {
@@ -741,6 +771,7 @@ fn name_resolve_where_clause<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -754,6 +785,7 @@ fn name_resolve_expression<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     match ast {
@@ -765,6 +797,7 @@ fn name_resolve_expression<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
             for right_expr in or_expression.right_exprs.iter() {
@@ -776,6 +809,7 @@ fn name_resolve_expression<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -790,6 +824,7 @@ fn name_resolve_expression<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
             }
@@ -832,6 +867,7 @@ fn name_resolve_expression<'input, 'allocator>(
                                     resolved_map,
                                     errors,
                                     warnings,
+                                    context,
                                     allocator,
                                 );
                             }
@@ -863,6 +899,7 @@ fn name_resolve_expression<'input, 'allocator>(
                             resolved_map,
                             errors,
                             warnings,
+                            context,
                             allocator,
                         );
                     }
@@ -875,6 +912,7 @@ fn name_resolve_expression<'input, 'allocator>(
                             resolved_map,
                             errors,
                             warnings,
+                            context,
                             allocator,
                         );
                     }
@@ -921,6 +959,7 @@ fn name_resolve_block<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     let name_environment =
@@ -936,6 +975,7 @@ fn name_resolve_block<'input, 'allocator>(
         resolved_map,
         errors,
         warnings,
+        context,
         allocator,
     );
 }
@@ -947,6 +987,7 @@ fn name_resolve_and_expression<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     name_resolve_compare_expression(
@@ -956,6 +997,7 @@ fn name_resolve_and_expression<'input, 'allocator>(
         resolved_map,
         errors,
         warnings,
+        context,
         allocator,
     );
     for right_expr in ast.right_exprs.iter() {
@@ -967,6 +1009,7 @@ fn name_resolve_and_expression<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -980,6 +1023,7 @@ fn name_resolve_compare_expression<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     name_resolve_add_or_sub_expression(
@@ -989,6 +1033,7 @@ fn name_resolve_compare_expression<'input, 'allocator>(
         resolved_map,
         errors,
         warnings,
+        context,
         allocator,
     );
     for right_expr in ast.right_exprs.iter() {
@@ -1000,6 +1045,7 @@ fn name_resolve_compare_expression<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -1013,6 +1059,7 @@ fn name_resolve_add_or_sub_expression<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     name_resolve_mul_or_div_expression(
@@ -1022,6 +1069,7 @@ fn name_resolve_add_or_sub_expression<'input, 'allocator>(
         resolved_map,
         errors,
         warnings,
+        context,
         allocator,
     );
     for right_expr in ast.right_exprs.iter() {
@@ -1033,6 +1081,7 @@ fn name_resolve_add_or_sub_expression<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -1046,6 +1095,7 @@ fn name_resolve_mul_or_div_expression<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     name_resolve_factor(
@@ -1055,6 +1105,7 @@ fn name_resolve_mul_or_div_expression<'input, 'allocator>(
         resolved_map,
         errors,
         warnings,
+        context,
         allocator,
     );
     for right_expr in ast.right_exprs.iter() {
@@ -1066,6 +1117,7 @@ fn name_resolve_mul_or_div_expression<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -1079,6 +1131,7 @@ fn name_resolve_factor<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     if let Ok(primary) = &ast.primary {
@@ -1089,6 +1142,7 @@ fn name_resolve_factor<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
     }
@@ -1101,6 +1155,7 @@ fn name_resolve_primary<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     name_resolve_primary_left(
@@ -1110,6 +1165,7 @@ fn name_resolve_primary<'input, 'allocator>(
         resolved_map,
         errors,
         warnings,
+        context,
         allocator,
     );
 
@@ -1125,6 +1181,7 @@ fn name_resolve_primary<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
     }
@@ -1133,14 +1190,21 @@ fn name_resolve_primary<'input, 'allocator>(
         let collect_error = !(ast.left.mapping_operator.is_none() && has_double_colon);
 
         if let SimplePrimary::Identifier(literal) = &simple.0 {
-            name_resolve_literal(
-                literal,
-                collect_error,
-                environment_id,
-                name_environments,
-                resolved_map,
-                errors,
-            );
+            if !context
+                .context
+                .auto_import
+                .auto_import_elements
+                .contains_key(literal.value)
+            {
+                name_resolve_literal(
+                    literal,
+                    collect_error,
+                    environment_id,
+                    name_environments,
+                    resolved_map,
+                    errors,
+                );
+            }
         }
     }
 }
@@ -1152,6 +1216,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     match &ast.first_expr {
@@ -1170,6 +1235,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                             resolved_map,
                             errors,
                             warnings,
+                            context,
                             allocator,
                         );
                     }
@@ -1185,6 +1251,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -1197,6 +1264,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
             }
@@ -1210,6 +1278,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
             }
@@ -1221,6 +1290,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
             }
@@ -1235,6 +1305,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                         resolved_map,
                         errors,
                         warnings,
+                        context,
                         allocator,
                     );
                 }
@@ -1263,6 +1334,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                             resolved_map,
                             errors,
                             warnings,
+                            context,
                             allocator,
                         );
                     }
@@ -1288,6 +1360,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
             }
@@ -1300,6 +1373,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
             }
@@ -1329,6 +1403,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                                     resolved_map,
                                     errors,
                                     warnings,
+                                    context,
                                     allocator,
                                 );
                             }
@@ -1341,6 +1416,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                                     resolved_map,
                                     errors,
                                     warnings,
+                                    context,
                                     allocator,
                                 );
                             }
@@ -1354,6 +1430,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                                 resolved_map,
                                 errors,
                                 warnings,
+                                context,
                                 allocator,
                             );
                         }
@@ -1371,6 +1448,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
             }
@@ -1385,6 +1463,7 @@ fn name_resolve_primary_left<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
     }
@@ -1397,6 +1476,7 @@ fn name_resolve_mapping_operator<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     let block = match ast {
@@ -1413,6 +1493,7 @@ fn name_resolve_mapping_operator<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
     }
@@ -1425,6 +1506,7 @@ fn name_resolve_primary_right<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     if let Some(second_expr) = &ast.second_expr {
@@ -1437,6 +1519,7 @@ fn name_resolve_primary_right<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
             }
@@ -1449,6 +1532,7 @@ fn name_resolve_primary_right<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -1461,6 +1545,7 @@ fn name_resolve_primary_right<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
     }
@@ -1473,6 +1558,7 @@ fn name_resolve_function_call<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     if let Ok(arg_exprs) = &ast.arg_exprs {
@@ -1484,6 +1570,7 @@ fn name_resolve_function_call<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -1497,6 +1584,7 @@ fn name_resolve_generics<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     for type_info in ast.elements.iter() {
@@ -1507,6 +1595,7 @@ fn name_resolve_generics<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
     }
@@ -1519,6 +1608,7 @@ fn name_resolve_type_tag<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     if let Ok(type_info) = &ast.type_info {
@@ -1529,6 +1619,7 @@ fn name_resolve_type_tag<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
     }
@@ -1541,6 +1632,7 @@ fn name_resolve_type_info<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     match ast {
@@ -1552,6 +1644,7 @@ fn name_resolve_type_info<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -1563,6 +1656,7 @@ fn name_resolve_type_info<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -1574,6 +1668,7 @@ fn name_resolve_type_info<'input, 'allocator>(
                 resolved_map,
                 errors,
                 warnings,
+                context,
                 allocator,
             );
         }
@@ -1587,6 +1682,7 @@ fn name_resolve_tuple_type_info<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     for type_info in ast.types.iter() {
@@ -1597,6 +1693,7 @@ fn name_resolve_tuple_type_info<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
     }
@@ -1609,6 +1706,7 @@ fn name_resolve_array_type_info<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     if let Ok(type_info) = ast.type_info {
@@ -1619,6 +1717,7 @@ fn name_resolve_array_type_info<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
     }
@@ -1631,6 +1730,7 @@ fn name_resolve_base_type_info<'input, 'allocator>(
     resolved_map: &mut FxHashMap<EntityID, FoundDefineInfo>,
     errors: &mut Vec<TranspileError>,
     warnings: &mut Vec<TranspileWarning>,
+    context: &TranspileModuleContext,
     allocator: &'allocator Bump,
 ) {
     if ast.path.len() >= 1 {
@@ -1654,6 +1754,7 @@ fn name_resolve_base_type_info<'input, 'allocator>(
             resolved_map,
             errors,
             warnings,
+            context,
             allocator,
         );
     }
@@ -1668,6 +1769,7 @@ fn name_resolve_base_type_info<'input, 'allocator>(
                     resolved_map,
                     errors,
                     warnings,
+                    context,
                     allocator,
                 );
             }

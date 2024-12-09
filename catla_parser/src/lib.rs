@@ -9,7 +9,8 @@ fn test() {
 
     let source = 
 "
-let (value1, value2): (int, float) = (100, 100.0)
+#[rust_codegen]
+function print(String str);
 ";
 
     let allocator = Bump::new();

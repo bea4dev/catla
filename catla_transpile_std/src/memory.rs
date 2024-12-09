@@ -11,7 +11,7 @@ pub struct CatlaRefObject<T: CatlaDrop> {
     ref_count: UnsafeCell<usize>,
     spin_lock_flag: AtomicBool,
     is_mutex: UnsafeCell<bool>,
-    value: T,
+    pub value: T,
 }
 
 unsafe impl<T: CatlaDrop> Send for CatlaRefObject<T> {}
@@ -102,5 +102,10 @@ impl<T: CatlaDrop> CatlaRefObject<T> {
     #[inline(always)]
     pub fn unlock(&self) {
         self.spin_lock_flag.store(false, Ordering::Release);
+    }
+
+    #[inline(always)]
+    pub fn to_mutex(&self) {
+        unsafe { *self.is_mutex.get() = true; }
     }
 }

@@ -1,7 +1,7 @@
 use std::ops::Range;
 
-use allocator_api2::vec::Vec;
 use allocator_api2::vec;
+use allocator_api2::vec::Vec;
 use bumpalo::Bump;
 use catla_parser::{
     lexer::Token,
@@ -10,8 +10,8 @@ use catla_parser::{
         CompareExpression, Expression, ExpressionEnum, Factor, FieldAssign, FunctionCall, Generics,
         GenericsDefine, IfStatement, MappingOperatorKind, MulOrDivExpression, ParseResult, Primary,
         PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, Recovered, SimplePrimary,
-        StatementAST, TupleTypeInfo, TypeAttributeEnum, TypeInfo, TypeTag, WhereClause,
-        WhereElement,
+        StatementAST, TranspilerTag, TupleTypeInfo, TypeAttributeEnum, TypeInfo, TypeTag,
+        WhereClause, WhereElement,
     },
 };
 use either::Either::{self, Left, Right};
@@ -304,6 +304,9 @@ pub fn collect_parse_error_program(
             StatementAST::Expression(expression) => {
                 collect_parse_error_expression(expression, errors, warnings, context);
             }
+            StatementAST::TranspilerTag(transpiler_tag) => {
+                collect_parse_error_transpiler_tag(transpiler_tag, errors, context);
+            }
         }
     }
 
@@ -317,6 +320,34 @@ pub fn collect_parse_error_program(
         0002,
         context,
     ));
+}
+
+fn collect_parse_error_transpiler_tag(
+    ast: &TranspilerTag,
+    errors: &mut Vec<TranspileError>,
+    context: &TranspileModuleContext,
+) {
+    collect_parse_error_only_parse_result_error(
+        &ast.literal,
+        Expected::TagName,
+        0081,
+        errors,
+        context,
+    );
+    collect_error_tokens(
+        &ast.error_tokens,
+        Expected::BracketRight,
+        0081,
+        errors,
+        context,
+    );
+    collect_parse_error_only_parse_result_error(
+        &ast.bracket_right,
+        Expected::BracketRight,
+        0081,
+        errors,
+        context,
+    );
 }
 
 fn collect_parse_error_block_or_semicolon(

@@ -1,8 +1,8 @@
-use std::path::Path;
+use std::{env::{current_dir, set_current_dir, set_var}, path::Path, process::Command};
 
 use transpiler::{
     context::{AutoImport, OptimizationSettings},
-    resource::DefaultSourceCodeProvider,
+    resource::SourceCodeProvider,
 };
 
 use crate::transpiler::{
@@ -31,7 +31,7 @@ fn main() {
         codegen_dir: "./.catla".to_string()
     };
 
-    let mut resource_provider = DefaultSourceCodeProvider::new();
+    let mut resource_provider = SourceCodeProvider::new();
     resource_provider
         .add_entry("std".to_string(), &Path::new("./std/src"))
         .unwrap();
@@ -54,4 +54,8 @@ fn main() {
     transpile("test::main".to_string(), context.clone()).unwrap();
 
     context.print_report();
+
+    set_current_dir(Path::new(".catla/test")).unwrap();
+    set_var("RUSTFLAGS", "-Awarnings");
+    Command::new("cargo").arg("run").spawn().unwrap();
 }

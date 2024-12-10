@@ -41,7 +41,7 @@ impl CustomCodeGenerator<UserTypeDefine<'_, '_>> for StringCodeGenerator {
         match name {
             "String" => {
                 code_builder.add(String::from_str_in(
-                    "pub type String = catla_transpile_std::string::String;",
+                    "pub type String = catla_transpile_std::rust_codegen::string::String;",
                     allocator,
                 ));
             }

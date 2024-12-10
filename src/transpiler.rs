@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fs, path::Path, sync::Arc};
 
 use allocator_api2::vec;
 use allocator_api2::vec::Vec;
@@ -6,7 +6,7 @@ use ariadne::Color;
 use async_recursion::async_recursion;
 use bumpalo::Bump;
 use catla_parser::parser::{parse_source, Spanned};
-use codegen::{cargo::generate_cargo_toml, codegen};
+use codegen::{cargo::generate_cargo_toml, codegen, codegen_dir_modules};
 use either::Either;
 use error::SimpleError;
 use fxhash::FxHashMap;
@@ -101,6 +101,12 @@ pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> R
     let transpile_context = context.clone();
 
     context.future_runtime.block_on(async move {
+        // remove codegen dir
+        let dir = Path::new(&transpile_context.settings.codegen_dir);
+        if dir.exists() {
+            fs::remove_dir_all(dir).unwrap();
+        }
+
         transpile_context.future_runtime.spawn(async {
             transpile_module(entry_module_name, module_context).await;
         });
@@ -134,6 +140,9 @@ pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> R
             .phase(TRANSPILE_PHASE_CODE_GEN)
             .future()
             .await;
+
+        // add "pub crate ..;"
+        codegen_dir_modules(&transpile_context).unwrap();
 
         // generate Cargo.toml
         generate_cargo_toml(&transpile_context).unwrap();

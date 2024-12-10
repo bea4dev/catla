@@ -21,7 +21,7 @@ pub struct TranspileContext {
     pub settings: TranspileSettings,
     pub(crate) localized_text: LocalizedText,
     pub(crate) auto_import: AutoImport,
-    pub source_code_provider: Box<dyn SourceCodeProvider + Send + Sync>,
+    pub source_code_provider: SourceCodeProvider,
     pub module_context_map: Mutex<HashMap<String, Arc<TranspileModuleContext>>>,
     pub lifetime_evaluator: Arc<LifetimeEvaluator>,
     error_and_warnings: Mutex<HashMap<String, (Vec<TranspileError>, Vec<TranspileWarning>)>>,
@@ -34,7 +34,7 @@ impl TranspileContext {
     pub fn new(
         settings: TranspileSettings,
         auto_import: AutoImport,
-        source_code_provider: impl SourceCodeProvider + Send + Sync + 'static,
+        source_code_provider: SourceCodeProvider,
     ) -> Arc<TranspileContext> {
         let localized_text = LocalizedText::new(&settings.lang);
         let future_runtime = Builder::new_multi_thread()
@@ -47,7 +47,7 @@ impl TranspileContext {
             settings,
             localized_text,
             auto_import,
-            source_code_provider: Box::new(source_code_provider),
+            source_code_provider,
             module_context_map: Mutex::new(HashMap::new()),
             lifetime_evaluator: Arc::new(LifetimeEvaluator::new()),
             error_and_warnings: Mutex::new(HashMap::new()),

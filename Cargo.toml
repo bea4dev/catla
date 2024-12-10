@@ -5,6 +5,7 @@ edition = "2021"
 
 [workspace]
 members = ["catla_parser", "catla_transpile_std"]
+exclude = [ ".catla" ]
 
 [dependencies]
 catla_parser = { path = "./catla_parser", version = "0.1.0" }

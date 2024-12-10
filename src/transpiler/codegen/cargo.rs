@@ -31,7 +31,9 @@ pub fn generate_cargo_toml(context: &TranspileContext) -> io::Result<()> {
         //file.write_all("members = [ \"catla_std\", \"catla_transpile_std\" ]\n\n".as_bytes())?;
 
         file.write_all("[dependencies]\n".as_bytes())?;
-        file.write_all("catla_std = { path = \"../catla_std\" }\n".as_bytes())?;
+        if entry.as_str() != "catla_std" {
+            file.write_all("catla_std = { path = \"../catla_std\" }\n".as_bytes())?;
+        }
         file.write_all(
             "catla_transpile_std = { path = \"../../catla_transpile_std\" }\n".as_bytes(),
         )?;

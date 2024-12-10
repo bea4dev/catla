@@ -8,33 +8,22 @@ use fxhash::{FxHashMap, FxHashSet};
 
 use super::SourceCode;
 
-pub trait SourceCodeProvider {
-    fn get_source_code(
-        &self,
-        module_name: &str,
-    ) -> Option<Arc<Result<Arc<SourceCode>, std::io::Error>>>;
-
-    fn get_source_code_path(&self, module_name: &str) -> String;
-
-    fn exists_source_code_or_package(&self, module_name: &str) -> bool;
-
-    fn get_entries(&self) -> FxHashSet<String>;
-}
-
-pub struct DefaultSourceCodeProvider {
+pub struct SourceCodeProvider {
     entries: FxHashSet<String>,
     entry_rename_map: FxHashMap<String, String>,
     path_map: FxHashMap<String, Box<Path>>,
     code_map: FxHashMap<String, Mutex<Option<Arc<Result<Arc<SourceCode>, std::io::Error>>>>>,
+    dir_modules: FxHashSet<String>,
 }
 
-impl DefaultSourceCodeProvider {
+impl SourceCodeProvider {
     pub fn new() -> Self {
         Self {
             entries: Default::default(),
             entry_rename_map: Default::default(),
             path_map: Default::default(),
             code_map: Default::default(),
+            dir_modules: FxHashSet::default(),
         }
     }
 
@@ -59,7 +48,11 @@ impl DefaultSourceCodeProvider {
         Ok(())
     }
 
-    fn search_source_code(&mut self, current_module_name: &str, path: &Path) -> Result<(), String> {
+    pub fn search_source_code(
+        &mut self,
+        current_module_name: &str,
+        path: &Path,
+    ) -> Result<(), String> {
         if !path.is_dir() {
             return Ok(());
         }
@@ -83,6 +76,8 @@ impl DefaultSourceCodeProvider {
 
             if path.is_dir() {
                 self.search_source_code(&current_module_name, &path)?;
+
+                self.dir_modules.insert(current_module_name.clone());
             } else {
                 let extension = path.extension().unwrap().to_str();
                 if extension.is_none() || extension.unwrap() != "catla" {
@@ -98,10 +93,8 @@ impl DefaultSourceCodeProvider {
 
         Ok(())
     }
-}
 
-impl SourceCodeProvider for DefaultSourceCodeProvider {
-    fn get_source_code(
+    pub fn get_source_code(
         &self,
         module_name: &str,
     ) -> Option<Arc<Result<Arc<SourceCode>, std::io::Error>>> {
@@ -127,7 +120,7 @@ impl SourceCodeProvider for DefaultSourceCodeProvider {
         Some(source_code)
     }
 
-    fn get_source_code_path(&self, module_name: &str) -> String {
+    pub fn get_source_code_path(&self, module_name: &str) -> String {
         let (entry_name, latter) = match module_name.split_once("::") {
             Some(result) => result,
             None => return self.entry_rename_map.get(module_name).unwrap().clone(),
@@ -141,12 +134,19 @@ impl SourceCodeProvider for DefaultSourceCodeProvider {
         )
     }
 
-    fn exists_source_code_or_package(&self, module_name: &str) -> bool {
+    pub fn exists_source_code_or_package(&self, module_name: &str) -> bool {
         self.path_map.contains_key(module_name)
     }
 
-    fn get_entries(&self) -> FxHashSet<String> {
+    pub fn get_entries(&self) -> FxHashSet<String> {
         self.entries.clone()
     }
-}
 
+    pub fn get_dir_modules(&self) -> FxHashSet<String> {
+        self.dir_modules.clone()
+    }
+
+    pub fn get_all_modules(&self) -> FxHashSet<String> {
+        self.path_map.keys().cloned().collect()
+    }
+}

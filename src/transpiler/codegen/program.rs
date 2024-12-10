@@ -6,7 +6,7 @@ use catla_parser::parser::{
     AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp,
     CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression,
     MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
-    Program, SimplePrimary, Spanned, StatementAST, TranspilerTag,
+    Program, SimplePrimary, Spanned, StatementAST, TranspilerTag, VariableBinding,
 };
 use either::Either;
 use fxhash::{FxHashMap, FxHashSet};
@@ -107,10 +107,64 @@ fn contains_rust_codegen_tag(tags: &Vec<&TranspilerTag, &Bump>) -> bool {
 }
 
 pub(crate) fn add_auto_import<'allocator>(
+    ast: Program,
     code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
 ) {
+    let mut user_define_names = FxHashSet::default();
+
+    for statement in ast.statements.iter() {
+        let statement = match statement {
+            Ok(statement) => statement,
+            Err(_) => continue,
+        };
+
+        match statement {
+            StatementAST::Import(import) => {
+                user_define_names
+                    .extend(import.elements.elements.iter().map(|element| element.value));
+            }
+            StatementAST::VariableDefine(variable_define) => {
+                fn collect_name<'a>(
+                    binding: &'a VariableBinding,
+                    user_define_names: &mut FxHashSet<&'a str>,
+                ) {
+                    match &binding.binding {
+                        Either::Left(literal) => {
+                            user_define_names.insert(literal.value);
+                        }
+                        Either::Right(bindings) => {
+                            for binding in bindings.iter() {
+                                collect_name(binding, user_define_names);
+                            }
+                        }
+                    }
+                }
+
+                if let Ok(binding) = &variable_define.binding {
+                    collect_name(binding, &mut user_define_names);
+                }
+            }
+            StatementAST::FunctionDefine(function_define) => {
+                if let Ok(name) = &function_define.name {
+                    user_define_names.insert(name.value);
+                }
+            }
+            StatementAST::UserTypeDefine(user_type_define) => {
+                if let Ok(name) = &user_type_define.name {
+                    user_define_names.insert(name.value);
+                }
+            }
+            StatementAST::TypeDefine(type_define) => {
+                if let Ok(name) = &type_define.name {
+                    user_define_names.insert(name.value);
+                }
+            }
+            _ => {}
+        }
+    }
+
     let mut module_element_map = FxHashMap::default();
 
     for module_name in context.context.auto_import.auto_import_modules.iter() {
@@ -136,18 +190,26 @@ pub(crate) fn add_auto_import<'allocator>(
         let module_name = regex.replace(module_name.as_str(), replace).to_string();
 
         if element_names.is_empty() {
-            let code = format!(
-                in allocator,
-                "use {};",
-                module_name,
-            );
-            code_builder.add(code);
+            let module_name_last = module_name.split("::").last().unwrap();
+
+            if !user_define_names.contains(module_name_last) {
+                let code = format!(
+                    in allocator,
+                    "use {};",
+                    module_name,
+                );
+                code_builder.add(code);
+            }
         } else {
             let code = format!(
                 in allocator,
                 "use {}::{{{}}};",
                 module_name,
-                element_names.into_iter().collect::<Vec<_>>().join(", "),
+                element_names
+                    .into_iter()
+                    .filter(|name| !user_define_names.contains(name.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(", "),
             );
             code_builder.add(code);
         }
@@ -155,6 +217,10 @@ pub(crate) fn add_auto_import<'allocator>(
 
     code_builder.add(String::from_str_in(
         "use catla_transpile_std::memory::CatlaRefObject;",
+        allocator,
+    ));
+    code_builder.add(String::from_str_in(
+        "use catla_transpile_std::memory::CatlaRefManagement;",
         allocator,
     ));
 }
@@ -366,15 +432,16 @@ fn codegen_expression<'allocator>(
     context: &TranspileModuleContext,
 ) {
     let parent_result_bind_var_name = result_bind_var_name;
-
-    let expr_temp_var_name = create_temp_var_with_name(
-        code_builder,
-        ast.get_span(),
-        EntityID::from(ast),
-        "for_convert",
-    );
+ 
     let result_bind_var_name = if parent_result_bind_var_name.is_some() {
-        Some(expr_temp_var_name.as_str())
+        let expr_temp_var_name = create_temp_var_with_name(
+            code_builder,
+            ast.get_span(),
+            EntityID::from(ast),
+            "for_convert",
+        );
+
+        Some(expr_temp_var_name)
     } else {
         None
     };
@@ -383,7 +450,7 @@ fn codegen_expression<'allocator>(
         ExpressionEnum::OrExpression(or_expression) => {
             codegen_or_expression(
                 or_expression,
-                result_bind_var_name,
+                result_bind_var_name.as_ref().map(|str| str.as_str()),
                 as_assign_left,
                 type_inference_result,
                 lifetime_analyze_results,
@@ -398,7 +465,7 @@ fn codegen_expression<'allocator>(
             );
         }
         ExpressionEnum::ReturnExpression(return_expression) => {
-            if let Some(result_bind_var_name) = result_bind_var_name {
+            if let Some(result_bind_var_name) = &result_bind_var_name {
                 code_builder
                     .add(format!(in allocator, "{} = unreachable!();", result_bind_var_name));
             }
@@ -426,7 +493,7 @@ fn codegen_expression<'allocator>(
                     context,
                 );
             } else {
-                code_builder.add(format!(in allocator, "{} = ()", &temp_var_name));
+                code_builder.add(format!(in allocator, "{} = ();", &temp_var_name));
             }
 
             code_builder.add(format!(in allocator, "return {};", &temp_var_name));
@@ -435,7 +502,7 @@ fn codegen_expression<'allocator>(
     }
 
     // implicit convert
-    if let Some(result_bind_var_name) = result_bind_var_name {
+    if let Some(result_bind_var_name) = &result_bind_var_name {
         if let Some(convert) = type_inference_result
             .implicit_convert_map
             .get(&EntityID::from(ast))
@@ -470,7 +537,7 @@ fn codegen_expression<'allocator>(
         } else {
             let code = format!(
                 in allocator,
-                "{} = {}",
+                "{} = {};",
                 parent_result_bind_var_name.unwrap(),
                 result_bind_var_name
             );
@@ -1213,6 +1280,12 @@ fn codegen_primary_left<'allocator>(
                             .auto_import_elements
                             .get(literal.value)
                         {
+                            let module_name = if module_name.starts_with("std::") {
+                                module_name.replace("std::", "catla_std::")
+                            } else {
+                                module_name.clone()
+                            };
+
                             let code = format!(
                                 in allocator,
                                 "{} = {}::{};",

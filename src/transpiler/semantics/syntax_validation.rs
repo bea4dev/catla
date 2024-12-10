@@ -58,7 +58,7 @@ pub(crate) fn validate_syntax_program(
                 StatementAST::Implements(implements) => (true, implements.span.clone()),
                 StatementAST::DropStatement(drop_statement) => (false, drop_statement.span.clone()),
                 StatementAST::Expression(expression) => (false, get_expression_span(expression)),
-                StatementAST::TranspilerTag(transpiler_tag) => continue,
+                StatementAST::TranspilerTag(_) => continue,
             };
 
             if !is_valid {

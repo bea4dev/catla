@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::{self, Write},
     ops::Range,
     path::Path,
@@ -9,19 +9,22 @@ use allocator_api2::vec::Vec;
 use bumpalo::{collections::String, format, Bump};
 use catla_parser::parser::{Program, Spanned};
 use either::Either;
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use program::{add_auto_import, codegen_program};
 
 use super::{
-    component::EntityID, context::TranspileModuleContext, name_resolver::FoundDefineInfo,
+    component::EntityID,
+    context::{TranspileContext, TranspileModuleContext},
+    name_resolver::FoundDefineInfo,
     optimizer::lifetime_analyzer::LifetimeAnalyzeResults,
-    semantics::types::type_inference::TypeInferenceResultContainer, TranspileError,
+    semantics::types::type_inference::TypeInferenceResultContainer,
+    TranspileError,
 };
 
+pub mod cargo;
 pub mod custom;
 pub mod program;
 pub mod user_type;
-pub mod cargo;
 
 const INDENT: &str = "    ";
 
@@ -150,6 +153,108 @@ impl<'allocator> StackAllocCodeBuilder<'allocator> {
     }
 }
 
+pub fn codegen_dir_modules(context: &TranspileContext) -> io::Result<()> {
+    let all_modules = context.source_code_provider.get_all_modules();
+    let dir_modules = context.source_code_provider.get_dir_modules();
+
+    for dir_module in dir_modules.iter() {
+        let entry_name = dir_module.split("::").next().unwrap();
+
+        let out_entry_name = if entry_name == "std" {
+            "catla_std"
+        } else {
+            entry_name
+        };
+
+        let path = std::format!(
+            "{}/{}/src/{}.rs",
+            &context.settings.codegen_dir,
+            out_entry_name,
+            (&dir_module[(entry_name.len() + 2)..]).replace("::", "/")
+        );
+
+        let dir = Path::new(path.as_str());
+
+        fs::create_dir_all(dir.parent().unwrap())?;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open(path)?;
+
+        for module in all_modules.iter() {
+            if !module.starts_with(dir_module) {
+                continue;
+            }
+
+            let right_name = &module[(dir_module.len() + 2)..];
+
+            if right_name.contains("::") {
+                continue;
+            }
+
+            file.write_all(std::format!("pub mod {};", right_name).as_bytes())?;
+        }
+    }
+
+    let entries = context.source_code_provider.get_entries();
+
+    for entry in entries.iter() {
+        let out_entry_name = if entry.as_str() == "std" {
+            "catla_std"
+        } else {
+            entry.as_str()
+        };
+
+        for crate_entry in ["main", "lib"] {
+            let path = std::format!(
+                "{}/{}/src/{}.rs",
+                &context.settings.codegen_dir,
+                out_entry_name,
+                crate_entry
+            );
+
+            let dir = Path::new(path.as_str());
+
+            fs::create_dir_all(dir.parent().unwrap())?;
+
+            let mut file = OpenOptions::new()
+                .write(true)
+                .append(true)
+                .create(true)
+                .open(path)?;
+
+            let mut generated = FxHashSet::default();
+
+            for module in all_modules.iter().chain(dir_modules.iter()) {
+                if !module.starts_with(entry) {
+                    continue;
+                }
+
+                if generated.contains(&module) {
+                    continue;
+                }
+                generated.insert(module);
+
+                let right_name = &module[(entry.len() + 2)..];
+
+                if right_name.contains("::") || right_name == "main" || right_name == "lib" {
+                    continue;
+                }
+
+                if entries.contains(right_name) {
+                    continue;
+                }
+
+                file.write_all(std::format!("pub mod {};", right_name).as_bytes())?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn codegen(
     ast: Program,
     type_inference_result: &TypeInferenceResultContainer,
@@ -163,7 +268,7 @@ pub fn codegen(
 
     let mut code_builder = CodeBuilder::new(&allocator);
 
-    add_auto_import(&mut code_builder, &allocator, context);
+    add_auto_import(ast, &mut code_builder, &allocator, context);
 
     codegen_program(
         ast,

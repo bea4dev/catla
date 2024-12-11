@@ -1,4 +1,8 @@
-use std::{env::{current_dir, set_current_dir, set_var}, path::Path, process::Command};
+use std::{
+    env::{set_current_dir, set_var},
+    path::Path,
+    process::Command,
+};
 
 use transpiler::{
     context::{AutoImport, OptimizationSettings},
@@ -28,7 +32,7 @@ fn main() {
         num_threads: num_cpus::get(),
         is_transpiler_debug: true,
         optimization,
-        codegen_dir: "./.catla".to_string()
+        codegen_dir: "./.catla".to_string(),
     };
 
     let mut resource_provider = SourceCodeProvider::new();

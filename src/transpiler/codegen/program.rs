@@ -53,7 +53,7 @@ fn create_temp_var_with_name<'allocator>(
         name,
     );
 
-    code_builder.add(format!(in code_builder.allocator, "let {};", &temp_var_name));
+    code_builder.add_line(format!(in code_builder.allocator, "let {};", &temp_var_name));
 
     temp_var_name
 }
@@ -90,7 +90,7 @@ fn build_drop<'allocator>(
         drop_target,
         drop_func_name,
     );
-    code_builder.add(code);
+    code_builder.add_line(code);
 }
 
 pub const RUST_CODEGEN_TAG: &str = "rust_codegen";
@@ -198,7 +198,7 @@ pub(crate) fn add_auto_import<'allocator>(
                     "use {};",
                     module_name,
                 );
-                code_builder.add(code);
+                code_builder.add_line(code);
             }
         } else {
             let code = format!(
@@ -211,15 +211,15 @@ pub(crate) fn add_auto_import<'allocator>(
                     .collect::<Vec<_>>()
                     .join(", "),
             );
-            code_builder.add(code);
+            code_builder.add_line(code);
         }
     }
 
-    code_builder.add(String::from_str_in(
+    code_builder.add_line(String::from_str_in(
         "use catla_transpile_std::memory::CatlaRefObject;",
         allocator,
     ));
-    code_builder.add(String::from_str_in(
+    code_builder.add_line(String::from_str_in(
         "use catla_transpile_std::memory::CatlaRefManagement;",
         allocator,
     ));
@@ -232,7 +232,7 @@ pub(crate) fn codegen_program<'allocator>(
     lifetime_analyze_results: &LifetimeAnalyzeResults,
     import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
-    user_type_field_builder: Option<&mut CodeBuilder<'allocator>>,
+    mut user_type_impl_builder: Option<&mut CodeBuilder<'allocator>>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     mut code_builder: &mut CodeBuilder<'allocator>,
@@ -291,7 +291,134 @@ pub(crate) fn codegen_program<'allocator>(
             StatementAST::Exchange(exchange) => {}
             StatementAST::Import(import) => {}
             StatementAST::StatementAttributes(_) => { /* do nothing */ }
-            StatementAST::VariableDefine(variable_define) => {}
+            StatementAST::VariableDefine(variable_define) => {
+                if let Some(user_type_impl_builder) = &mut user_type_impl_builder {
+                    let name = variable_define
+                        .binding
+                        .as_ref()
+                        .unwrap()
+                        .binding
+                        .as_ref()
+                        .left()
+                        .unwrap()
+                        .value;
+
+                    let name = String::from_str_in(name, allocator).into_bump_str();
+
+                    code_builder.add_line_str(name);
+                    code_builder.add_str(": ");
+
+                    let mut type_name_builder = CodeBuilder::new(allocator);
+                    codegen_type(
+                        type_inference_result.get_entity_type(EntityID::from(
+                            variable_define.type_tag.as_ref().unwrap(),
+                        )),
+                        &mut type_name_builder,
+                        allocator,
+                    );
+                    let type_name = type_name_builder.to_string_without_indent().into_bump_str();
+
+                    code_builder.add_str("std::cell::UnsafeCell<");
+                    code_builder.add_str(type_name);
+                    code_builder.add_str(">");
+                    code_builder.add_str(",\n");
+
+                    user_type_impl_builder.add_line_str("pub fn __catla_get_");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str("(&self) -> ");
+                    user_type_impl_builder.add_str(type_name);
+                    user_type_impl_builder
+                        .add_str("{ if self.is_mutex() { self.lock(); let value = unsafe { *");
+                    user_type_impl_builder.add_line_str(name);
+                    user_type_impl_builder
+                        .add_str(".get() }; value.clone_ref_mutex(); self.unlock(); value }");
+                    user_type_impl_builder.add_str(" else { let value = unsafe { *");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get() }; value.clone_ref(); value } }\n");
+
+                    user_type_impl_builder.add_line_str("pub fn __catla_borrow_");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str("(&self) -> ");
+                    user_type_impl_builder.add_str(type_name);
+                    user_type_impl_builder.add_str("{ let value = unsafe { *");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get() }; value }\n");
+
+                    user_type_impl_builder.add_line_str("pub fn __catla_set_");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str("(&self, new: ");
+                    user_type_impl_builder.add_str(type_name);
+                    user_type_impl_builder.add_str(") ");
+                    user_type_impl_builder
+                        .add_str("{ if self.is_mutex() { self.lock(); let value = unsafe { *");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get() }; value.drop_ref_mutex(); unsafe { *");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get() = new }; self.unlock(); } else { ");
+                    user_type_impl_builder.add_str("let value = unsafe { *");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get() }; value.drop_ref(); unsafe { *");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get() = new }; } }\n");
+
+                    user_type_impl_builder.add_line_str("pub fn __catla_set_as_unique_");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str("(&self, new: ");
+                    user_type_impl_builder.add_str(type_name);
+                    user_type_impl_builder.add_str(") { ");
+                    user_type_impl_builder.add_str("let value = unsafe { *");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get() }; value.drop_as_unique(); unsafe { *");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get() = new }; }\n");
+                } else {
+                    code_builder.add_line_str("let ");
+
+                    let mut var_binding_builder = CodeBuilder::new(allocator);
+                    codegen_variable_binding(
+                        variable_define.binding.as_ref().unwrap(),
+                        &mut var_binding_builder,
+                        allocator,
+                    );
+                    let variable_binding = var_binding_builder
+                        .to_string_without_indent()
+                        .into_bump_str();
+
+                    code_builder.add_line_str(variable_binding);
+
+                    if let Some(type_tag) = &variable_define.type_tag {
+                        code_builder.add_line_str(": ");
+
+                        codegen_type(
+                            type_inference_result.get_entity_type(EntityID::from(type_tag)),
+                            code_builder,
+                            allocator,
+                        );
+                    }
+
+                    code_builder.add_line_str(";");
+
+                    if let Some(expression) = &variable_define.expression {
+                        if let Ok(expression) = &expression {
+                            codegen_expression(
+                                *expression,
+                                Some(variable_binding),
+                                false,
+                                type_inference_result,
+                                lifetime_analyze_results,
+                                import_element_map,
+                                name_resolved_map,
+                                top_stack_alloc_builder,
+                                current_tree_alloc_builder,
+                                code_builder,
+                                allocator,
+                                errors,
+                                context,
+                            );
+                        }
+                    }
+                }
+            }
             StatementAST::FunctionDefine(function_define) => {
                 if contains_rust_codegen_tag(&transpiler_tags) {
                     rust_codegen_function(
@@ -316,7 +443,7 @@ pub(crate) fn codegen_program<'allocator>(
                         "pub fn {}() {{",
                         function_define.name.as_ref().unwrap().value,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
 
                     if let Either::Right(block) =
                         function_define.block_or_semicolon.value.as_ref().unwrap()
@@ -356,7 +483,7 @@ pub(crate) fn codegen_program<'allocator>(
                         parent_code_builder.pull(code_builder);
                     }
 
-                    code_builder.add(String::from_str_in("}", allocator));
+                    code_builder.add_line(String::from_str_in("}", allocator));
                 }
             }
             StatementAST::UserTypeDefine(user_type_define) => {
@@ -376,6 +503,86 @@ pub(crate) fn codegen_program<'allocator>(
                         errors,
                         context,
                     );
+                } else {
+                    code_builder.add_line_str("impl<");
+
+                    let mut generics = Vec::new_in(allocator);
+
+                    if let Some(generic_define) = &user_type_define.generics_define {
+                        for element in generic_define.elements.iter() {
+                            generics.push(
+                                String::from_str_in(element.name.value, allocator).into_bump_str(),
+                            );
+                            generics.push(", ");
+                        }
+                    }
+
+                    for generic in generics.iter() {
+                        code_builder.add_str(*generic);
+                    }
+
+                    code_builder.add_str("> CatlaRefObject<");
+
+                    code_builder.add_str(
+                        String::from_str_in(
+                            user_type_define.name.as_ref().unwrap().value,
+                            allocator,
+                        )
+                        .into_bump_str(),
+                    );
+
+                    code_builder.add_str("<");
+
+                    for generic in generics.iter() {
+                        code_builder.add_str(*generic);
+                    }
+
+                    code_builder.add_str(">> {\n");
+
+                    let mut user_type_impl_builder = code_builder.fork();
+
+                    code_builder.add_line_str("}");
+
+                    code_builder.add_line_str("pub struct ");
+
+                    code_builder.add_str(
+                        String::from_str_in(
+                            user_type_define.name.as_ref().unwrap().value,
+                            allocator,
+                        )
+                        .into_bump_str(),
+                    );
+
+                    code_builder.add_str("<");
+
+                    for generic in generics.iter() {
+                        code_builder.add_str(*generic);
+                    }
+
+                    code_builder.add_str("> {");
+
+                    let mut child_code_builder = code_builder.fork();
+
+                    codegen_program(
+                        user_type_define.block.value.as_ref().unwrap().program,
+                        None,
+                        type_inference_result,
+                        lifetime_analyze_results,
+                        import_element_map,
+                        name_resolved_map,
+                        Some(&mut user_type_impl_builder),
+                        top_stack_alloc_builder,
+                        current_tree_alloc_builder,
+                        &mut child_code_builder,
+                        allocator,
+                        errors,
+                        context,
+                    );
+
+                    code_builder.add_line_str("}\n");
+
+                    code_builder.pull(user_type_impl_builder);
+                    code_builder.pull(child_code_builder);
                 }
             }
             StatementAST::TypeDefine(type_define) => {}
@@ -416,6 +623,126 @@ pub(crate) fn codegen_program<'allocator>(
     }
 }
 
+fn codegen_variable_binding<'allocator>(
+    ast: &VariableBinding,
+    code_builder: &mut CodeBuilder<'allocator>,
+    allocator: &'allocator Bump,
+) {
+    match &ast.binding {
+        Either::Left(literal) => {
+            code_builder.add_str(String::from_str_in(literal.value, allocator).into_bump_str());
+        }
+        Either::Right(bindings) => {
+            code_builder.add_str("(");
+
+            for binding in bindings.iter() {
+                codegen_variable_binding(binding, code_builder, allocator);
+
+                code_builder.add_str(", ");
+            }
+
+            code_builder.add_str(")");
+        }
+    }
+}
+
+fn codegen_type<'allocator>(
+    ty: &Type,
+    code_builder: &mut CodeBuilder<'allocator>,
+    allocator: &'allocator Bump,
+) {
+    let primitive_type_name = match ty {
+        Type::Int8 => "i8",
+        Type::Int16 => "i16",
+        Type::Int32 => "i32",
+        Type::Int64 => "i64",
+        Type::Uint8 => "u8",
+        Type::Uint16 => "u16",
+        Type::Uint32 => "u32",
+        Type::Uint64 => "u64",
+        Type::Float32 => "f32",
+        Type::Float64 => "f64",
+        Type::Bool => "bool",
+        Type::Unit => "()",
+        Type::NumericLiteral(_) => unreachable!(),
+        Type::UserType {
+            user_type_info,
+            generics,
+            generics_span: _,
+        } => {
+            let name = format!(
+                in allocator,
+                "{}::{}",
+                &user_type_info.module_name,
+                user_type_info.name.value,
+            );
+            code_builder.add_str(name.into_bump_str());
+
+            code_builder.add_str("<");
+
+            for generic in generics.iter() {
+                codegen_type(generic, code_builder, allocator);
+
+                code_builder.add_str(", ");
+            }
+
+            code_builder.add_str(">");
+
+            return;
+        }
+        Type::Function {
+            function_info: _,
+            generics: _,
+        } => todo!(),
+        Type::Generic(generic) => {
+            code_builder.add_str(String::from_str_in(&generic.name, allocator).into_bump_str());
+            return;
+        }
+        Type::LocalGeneric(_) => unreachable!(),
+        Type::Array(_) => todo!(),
+        Type::Tuple(types) => {
+            code_builder.add_str("(");
+
+            for ty in types.iter() {
+                codegen_type(ty, code_builder, allocator);
+
+                code_builder.add_str(", ");
+            }
+
+            code_builder.add_str(")");
+
+            return;
+        }
+        Type::Option(base_type) => {
+            code_builder.add_str("Option<");
+
+            codegen_type(&base_type, code_builder, allocator);
+
+            code_builder.add_str(">");
+
+            return;
+        }
+        Type::Result { value, error } => {
+            code_builder.add_str("Result<");
+
+            codegen_type(&value, code_builder, allocator);
+
+            code_builder.add_str(", ");
+
+            codegen_type(&error, code_builder, allocator);
+
+            code_builder.add_str(">");
+
+            return;
+        }
+        Type::This => "Self",
+        Type::Unreachable => "!",
+        Type::Unknown => unreachable!(),
+    };
+
+    code_builder.add_line_str(primitive_type_name);
+}
+
 fn codegen_expression<'allocator>(
     ast: Expression,
     result_bind_var_name: Option<&str>,
@@ -432,7 +759,7 @@ fn codegen_expression<'allocator>(
     context: &TranspileModuleContext,
 ) {
     let parent_result_bind_var_name = result_bind_var_name;
- 
+
     let result_bind_var_name = if parent_result_bind_var_name.is_some() {
         let expr_temp_var_name = create_temp_var_with_name(
             code_builder,
@@ -467,7 +794,7 @@ fn codegen_expression<'allocator>(
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(result_bind_var_name) = &result_bind_var_name {
                 code_builder
-                    .add(format!(in allocator, "{} = unreachable!();", result_bind_var_name));
+                    .add_line(format!(in allocator, "{} = unreachable!();", result_bind_var_name));
             }
 
             let temp_var_name = create_temp_var(
@@ -493,10 +820,10 @@ fn codegen_expression<'allocator>(
                     context,
                 );
             } else {
-                code_builder.add(format!(in allocator, "{} = ();", &temp_var_name));
+                code_builder.add_line(format!(in allocator, "{} = ();", &temp_var_name));
             }
 
-            code_builder.add(format!(in allocator, "return {};", &temp_var_name));
+            code_builder.add_line(format!(in allocator, "return {};", &temp_var_name));
         }
         ExpressionEnum::Closure(closure) => {}
     }
@@ -533,7 +860,7 @@ fn codegen_expression<'allocator>(
                     )
                 }
             };
-            code_builder.add(code);
+            code_builder.add_line(code);
         } else {
             let code = format!(
                 in allocator,
@@ -541,7 +868,7 @@ fn codegen_expression<'allocator>(
                 parent_result_bind_var_name.unwrap(),
                 result_bind_var_name
             );
-            code_builder.add(code);
+            code_builder.add_line(code);
         }
     }
 }
@@ -636,7 +963,7 @@ macro_rules! codegen_for_op2 {
                             ImplicitConvertKind::Ok => "Ok",
                             ImplicitConvertKind::Error => "Err",
                         };
-                        code_builder.add(format!(
+                        code_builder.add_line(format!(
                             in allocator,
                             "{} = {}.{}({}({}));",
                             &operator_result_var_name,
@@ -646,7 +973,7 @@ macro_rules! codegen_for_op2 {
                             &right_expr_temp_var_name
                         ));
                     } else {
-                        code_builder.add(format!(
+                        code_builder.add_line(format!(
                             in allocator,
                             "{} = {}.{}({});",
                             &operator_result_var_name,
@@ -660,11 +987,11 @@ macro_rules! codegen_for_op2 {
                 }
 
                 if let Some(result_bind_var_name) = result_bind_var_name {
-                    code_builder.add(
+                    code_builder.add_line(
                         format!(in allocator, "{} = {}", result_bind_var_name, &last_result_bind_var_name),
                     );
                 } else {
-                    code_builder.add(format!(in allocator, "{}.drop();", &last_result_bind_var_name));
+                    code_builder.add_line(format!(in allocator, "{}.drop();", &last_result_bind_var_name));
                 }
             }
         }
@@ -812,7 +1139,7 @@ fn codegen_primary<'allocator>(
                         &module_name,
                         literal.value,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
 
                     literal_value_temp
                 } else {
@@ -852,7 +1179,7 @@ fn codegen_primary<'allocator>(
                     literal_value_temp,
                     arguments,
                 );
-                code_builder.add(code);
+                code_builder.add_line(code);
 
                 for (argument_expr_result, (ty, lifetime_analyze_result)) in
                     argument_results.iter().zip(argument_drop_info.iter()).rev()
@@ -903,7 +1230,7 @@ fn codegen_primary<'allocator>(
                         &module_name,
                         literal.value,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
                 } else {
                     let code = format!(
                         in allocator,
@@ -912,7 +1239,7 @@ fn codegen_primary<'allocator>(
                         &module_name,
                         literal.value,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
                 }
 
                 last_result_temp_var = result_temp;
@@ -984,7 +1311,7 @@ fn codegen_primary<'allocator>(
                         getter_name,
                         literal.value,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
 
                     literal_value_temp
                 } else {
@@ -1029,7 +1356,7 @@ fn codegen_primary<'allocator>(
                     literal_value_temp,
                     arguments,
                 );
-                code_builder.add(code);
+                code_builder.add_line(code);
 
                 for (argument_expr_result, (ty, lifetime_analyze_result)) in
                     argument_results.iter().zip(argument_drop_info.iter()).rev()
@@ -1078,7 +1405,7 @@ fn codegen_primary<'allocator>(
                     getter_name,
                     literal.value,
                 );
-                code_builder.add(code);
+                code_builder.add_line(code);
 
                 build_drop(
                     &last_result_temp_var,
@@ -1102,7 +1429,7 @@ fn codegen_primary<'allocator>(
             result_bind_var_name,
             last_result_temp_var,
         );
-        code_builder.add(code);
+        code_builder.add_line(code);
     } else {
         if !as_assign_left {
             build_drop(
@@ -1234,7 +1561,7 @@ fn codegen_primary_left<'allocator>(
                         &simple_primary_result_temp,
                         expression_results.join(", "),
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
                 }
                 SimplePrimary::Identifier(literal) => {
                     if let Some(resolved) = name_resolved_map.get(&EntityID::from(literal)) {
@@ -1263,7 +1590,7 @@ fn codegen_primary_left<'allocator>(
                                 &simple_primary_result_temp,
                                 literal.value,
                             );
-                            code_builder.add(code);
+                            code_builder.add_line(code);
                         } else {
                             let code = format!(
                                 in allocator,
@@ -1271,7 +1598,7 @@ fn codegen_primary_left<'allocator>(
                                 &simple_primary_result_temp,
                                 literal.value,
                             );
-                            code_builder.add(code);
+                            code_builder.add_line(code);
                         }
                     } else {
                         if let Some(module_name) = context
@@ -1293,7 +1620,7 @@ fn codegen_primary_left<'allocator>(
                                 module_name,
                                 literal.value,
                             );
-                            code_builder.add(code);
+                            code_builder.add_line(code);
                         } else {
                             let code = format!(
                                 in allocator,
@@ -1301,7 +1628,7 @@ fn codegen_primary_left<'allocator>(
                                 &simple_primary_result_temp,
                                 literal.value,
                             );
-                            code_builder.add(code);
+                            code_builder.add_line(code);
                         }
                     }
                 }
@@ -1320,7 +1647,7 @@ fn codegen_primary_left<'allocator>(
                         STRING_TYPE,
                         literal.value,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
 
                     let code = format!(
                         in allocator,
@@ -1329,7 +1656,7 @@ fn codegen_primary_left<'allocator>(
                         literal.span.end,
                         &simple_primary_result_temp,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
                 }
                 SimplePrimary::NullKeyword(_) => {
                     let code = format!(
@@ -1337,7 +1664,7 @@ fn codegen_primary_left<'allocator>(
                         "{} = None;",
                         &simple_primary_result_temp,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
                 }
                 SimplePrimary::TrueKeyword(_) => {
                     let code = format!(
@@ -1345,7 +1672,7 @@ fn codegen_primary_left<'allocator>(
                         "{} = true;",
                         &simple_primary_result_temp,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
                 }
                 SimplePrimary::FalseKeyword(_) => {
                     let code = format!(
@@ -1353,7 +1680,7 @@ fn codegen_primary_left<'allocator>(
                         "{} = false;",
                         &simple_primary_result_temp,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
                 }
                 SimplePrimary::ThisKeyword(_) => {
                     let code = format!(
@@ -1361,7 +1688,7 @@ fn codegen_primary_left<'allocator>(
                         "{} = self;",
                         &simple_primary_result_temp,
                     );
-                    code_builder.add(code);
+                    code_builder.add_line(code);
                 }
                 SimplePrimary::LargeThisKeyword(_) => unreachable!(),
             }
@@ -1400,7 +1727,7 @@ fn codegen_primary_left<'allocator>(
                     &simple_primary_result_temp,
                     arguments,
                 );
-                code_builder.add(code);
+                code_builder.add_line(code);
 
                 for (argument_expr_result, (ty, lifetime_analyze_result)) in
                     argument_results.iter().zip(argument_drop_info.iter()).rev()
@@ -1431,7 +1758,7 @@ fn codegen_primary_left<'allocator>(
                     result_bind_var_name,
                     &result_temp
                 );
-                code_builder.add(code);
+                code_builder.add_line(code);
             } else {
                 let code = format!(
                     in allocator,
@@ -1439,12 +1766,79 @@ fn codegen_primary_left<'allocator>(
                     result_bind_var_name,
                     &simple_primary_result_temp
                 );
-                code_builder.add(code);
+                code_builder.add_line(code);
             }
         }
         PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {}
         PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {}
-        PrimaryLeftExpr::NewExpression(new_expression) => {}
+        PrimaryLeftExpr::NewExpression(new_expression) => {
+            if let Ok(assignment) = &new_expression.field_assigns {
+                let mut assigns = Vec::new_in(allocator);
+
+                for assignment in assignment.iter() {
+                    let temp_var_name = create_temp_var_with_name(
+                        code_builder,
+                        assignment.name.span.clone(),
+                        EntityID::from(assignment),
+                        assignment.name.value,
+                    );
+
+                    codegen_expression(
+                        assignment.expression.as_ref().unwrap(),
+                        Some(temp_var_name.as_str()),
+                        false,
+                        type_inference_result,
+                        lifetime_analyze_results,
+                        import_element_map,
+                        name_resolved_map,
+                        top_stack_alloc_builder,
+                        current_tree_alloc_builder,
+                        code_builder,
+                        allocator,
+                        errors,
+                        context,
+                    );
+
+                    assigns.push((assignment.name.value, temp_var_name));
+                }
+
+                let new_temp_var = create_temp_var_with_name(
+                    code_builder,
+                    new_expression.span.clone(),
+                    EntityID::from(new_expression),
+                    "new",
+                );
+
+                let mut code = String::new_in(allocator);
+
+                code += new_temp_var.as_str();
+                code += " = ";
+
+                code += new_expression
+                    .path
+                    .iter()
+                    .map(|path| String::from_str_in(path.value, allocator))
+                    .collect::<Vec<_>>()
+                    .join("::")
+                    .as_str();
+
+                code += " { ";
+
+                for (name, result) in assigns {
+                    code += format!(
+                        in allocator,
+                        "{}: std::cell::UnsafeCell::new({}),",
+                        name,
+                        result,
+                    )
+                    .as_str();
+                }
+
+                code += " };";
+
+                code_builder.add_line(code);
+            }
+        }
         PrimaryLeftExpr::IfExpression(if_expression) => {}
         PrimaryLeftExpr::LoopExpression(loop_expression) => {}
     }

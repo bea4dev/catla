@@ -2613,6 +2613,15 @@ pub(crate) fn infer_type_program<'input, 'allocator>(
                         current_scope_implements_info_set,
                         context,
                     );
+
+                    type_environment.set_entity_type(
+                        EntityID::from(type_tag),
+                        WithDefineInfo {
+                            value: tag_type.clone(),
+                            module_name: context.module_name.clone(),
+                            span: type_tag.span.clone(),
+                        },
+                    );
                 }
 
                 if &tag_type != &Type::Unknown {

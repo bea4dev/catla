@@ -8,7 +8,6 @@ use std::{
 use allocator_api2::vec::Vec;
 use bumpalo::{collections::String, format, Bump};
 use catla_parser::parser::{Program, Spanned};
-use either::Either;
 use fxhash::{FxHashMap, FxHashSet};
 use program::{add_auto_import, codegen_program};
 
@@ -30,9 +29,15 @@ const INDENT: &str = "    ";
 
 pub struct CodeBuilder<'allocator> {
     index: Option<usize>,
-    code: Vec<Either<String<'allocator>, Option<CodeBuilder<'allocator>>>, &'allocator Bump>,
+    code: Vec<Code<'allocator>, &'allocator Bump>,
     indent: usize,
     allocator: &'allocator Bump,
+}
+
+pub enum Code<'allocator> {
+    Line(&'allocator str),
+    Str(&'allocator str),
+    Builder(Option<CodeBuilder<'allocator>>),
 }
 
 impl<'allocator> CodeBuilder<'allocator> {
@@ -45,8 +50,16 @@ impl<'allocator> CodeBuilder<'allocator> {
         }
     }
 
-    pub fn add(&mut self, str: String<'allocator>) {
-        self.code.push(Either::Left(str));
+    pub fn add_line(&mut self, str: String<'allocator>) {
+        self.code.push(Code::Line(str.into_bump_str()));
+    }
+
+    pub fn add_line_str(&mut self, str: &'allocator str) {
+        self.code.push(Code::Line(str));
+    }
+
+    pub fn add_str(&mut self, str: &'allocator str) {
+        self.code.push(Code::Str(str));
     }
 
     pub fn push_indent(&mut self) {
@@ -59,7 +72,7 @@ impl<'allocator> CodeBuilder<'allocator> {
 
     pub fn fork(&mut self) -> CodeBuilder<'allocator> {
         let index = self.code.len();
-        self.code.push(Either::Right(None));
+        self.code.push(Code::Builder(None));
 
         Self {
             index: Some(index),
@@ -71,7 +84,7 @@ impl<'allocator> CodeBuilder<'allocator> {
 
     pub fn pull(&mut self, builder: CodeBuilder<'allocator>) {
         let index = builder.index.unwrap();
-        self.code[index] = Either::Right(Some(builder));
+        self.code[index] = Code::Builder(Some(builder));
     }
 
     pub fn build(self, context: &TranspileModuleContext) -> io::Result<()> {
@@ -104,14 +117,19 @@ impl<'allocator> CodeBuilder<'allocator> {
     fn write_all(self, file: &mut File) -> io::Result<()> {
         for code in self.code {
             match code {
-                Either::Left(str) => {
+                Code::Line(str) => {
+                    file.write_all("\n".as_bytes())?;
+
                     for _ in 0..self.indent {
                         file.write_all(INDENT.as_bytes())?;
                     }
+
                     file.write_all(str.as_bytes())?;
-                    file.write_all("\n".as_bytes())?;
                 }
-                Either::Right(builder) => {
+                Code::Str(str) => {
+                    file.write_all(str.as_bytes())?;
+                }
+                Code::Builder(builder) => {
                     if let Some(builder) = builder {
                         builder.write_all(file)?;
                     }
@@ -120,6 +138,41 @@ impl<'allocator> CodeBuilder<'allocator> {
         }
 
         Ok(())
+    }
+
+    pub fn to_string_without_indent(&self) -> String<'allocator> {
+        let length = self.length_without_indent();
+        let mut string = String::with_capacity_in(length, self.allocator);
+
+        self.write_to_str_without_indent(&mut string);
+
+        string
+    }
+
+    pub fn write_to_str_without_indent(&self, string: &mut String<'allocator>) {
+        for code in self.code.iter() {
+            match code {
+                Code::Line(str) | Code::Str(str) => *string += *str,
+                Code::Builder(builder) => {
+                    if let Some(builder) = builder {
+                        builder.write_to_str_without_indent(string);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn length_without_indent(&self) -> usize {
+        self.code
+            .iter()
+            .map(|code| match code {
+                Code::Line(str) | Code::Str(str) => str.len(),
+                Code::Builder(builder) => builder
+                    .as_ref()
+                    .map(|builder| builder.length_without_indent())
+                    .unwrap_or(0),
+            })
+            .sum()
     }
 }
 
@@ -147,7 +200,7 @@ impl<'allocator> StackAllocCodeBuilder<'allocator> {
             &name
         );
 
-        self.builder.add(code);
+        self.builder.add_line(code);
 
         name
     }

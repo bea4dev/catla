@@ -40,15 +40,15 @@ impl CustomCodeGenerator<FunctionDefine<'_, '_>> for PrintFunctionCodeGenerator 
 
         match function_name {
             "print" => {
-                code_builder.add(String::from_str_in(
+                code_builder.add_line(String::from_str_in(
                     "pub fn print(str: &CatlaRefObject<catla_transpile_std::rust_codegen::string::String>) { ",
                     allocator,
                 ));
-                code_builder.add(String::from_str_in(
+                code_builder.add_line(String::from_str_in(
                     "    catla_transpile_std::rust_codegen::print::print(str);",
                     allocator,
                 ));
-                code_builder.add(String::from_str_in("}", allocator));
+                code_builder.add_line(String::from_str_in("}", allocator));
             }
             _ => {
                 let mut rust_codegen_tag = None;

@@ -3,10 +3,7 @@ use std::ops::Range;
 use allocator_api2::vec::Vec;
 use bumpalo::{collections::String, format, Bump};
 use catla_parser::parser::{
-    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp,
-    CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression,
-    MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
-    Program, SimplePrimary, Spanned, StatementAST, TranspilerTag, VariableBinding,
+    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp, CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression, MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, Program, SimplePrimary, Spanned, StatementAST, TranspilerTag, UserTypeKindEnum, VariableBinding
 };
 use either::Either;
 use fxhash::{FxHashMap, FxHashSet};
@@ -336,14 +333,6 @@ pub(crate) fn codegen_program<'allocator>(
                     user_type_impl_builder.add_str(name);
                     user_type_impl_builder.add_str(".get() }; value.clone_ref(); value } }\n");
 
-                    user_type_impl_builder.add_line_str("pub fn __catla_borrow_");
-                    user_type_impl_builder.add_str(name);
-                    user_type_impl_builder.add_str("(&self) -> ");
-                    user_type_impl_builder.add_str(type_name);
-                    user_type_impl_builder.add_str("{ let value = unsafe { *");
-                    user_type_impl_builder.add_str(name);
-                    user_type_impl_builder.add_str(".get() }; value }\n");
-
                     user_type_impl_builder.add_line_str("pub fn __catla_set_");
                     user_type_impl_builder.add_str(name);
                     user_type_impl_builder.add_str("(&self, new: ");
@@ -360,17 +349,6 @@ pub(crate) fn codegen_program<'allocator>(
                     user_type_impl_builder.add_str(".get() }; value.drop_ref(); unsafe { *");
                     user_type_impl_builder.add_str(name);
                     user_type_impl_builder.add_str(".get() = new }; } }\n");
-
-                    user_type_impl_builder.add_line_str("pub fn __catla_set_as_unique_");
-                    user_type_impl_builder.add_str(name);
-                    user_type_impl_builder.add_str("(&self, new: ");
-                    user_type_impl_builder.add_str(type_name);
-                    user_type_impl_builder.add_str(") { ");
-                    user_type_impl_builder.add_str("let value = unsafe { *");
-                    user_type_impl_builder.add_str(name);
-                    user_type_impl_builder.add_str(".get() }; value.drop_as_unique(); unsafe { *");
-                    user_type_impl_builder.add_str(name);
-                    user_type_impl_builder.add_str(".get() = new }; }\n");
                 } else {
                     code_builder.add_line_str("let ");
 
@@ -521,7 +499,11 @@ pub(crate) fn codegen_program<'allocator>(
                         code_builder.add_str(*generic);
                     }
 
-                    code_builder.add_str("> CatlaRefObject<");
+                    if user_type_define.kind.value == UserTypeKindEnum::Class {
+                        code_builder.add_str("> CatlaRefObject<");
+                    } else {
+                        code_builder.add_str("> ");
+                    }
 
                     code_builder.add_str(
                         String::from_str_in(
@@ -537,7 +519,11 @@ pub(crate) fn codegen_program<'allocator>(
                         code_builder.add_str(*generic);
                     }
 
-                    code_builder.add_str(">> {\n");
+                    if user_type_define.kind.value == UserTypeKindEnum::Class {
+                        code_builder.add_str(">> {\n");
+                    } else {
+                        code_builder.add_str("> {\n");
+                    }
 
                     let mut user_type_impl_builder = code_builder.fork();
 

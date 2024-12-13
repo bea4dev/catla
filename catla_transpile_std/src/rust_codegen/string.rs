@@ -15,6 +15,14 @@ impl CatlaDrop for String {
             }
         }
     }
+
+    fn drop_mutex(&self) {
+        if let Self::NonStatic(buffer) = self {
+            unsafe {
+                drop(std::ptr::read(buffer.get()));
+            }
+        }
+    }
 }
 
 impl String {

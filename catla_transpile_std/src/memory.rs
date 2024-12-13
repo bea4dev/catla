@@ -40,29 +40,6 @@ impl<T: CatlaDrop> CatlaRefObject<T> {
             value,
         }
     } 
-
-    #[inline(always)]
-    pub fn lock(&self) {
-        loop {
-            if self
-                .spin_lock_flag
-                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .is_ok()
-            {
-                return;
-            }
-        }
-    }
-
-    #[inline(always)]
-    pub fn unlock(&self) {
-        self.spin_lock_flag.store(false, Ordering::Release);
-    }
-
-    #[inline(always)]
-    pub fn to_mutex(&self) {
-        unsafe { *self.is_mutex.get() = true; }
-    }
 }
 
 impl<T: CatlaDrop> CatlaRefManagement for &CatlaRefObject<T> {
@@ -83,15 +60,7 @@ impl<T: CatlaDrop> CatlaRefManagement for &CatlaRefObject<T> {
     fn drop_ref(&self) {
         unsafe {
             if *self.is_mutex.get() {
-                let atomic_ref_count = transmute::<*mut usize, &AtomicUsize>(self.ref_count.get());
-
-                let old_count = atomic_ref_count.fetch_sub(1, Ordering::Release);
-
-                if old_count == 1 {
-                    fence(Ordering::Acquire);
-
-                    self.value.drop();
-                }
+                self.drop_ref_mutex();
             } else {
                 let ref_count = self.ref_count.get();
 
@@ -107,8 +76,51 @@ impl<T: CatlaDrop> CatlaRefManagement for &CatlaRefObject<T> {
     }
 
     #[inline(always)]
+    fn drop_ref_mutex(&self) {
+        unsafe {
+            let atomic_ref_count = transmute::<*mut usize, &AtomicUsize>(self.ref_count.get());
+
+            let old_count = atomic_ref_count.fetch_sub(1, Ordering::Release);
+
+            if old_count == 1 {
+                fence(Ordering::Acquire);
+
+                self.value.drop_mutex();
+            }
+        }
+    }
+
+    #[inline(always)]
     fn drop_as_unique(&self) {
         self.value.drop();
+    }
+
+    #[inline(always)]
+    fn lock(&self) {
+        loop {
+            if self
+                .spin_lock_flag
+                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                return;
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn unlock(&self) {
+        self.spin_lock_flag.store(false, Ordering::Release);
+    }
+
+    #[inline(always)]
+    fn to_mutex(&self) {
+        unsafe { *self.is_mutex.get() = true; }
+    }
+
+    #[inline(always)]
+    fn is_mutex(&self) -> bool {
+        unsafe { *self.is_mutex.get() }
     }
 }
 
@@ -117,7 +129,17 @@ pub trait CatlaRefManagement {
 
     fn drop_ref(&self);
 
+    fn drop_ref_mutex(&self);
+
     fn drop_as_unique(&self);
+
+    fn lock(&self);
+
+    fn unlock(&self);
+
+    fn to_mutex(&self);
+
+    fn is_mutex(&self) -> bool;
 }
 
 macro_rules! empty_impl {
@@ -130,7 +152,22 @@ macro_rules! empty_impl {
             fn drop_ref(&self) {}
 
             #[inline(always)]
+            fn drop_ref_mutex(&self) {}
+
+            #[inline(always)]
             fn drop_as_unique(&self) {}
+
+            #[inline(always)]
+            fn lock(&self) {}
+
+            #[inline(always)]
+            fn unlock(&self) {}
+
+            #[inline(always)]
+            fn to_mutex(&self) {}
+
+            #[inline(always)]
+            fn is_mutex(&self) -> bool { false }
         })*
     };
 }

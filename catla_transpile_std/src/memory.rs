@@ -1,8 +1,12 @@
 use std::{
+    alloc::Layout,
     cell::UnsafeCell,
     mem::{transmute, MaybeUninit},
+    ptr::NonNull,
     sync::atomic::{fence, AtomicBool, AtomicUsize, Ordering},
 };
+
+use allocator_api2::alloc::{Allocator, Global};
 
 use crate::drop::CatlaDrop;
 
@@ -11,6 +15,7 @@ pub struct CatlaRefObject<T: CatlaDrop> {
     ref_count: UnsafeCell<usize>,
     spin_lock_flag: AtomicBool,
     is_mutex: UnsafeCell<bool>,
+    on_heap: bool,
     pub value: T,
 }
 
@@ -19,27 +24,37 @@ unsafe impl<T: CatlaDrop> Sync for CatlaRefObject<T> {}
 
 impl<T: CatlaDrop> CatlaRefObject<T> {
     #[inline(always)]
-    pub fn init_on_stack(uninit: &mut MaybeUninit<Self>, value: T) -> &Self {
+    pub fn init_on_stack(uninit: &mut MaybeUninit<Self>, value: T) -> &'static Self {
         unsafe {
-            uninit.write(Self::new(value));
-            uninit.assume_init_ref()
+            uninit.write(Self::new::<false>(value));
+            transmute::<&Self, &'static Self>(uninit.assume_init_ref())
         }
     }
 
     #[inline(always)]
     pub fn init_on_heap(value: T) -> &'static Self {
-        Box::leak(Box::new(Self::new(value)))
+        Box::leak(Box::new(Self::new::<true>(value)))
     }
 
     #[inline(always)]
-    const fn new(value: T) -> Self {
+    const fn new<const ON_HEAP: bool>(value: T) -> Self {
         Self {
             ref_count: UnsafeCell::new(1),
             spin_lock_flag: AtomicBool::new(false),
             is_mutex: UnsafeCell::new(false),
+            on_heap: ON_HEAP,
             value,
         }
-    } 
+    }
+
+    #[inline(always)]
+    pub fn free(&self) {
+        if self.on_heap {
+            unsafe {
+                Global.deallocate(NonNull::from(self).cast(), Layout::for_value(self));
+            }
+        }
+    }
 }
 
 impl<T: CatlaDrop> CatlaRefManagement for &CatlaRefObject<T> {
@@ -50,8 +65,7 @@ impl<T: CatlaDrop> CatlaRefManagement for &CatlaRefObject<T> {
                 let atomic_ref_count = transmute::<*mut usize, &AtomicUsize>(self.ref_count.get());
                 atomic_ref_count.fetch_add(1, Ordering::Relaxed);
             } else {
-                let ref_count = self.ref_count.get();
-                *ref_count += 1;
+                self.clone_ref_non_mutex();
             }
         }
     }
@@ -62,15 +76,7 @@ impl<T: CatlaDrop> CatlaRefManagement for &CatlaRefObject<T> {
             if *self.is_mutex.get() {
                 self.drop_ref_mutex();
             } else {
-                let ref_count = self.ref_count.get();
-
-                let old_count = *ref_count;
-
-                *ref_count = old_count - 1;
-
-                if old_count == 1 {
-                    self.value.drop();
-                }
+                self.drop_ref_non_mutex();
             }
         }
     }
@@ -86,13 +92,38 @@ impl<T: CatlaDrop> CatlaRefManagement for &CatlaRefObject<T> {
                 fence(Ordering::Acquire);
 
                 self.value.drop_mutex();
+                self.free();
             }
         }
     }
 
     #[inline(always)]
-    fn drop_as_unique(&self) {
-        self.value.drop();
+    fn clone_ref_non_mutex(&self) {
+        unsafe {
+            let ref_count = self.ref_count.get();
+            *ref_count += 1;
+        }
+    }
+
+    #[inline(always)]
+    fn drop_ref_non_mutex(&self) {
+        self.drop_ref_without_free_this();
+        self.free();
+    }
+
+    #[inline(always)]
+    fn drop_ref_without_free_this(&self) {
+        unsafe {
+            let ref_count = self.ref_count.get();
+
+            let old_count = *ref_count;
+
+            *ref_count = old_count - 1;
+
+            if old_count == 1 {
+                self.value.drop();
+            }
+        }
     }
 
     #[inline(always)]
@@ -115,7 +146,9 @@ impl<T: CatlaDrop> CatlaRefManagement for &CatlaRefObject<T> {
 
     #[inline(always)]
     fn to_mutex(&self) {
-        unsafe { *self.is_mutex.get() = true; }
+        unsafe {
+            *self.is_mutex.get() = true;
+        }
     }
 
     #[inline(always)]
@@ -131,7 +164,11 @@ pub trait CatlaRefManagement {
 
     fn drop_ref_mutex(&self);
 
-    fn drop_as_unique(&self);
+    fn clone_ref_non_mutex(&self);
+
+    fn drop_ref_non_mutex(&self);
+
+    fn drop_ref_without_free_this(&self);
 
     fn lock(&self);
 
@@ -155,7 +192,13 @@ macro_rules! empty_impl {
             fn drop_ref_mutex(&self) {}
 
             #[inline(always)]
-            fn drop_as_unique(&self) {}
+            fn clone_ref_non_mutex(&self) {}
+
+            #[inline(always)]
+            fn drop_ref_non_mutex(&self) {}
+
+            #[inline(always)]
+            fn drop_ref_without_free_this(&self) {}
 
             #[inline(always)]
             fn lock(&self) {}
@@ -172,7 +215,7 @@ macro_rules! empty_impl {
     };
 }
 
-empty_impl!{
+empty_impl! {
     u8,
     u16,
     u32,

@@ -74,7 +74,7 @@ fn build_drop<'allocator>(
     let drop_func_name = if lifetime_analyze_result.contains_static {
         "drop_ref"
     } else {
-        "drop_ref_non_mutex"
+        "drop_"
     };
 
     let code = format!(

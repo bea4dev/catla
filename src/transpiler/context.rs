@@ -141,6 +141,7 @@ pub struct TranspileSettings {
 
 pub struct OptimizationSettings {
     pub lifetime_analyzer: bool,
+    pub move_optimizer: bool,
 }
 
 pub struct AutoImport {

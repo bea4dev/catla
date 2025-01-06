@@ -25,6 +25,7 @@ fn main() {
 
     let optimization = OptimizationSettings {
         lifetime_analyzer: true,
+        move_optimizer: true,
     };
 
     let settings = TranspileSettings {

@@ -13,6 +13,7 @@ use super::{
 };
 
 pub mod lifetime_analyzer;
+pub mod move_optimization;
 
 pub struct OptimizeResultContainer {}
 

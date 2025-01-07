@@ -6895,6 +6895,7 @@ impl OutOfEnvironmentVariable {
                 EnvironmentSeparatorKind::Function => false,
                 EnvironmentSeparatorKind::UserTypeDefine => false,
                 EnvironmentSeparatorKind::Closure => true,
+                EnvironmentSeparatorKind::Loop => true,
             };
 
             if !across {

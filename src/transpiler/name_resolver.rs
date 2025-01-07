@@ -67,6 +67,7 @@ pub enum EnvironmentSeparatorKind {
     Function,
     UserTypeDefine,
     Closure,
+    Loop,
 }
 
 #[derive(Debug)]
@@ -1440,6 +1441,16 @@ fn name_resolve_primary_left<'input, 'allocator>(
         }
         PrimaryLeftExpr::LoopExpression(loop_expression) => {
             if let Ok(block) = &loop_expression.block {
+                let name_environment = NameEnvironment::new(
+                    Some(environment_id),
+                    Some(EnvironmentSeparatorKind::Loop),
+                    loop_expression.span.clone(),
+                    allocator,
+                );
+
+                let environment_id = EntityID::from(loop_expression);
+                name_environments.insert(environment_id, name_environment);
+
                 name_resolve_block(
                     block,
                     environment_id,

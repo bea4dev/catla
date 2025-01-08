@@ -380,7 +380,7 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         );
     }
 
-    optimize(
+    let optimize_result = optimize(
         ast,
         &import_element_map,
         &name_resolved_map,

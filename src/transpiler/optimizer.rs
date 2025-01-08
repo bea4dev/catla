@@ -4,6 +4,7 @@ use bumpalo::Bump;
 use catla_parser::parser::{Program, Spanned};
 use fxhash::FxHashMap;
 use lifetime_analyzer::collect_lifetime;
+use move_optimization::{collect_last_users, LastUsers};
 
 use super::{
     component::EntityID,
@@ -15,7 +16,9 @@ use super::{
 pub mod lifetime_analyzer;
 pub mod move_optimization;
 
-pub struct OptimizeResultContainer {}
+pub struct OptimizeResultContainer {
+    pub last_users: LastUsers,
+}
 
 pub fn optimize<'allocator>(
     ast: Program<'_, 'allocator>,
@@ -27,8 +30,10 @@ pub fn optimize<'allocator>(
     type_inference_result: &TypeInferenceResultContainer,
     allocator: &'allocator Bump,
     context: &TranspileModuleContext,
-) {
-    if context.context.settings.optimization.lifetime_analyzer {
+) -> OptimizeResultContainer {
+    let optimization_settings = &context.context.settings.optimization;
+
+    if optimization_settings.lifetime_analyzer {
         let lifetime_source_map = collect_lifetime(
             ast,
             import_element_map,
@@ -46,4 +51,12 @@ pub fn optimize<'allocator>(
             .lifetime_evaluator
             .add_sources(context.module_name.clone(), lifetime_source_map);
     }
+
+    let last_users = if optimization_settings.move_optimizer {
+        collect_last_users(ast, name_resolved_map)
+    } else {
+        LastUsers::new()
+    };
+
+    OptimizeResultContainer { last_users }
 }

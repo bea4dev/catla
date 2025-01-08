@@ -1,12 +1,12 @@
 use allocator_api2::vec::Vec;
 use bumpalo::Bump;
 use catla_parser::parser::{
-    expression, AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum,
-    Factor, FunctionCall, MappingOperator, MulOrDivExpression, OrExpression, Primary, PrimaryLeft,
-    PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST,
+    AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
+    FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary,
+    PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST,
 };
 use either::Either;
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use hashbrown::{DefaultHashBuilder, HashMap};
 
 use crate::transpiler::{
@@ -14,8 +14,20 @@ use crate::transpiler::{
     name_resolver::{EnvironmentSeparatorKind, FoundDefineInfo},
 };
 
-pub struct LastUsePositions {
-    last_user_map: FxHashMap<EntityID, Vec<EntityID>>,
+pub struct LastUsers {
+    last_user_map: FxHashSet<EntityID>,
+}
+
+impl LastUsers {
+    pub fn new() -> Self {
+        Self {
+            last_user_map: FxHashSet::default(),
+        }
+    }
+
+    pub fn is_last_user(&self, user: EntityID) -> bool {
+        self.last_user_map.contains(&user)
+    }
 }
 
 #[must_use]
@@ -55,22 +67,23 @@ impl<'allocator> LastUseEnvironment<'allocator> {
             .push(user);
     }
 
-    fn export(self) -> LastUsePositions {
+    fn export(self) -> LastUsers {
         // into global allocator
-        LastUsePositions {
+        LastUsers {
             last_user_map: self
                 .last_use_position_map
                 .into_iter()
-                .map(|(key, values)| (key, values.into_iter().collect()))
+                .map(|(_, values)| values.into_iter())
+                .flatten()
                 .collect(),
         }
     }
 }
 
-pub fn collect_last_use(
+pub fn collect_last_users(
     ast: Program,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
-) -> LastUsePositions {
+) -> LastUsers {
     let allocator = Bump::new();
 
     let environment = collect_program(ast, name_resolved_map, &allocator);
@@ -180,6 +193,10 @@ fn collect_program<'allocator>(
                     name_resolved_map,
                     allocator,
                 ));
+
+                if let ExpressionEnum::ReturnExpression(_) = expression {
+                    break;
+                }
             }
             StatementAST::TranspilerTag(_) => {}
         }
@@ -467,7 +484,19 @@ fn collect_function_call<'allocator>(
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     allocator: &'allocator Bump,
 ) -> LastUseEnvironment<'allocator> {
-    todo!()
+    let mut environment = LastUseEnvironment::new(allocator);
+
+    if let Ok(args) = &ast.arg_exprs {
+        for expression in args.iter() {
+            environment.update_with(collect_expression(
+                *expression,
+                name_resolved_map,
+                allocator,
+            ));
+        }
+    }
+
+    environment
 }
 
 fn collect_mapping_operator<'allocator>(
@@ -475,7 +504,19 @@ fn collect_mapping_operator<'allocator>(
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
     allocator: &'allocator Bump,
 ) -> LastUseEnvironment<'allocator> {
-    todo!()
+    let mut environment = LastUseEnvironment::new(allocator);
+
+    let block = match &ast.value {
+        MappingOperatorKind::NullElvisBlock(block) => &block.value,
+        MappingOperatorKind::ResultElvisBlock(block) => &block.value,
+        _ => return environment,
+    };
+
+    if let Some(block) = block {
+        environment.update_with(collect_program(block.program, name_resolved_map, allocator));
+    }
+
+    environment
 }
 
 fn collect_primary_right<'allocator>(
@@ -484,6 +525,24 @@ fn collect_primary_right<'allocator>(
     allocator: &'allocator Bump,
 ) -> LastUseEnvironment<'allocator> {
     let mut environment = LastUseEnvironment::new(allocator);
+
+    if let Some((_, _, function_call)) = &ast.second_expr {
+        if let Some(function_call) = function_call {
+            environment.update_with(collect_function_call(
+                function_call,
+                name_resolved_map,
+                allocator,
+            ));
+        }
+    }
+
+    if let Some(mapping_operator) = &ast.mapping_operator {
+        environment.update_with(collect_mapping_operator(
+            mapping_operator,
+            name_resolved_map,
+            allocator,
+        ));
+    }
 
     environment
 }

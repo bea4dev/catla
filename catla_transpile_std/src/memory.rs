@@ -136,6 +136,10 @@ impl<T: CatlaDrop> CatlaRefManagement for &CatlaRefObject<T> {
             {
                 return;
             }
+
+            while self.spin_lock_flag.load(Ordering::Relaxed) {
+                std::hint::spin_loop();
+            }
         }
     }
 

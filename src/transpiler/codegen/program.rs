@@ -3,7 +3,10 @@ use std::ops::Range;
 use allocator_api2::vec::Vec;
 use bumpalo::{collections::String, format, Bump};
 use catla_parser::parser::{
-    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp, CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression, MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, Program, SimplePrimary, Spanned, StatementAST, TranspilerTag, UserTypeKindEnum, VariableBinding
+    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp,
+    CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression,
+    MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, Program,
+    SimplePrimary, Spanned, StatementAST, TranspilerTag, UserTypeKindEnum, VariableBinding,
 };
 use either::Either;
 use fxhash::{FxHashMap, FxHashSet};
@@ -55,8 +58,8 @@ fn create_temp_var_with_name<'allocator>(
     temp_var_name
 }
 
-fn build_drop<'allocator>(
-    drop_target: &str,
+fn build_drop_holder<'allocator>(
+    holder: &str,
     ty: &Type,
     lifetime_analyze_result: LifetimeAnalyzeResult,
     code_builder: &mut CodeBuilder<'allocator>,
@@ -72,15 +75,15 @@ fn build_drop<'allocator>(
     }
 
     let drop_func_name = if lifetime_analyze_result.contains_static {
-        "drop_ref"
+        "drop_without_free"
     } else {
-        "drop_ref_non_mutex"
+        "drop_with_free"
     };
 
     let code = format!(
         in code_builder.allocator,
         "{}.{}();",
-        drop_target,
+        holder,
         drop_func_name,
     );
     code_builder.add_line(code);
@@ -216,6 +219,14 @@ pub(crate) fn add_auto_import<'allocator>(
         "use catla_transpile_std::memory::CatlaRefManagement;",
         allocator,
     ));
+    code_builder.add_line(String::from_str_in(
+        "use catla_transpile_std::holder::CatlaObjectHolder;",
+        allocator,
+    ));
+    code_builder.add_line(String::from_str_in(
+        "use catla_transpile_std::holder::Hold;",
+        allocator,
+    ));
 }
 
 pub(crate) fn codegen_program<'allocator>(
@@ -311,40 +322,75 @@ pub(crate) fn codegen_program<'allocator>(
                     );
                     let type_name = type_name_builder.to_string_without_indent().into_bump_str();
 
-                    code_builder.add_str("std::cell::UnsafeCell<");
+                    code_builder.add_str("std::cell::Cell<");
                     code_builder.add_str(type_name);
                     code_builder.add_str(">");
                     code_builder.add_str(",\n");
 
-                    user_type_impl_builder.add_line_str("pub fn __catla_get_");
+                    user_type_impl_builder.add_line_str("pub fn __get_");
                     user_type_impl_builder.add_str(name);
                     user_type_impl_builder.add_str("(&self) -> ");
                     user_type_impl_builder.add_str(type_name);
                     user_type_impl_builder
-                        .add_str("{ if self.is_mutex() { self.lock(); let value = unsafe { *");
+                        .add_str("{ if self.is_mutex() { self.lock(); let value = self.");
                     user_type_impl_builder.add_line_str(name);
                     user_type_impl_builder
-                        .add_str(".get() }; value.clone_ref_mutex(); self.unlock(); value }");
-                    user_type_impl_builder.add_str(" else { let value = unsafe { *");
+                        .add_str(".get(); value.clone_ref_mutex(); self.unlock(); value }");
+                    user_type_impl_builder.add_str(" else { let value = self.");
                     user_type_impl_builder.add_str(name);
-                    user_type_impl_builder.add_str(".get() }; value.clone_ref(); value } }\n");
+                    user_type_impl_builder.add_str(".get(); value.clone_ref(); value } }\n");
 
-                    user_type_impl_builder.add_line_str("pub fn __catla_set_");
+                    user_type_impl_builder.add_line_str("pub fn __get_non_static_");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str("(&self) -> ");
+                    user_type_impl_builder.add_str(type_name);
+                    user_type_impl_builder.add_str(" { let value = self.");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get(); value.clone_ref(); value }\n");
+
+                    user_type_impl_builder.add_line_str("pub fn __get_non_rc");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str("(&self) -> ");
+                    user_type_impl_builder.add_str(type_name);
+                    user_type_impl_builder.add_str(" { self.");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get()}\n");
+
+                    user_type_impl_builder.add_line_str("pub fn __set_");
                     user_type_impl_builder.add_str(name);
                     user_type_impl_builder.add_str("(&self, new: ");
                     user_type_impl_builder.add_str(type_name);
                     user_type_impl_builder.add_str(") ");
                     user_type_impl_builder
-                        .add_str("{ if self.is_mutex() { self.lock(); let value = unsafe { *");
+                        .add_str("{ if self.is_mutex() { self.lock(); let value = self.");
                     user_type_impl_builder.add_str(name);
-                    user_type_impl_builder.add_str(".get() }; value.drop_ref_mutex(); unsafe { *");
+                    user_type_impl_builder.add_str(".get(); value.drop_ref_mutex(); self.");
                     user_type_impl_builder.add_str(name);
-                    user_type_impl_builder.add_str(".get() = new }; self.unlock(); } else { ");
-                    user_type_impl_builder.add_str("let value = unsafe { *");
+                    user_type_impl_builder.add_str(".set(new); self.unlock(); } else { ");
+                    user_type_impl_builder.add_str("let value = self.");
                     user_type_impl_builder.add_str(name);
-                    user_type_impl_builder.add_str(".get() }; value.drop_ref(); unsafe { *");
+                    user_type_impl_builder.add_str(".get(); value.drop_ref(); self.");
                     user_type_impl_builder.add_str(name);
-                    user_type_impl_builder.add_str(".get() = new }; } }\n");
+                    user_type_impl_builder.add_str(".set(new); } }\n");
+
+                    user_type_impl_builder.add_line_str("pub fn __set_non_static");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str("(&self, new: ");
+                    user_type_impl_builder.add_str(type_name);
+                    user_type_impl_builder.add_str(") { ");
+                    user_type_impl_builder.add_str("let value = self.");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".get(); value.drop_ref(); self.");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".set(new); }\n");
+
+                    user_type_impl_builder.add_line_str("pub fn __set_non_rc");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str("(&self, new: ");
+                    user_type_impl_builder.add_str(type_name);
+                    user_type_impl_builder.add_str(") { self.");
+                    user_type_impl_builder.add_str(name);
+                    user_type_impl_builder.add_str(".set(new); }\n");
                 } else {
                     code_builder.add_line_str("let ");
 
@@ -1166,7 +1212,7 @@ fn codegen_primary<'allocator>(
                 for (argument_expr_result, (ty, lifetime_analyze_result)) in
                     argument_results.iter().zip(argument_drop_info.iter()).rev()
                 {
-                    build_drop(
+                    build_drop_holder(
                         argument_expr_result.as_str(),
                         *ty,
                         lifetime_analyze_result.clone(),
@@ -1175,7 +1221,7 @@ fn codegen_primary<'allocator>(
                 }
 
                 if is_closure {
-                    build_drop(
+                    build_drop_holder(
                         literal_value_temp.as_str(),
                         type_inference_result.get_entity_type(EntityID::from(literal)),
                         lifetime_analyze_results.get_result(EntityID::from(literal)),
@@ -1283,11 +1329,11 @@ fn codegen_primary<'allocator>(
                         .get_result(EntityID::from(literal))
                         .contains_static;
 
-                    let getter_name = if contains_static { "get" } else { "borrow" };
+                    let getter_name = if contains_static { "__get" } else { "__get_non_static" };
 
                     let code = format!(
                         in allocator,
-                        "{} = {}.{}_{}();",
+                        "{} = {}.{}_{}().hold();",
                         &literal_value_temp,
                         &last_result_temp_var,
                         getter_name,
@@ -1343,7 +1389,7 @@ fn codegen_primary<'allocator>(
                 for (argument_expr_result, (ty, lifetime_analyze_result)) in
                     argument_results.iter().zip(argument_drop_info.iter()).rev()
                 {
-                    build_drop(
+                    build_drop_holder(
                         argument_expr_result.as_str(),
                         *ty,
                         lifetime_analyze_result.clone(),
@@ -1352,7 +1398,7 @@ fn codegen_primary<'allocator>(
                 }
 
                 if is_closure {
-                    build_drop(
+                    build_drop_holder(
                         literal_value_temp.as_str(),
                         type_inference_result.get_entity_type(EntityID::from(literal)),
                         lifetime_analyze_results.get_result(EntityID::from(literal)),
@@ -1360,7 +1406,7 @@ fn codegen_primary<'allocator>(
                     );
                 }
 
-                build_drop(
+                build_drop_holder(
                     &last_result_temp_var,
                     type_inference_result.get_entity_type(last_entity_id),
                     lifetime_analyze_results.get_result(last_entity_id),
@@ -1377,11 +1423,11 @@ fn codegen_primary<'allocator>(
                     .get_result(EntityID::from(literal))
                     .contains_static;
 
-                let getter_name = if contains_static { "get" } else { "borrow" };
+                let getter_name = if contains_static { "__get" } else { "__get_non_static" };
 
                 let code = format!(
                     in allocator,
-                    "{} = {}.{}_{}();",
+                    "{} = {}.{}_{}().hold();",
                     &literal_value_temp,
                     &last_result_temp_var,
                     getter_name,
@@ -1389,7 +1435,7 @@ fn codegen_primary<'allocator>(
                 );
                 code_builder.add_line(code);
 
-                build_drop(
+                build_drop_holder(
                     &last_result_temp_var,
                     type_inference_result.get_entity_type(last_entity_id),
                     lifetime_analyze_results.get_result(last_entity_id),
@@ -1414,7 +1460,7 @@ fn codegen_primary<'allocator>(
         code_builder.add_line(code);
     } else {
         if !as_assign_left {
-            build_drop(
+            build_drop_holder(
                 &last_result_temp_var,
                 type_inference_result.get_entity_type(last_entity_id),
                 lifetime_analyze_results.get_result(last_entity_id),
@@ -1557,7 +1603,7 @@ fn codegen_primary_left<'allocator>(
                             type_inference_result.get_entity_type(EntityID::from(&ast.first_expr))
                         {
                             if function_info.define_info.is_closure {
-                                true
+                                true && is_static_element
                             } else {
                                 false
                             }
@@ -1568,17 +1614,22 @@ fn codegen_primary_left<'allocator>(
                         if has_ref_count {
                             let code = format!(
                                 in allocator,
-                                "{} = {}.get();",
+                                "{} = {}.get().hold();",
                                 &simple_primary_result_temp,
                                 literal.value,
                             );
                             code_builder.add_line(code);
                         } else {
+                            let contains_static = lifetime_analyze_results.get_result(EntityID::from(literal)).contains_static;
+
+                            let clone_function_name = if contains_static { "clone" } else { "clone_non_mutex" };
+
                             let code = format!(
                                 in allocator,
-                                "{} = {};",
+                                "{} = {}.{}();",
                                 &simple_primary_result_temp,
                                 literal.value,
+                                clone_function_name,
                             );
                             code_builder.add_line(code);
                         }
@@ -1604,13 +1655,7 @@ fn codegen_primary_left<'allocator>(
                             );
                             code_builder.add_line(code);
                         } else {
-                            let code = format!(
-                                in allocator,
-                                "{} = {};",
-                                &simple_primary_result_temp,
-                                literal.value,
-                            );
-                            code_builder.add_line(code);
+                            unreachable!("unresolved literal!");
                         }
                     }
                 }
@@ -1633,7 +1678,7 @@ fn codegen_primary_left<'allocator>(
 
                     let code = format!(
                         in allocator,
-                        "let str = &*STRING_{}_{}; str.clone_ref(); {} = str;",
+                        "let str = &*STRING_{}_{}; str.clone_ref(); {} = str.hold();",
                         literal.span.start,
                         literal.span.end,
                         &simple_primary_result_temp,
@@ -1704,7 +1749,7 @@ fn codegen_primary_left<'allocator>(
 
                 let code = format!(
                     in allocator,
-                    "{} = {}({});",
+                    "{} = {}({}).hold();",
                     &result_temp,
                     &simple_primary_result_temp,
                     arguments,
@@ -1714,7 +1759,7 @@ fn codegen_primary_left<'allocator>(
                 for (argument_expr_result, (ty, lifetime_analyze_result)) in
                     argument_results.iter().zip(argument_drop_info.iter()).rev()
                 {
-                    build_drop(
+                    build_drop_holder(
                         argument_expr_result.as_str(),
                         *ty,
                         lifetime_analyze_result.clone(),
@@ -1726,7 +1771,7 @@ fn codegen_primary_left<'allocator>(
                     .get_entity_type(EntityID::from(simple_primary))
                     .is_closure()
                 {
-                    build_drop(
+                    build_drop_holder(
                         simple_primary_result_temp.as_str(),
                         type_inference_result.get_entity_type(EntityID::from(simple_primary)),
                         lifetime_analyze_results.get_result(EntityID::from(simple_primary)),

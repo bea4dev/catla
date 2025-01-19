@@ -75,9 +75,9 @@ fn build_drop_holder<'allocator>(
     }
 
     let drop_func_name = if lifetime_analyze_result.contains_static {
-        "drop_without_free"
-    } else {
         "drop_with_free"
+    } else {
+        "drop_without_free"
     };
 
     let code = format!(
@@ -212,15 +212,11 @@ pub(crate) fn add_auto_import<'allocator>(
     }
 
     code_builder.add_line(String::from_str_in(
-        "use catla_transpile_std::memory::CatlaRefObject;",
+        "use catla_transpile_std::memory::{ CatlaRefObject, CatlaRefManagement };",
         allocator,
     ));
     code_builder.add_line(String::from_str_in(
-        "use catla_transpile_std::memory::CatlaRefManagement;",
-        allocator,
-    ));
-    code_builder.add_line(String::from_str_in(
-        "use catla_transpile_std::holder::CatlaObjectHolder;",
+        "use catla_transpile_std::holder::{ CatlaObjectHolder, CatlaObjectDummyHolder };",
         allocator,
     ));
     code_builder.add_line(String::from_str_in(
@@ -240,6 +236,7 @@ pub(crate) fn codegen_program<'allocator>(
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     mut code_builder: &mut CodeBuilder<'allocator>,
+    is_interface_scope: bool,
     allocator: &'allocator Bump,
     errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext,
@@ -457,13 +454,19 @@ pub(crate) fn codegen_program<'allocator>(
                         context,
                     );
                 } else {
+                    code_builder.add_line_str("");
                     // TODO : add arguments, return type, etc...
+
+                    if !is_interface_scope {
+                        code_builder.add_str("pub ");
+                    }
+
                     let code = format!(
                         in allocator,
-                        "pub fn {}() {{",
+                        "fn {}() {{",
                         function_define.name.as_ref().unwrap().value,
                     );
-                    code_builder.add_line(code);
+                    code_builder.add_str(code.into_bump_str());
 
                     if let Either::Right(block) =
                         function_define.block_or_semicolon.value.as_ref().unwrap()
@@ -492,6 +495,7 @@ pub(crate) fn codegen_program<'allocator>(
                             &mut top_stack_alloc_builder,
                             &mut current_tree_alloc_builder,
                             &mut code_builder,
+                            false,
                             allocator,
                             errors,
                             context,
@@ -524,8 +528,6 @@ pub(crate) fn codegen_program<'allocator>(
                         context,
                     );
                 } else {
-                    code_builder.add_line_str("impl<");
-
                     let mut generics = Vec::new_in(allocator);
 
                     if let Some(generic_define) = &user_type_define.generics_define {
@@ -537,41 +539,60 @@ pub(crate) fn codegen_program<'allocator>(
                         }
                     }
 
-                    for generic in generics.iter() {
-                        code_builder.add_str(*generic);
+                    let mut user_type_impl_builder = None;
+
+                    if user_type_define.kind.value != UserTypeKindEnum::Interface {
+                        code_builder.add_line_str("impl<");
+
+                        for generic in generics.iter() {
+                            code_builder.add_str(*generic);
+                        }
+
+                        if user_type_define.kind.value == UserTypeKindEnum::Class {
+                            code_builder.add_str("> CatlaRefObject<");
+                        } else {
+                            code_builder.add_str("> ");
+                        }
+
+                        code_builder.add_str(
+                            String::from_str_in(
+                                user_type_define.name.as_ref().unwrap().value,
+                                allocator,
+                            )
+                            .into_bump_str(),
+                        );
+
+                        code_builder.add_str("<");
+
+                        for generic in generics.iter() {
+                            code_builder.add_str(*generic);
+                        }
+
+                        if user_type_define.kind.value == UserTypeKindEnum::Class {
+                            code_builder.add_str(">> {\n");
+                        } else {
+                            code_builder.add_str("> {\n");
+                        }
+
+                        user_type_impl_builder = {
+                            let mut builder = code_builder.fork();
+                            builder.push_indent();
+                            Some(builder)
+                        };
+
+                        code_builder.add_line_str("}");
                     }
 
-                    if user_type_define.kind.value == UserTypeKindEnum::Class {
-                        code_builder.add_str("> CatlaRefObject<");
-                    } else {
-                        code_builder.add_str("> ");
-                    }
+                    code_builder.add_line_str("pub ");
 
-                    code_builder.add_str(
-                        String::from_str_in(
-                            user_type_define.name.as_ref().unwrap().value,
-                            allocator,
-                        )
-                        .into_bump_str(),
-                    );
+                    let type_kind = match user_type_define.kind.value {
+                        UserTypeKindEnum::Class => "struct",
+                        UserTypeKindEnum::Struct => "struct",
+                        UserTypeKindEnum::Interface => "trait",
+                    };
 
-                    code_builder.add_str("<");
-
-                    for generic in generics.iter() {
-                        code_builder.add_str(*generic);
-                    }
-
-                    if user_type_define.kind.value == UserTypeKindEnum::Class {
-                        code_builder.add_str(">> {\n");
-                    } else {
-                        code_builder.add_str("> {\n");
-                    }
-
-                    let mut user_type_impl_builder = code_builder.fork();
-
-                    code_builder.add_line_str("}");
-
-                    code_builder.add_line_str("pub struct ");
+                    code_builder.add_str(type_kind);
+                    code_builder.add_str(" ");
 
                     code_builder.add_str(
                         String::from_str_in(
@@ -589,7 +610,17 @@ pub(crate) fn codegen_program<'allocator>(
 
                     code_builder.add_str("> {");
 
+                    let mut user_type_impl_builder = match user_type_impl_builder {
+                        Some(builder) => builder,
+                        None => {
+                            let mut builder = code_builder.fork();
+                            builder.push_indent();
+                            builder
+                        }
+                    };
+
                     let mut child_code_builder = code_builder.fork();
+                    child_code_builder.push_indent();
 
                     codegen_program(
                         user_type_define.block.value.as_ref().unwrap().program,
@@ -602,6 +633,7 @@ pub(crate) fn codegen_program<'allocator>(
                         top_stack_alloc_builder,
                         current_tree_alloc_builder,
                         &mut child_code_builder,
+                        user_type_define.kind.value == UserTypeKindEnum::Interface,
                         allocator,
                         errors,
                         context,
@@ -1197,7 +1229,7 @@ fn codegen_primary<'allocator>(
                 let mut arguments = String::new_in(allocator);
                 for argument_result in argument_results.iter() {
                     arguments += argument_result.as_str();
-                    arguments += ", ";
+                    arguments += ".borrow(), ";
                 }
 
                 let code = format!(
@@ -1329,7 +1361,11 @@ fn codegen_primary<'allocator>(
                         .get_result(EntityID::from(literal))
                         .contains_static;
 
-                    let getter_name = if contains_static { "__get" } else { "__get_non_static" };
+                    let getter_name = if contains_static {
+                        "__get"
+                    } else {
+                        "__get_non_static"
+                    };
 
                     let code = format!(
                         in allocator,
@@ -1374,7 +1410,7 @@ fn codegen_primary<'allocator>(
                 let mut arguments = String::new_in(allocator);
                 for argument_result in argument_results.iter() {
                     arguments += argument_result.as_str();
-                    arguments += ", ";
+                    arguments += ".borrow(), ";
                 }
 
                 let code = format!(
@@ -1423,7 +1459,11 @@ fn codegen_primary<'allocator>(
                     .get_result(EntityID::from(literal))
                     .contains_static;
 
-                let getter_name = if contains_static { "__get" } else { "__get_non_static" };
+                let getter_name = if contains_static {
+                    "__get"
+                } else {
+                    "__get_non_static"
+                };
 
                 let code = format!(
                     in allocator,
@@ -1620,9 +1660,15 @@ fn codegen_primary_left<'allocator>(
                             );
                             code_builder.add_line(code);
                         } else {
-                            let contains_static = lifetime_analyze_results.get_result(EntityID::from(literal)).contains_static;
+                            let contains_static = lifetime_analyze_results
+                                .get_result(EntityID::from(literal))
+                                .contains_static;
 
-                            let clone_function_name = if contains_static { "clone" } else { "clone_non_mutex" };
+                            let clone_function_name = if contains_static {
+                                "clone"
+                            } else {
+                                "clone_non_mutex"
+                            };
 
                             let code = format!(
                                 in allocator,
@@ -1744,7 +1790,7 @@ fn codegen_primary_left<'allocator>(
                 let mut arguments = String::new_in(allocator);
                 for argument_result in argument_results.iter() {
                     arguments += argument_result.as_str();
-                    arguments += ", ";
+                    arguments += ".borrow(), ";
                 }
 
                 let code = format!(

@@ -64,16 +64,41 @@ impl<T: CatlaRefManagement + Copy> Drop for CatlaObjectHolder<T> {
     }
 }
 
+#[repr(transparent)]
+pub struct CatlaObjectDummyHolder<T: CatlaRefManagement + Copy> {
+    object: T,
+}
+
+impl<T: CatlaRefManagement + Copy> CatlaObjectDummyHolder<T> {
+    #[inline(always)]
+    pub fn borrow(&self) -> T {
+        self.object
+    }
+
+    #[inline(always)]
+    pub fn drop_without_free(self) {}
+
+    #[inline(always)]
+    pub fn drop_with_free(self) {}
+}
+
 pub trait Hold
 where
     Self: CatlaRefManagement + Copy,
 {
     fn hold(self) -> CatlaObjectHolder<Self>;
+
+    fn hold_dummy(self) -> CatlaObjectDummyHolder<Self>;
 }
 
 impl<T: CatlaRefManagement + Copy> Hold for T {
     #[inline(always)]
     fn hold(self) -> CatlaObjectHolder<Self> {
         CatlaObjectHolder { object: self }
+    }
+
+    #[inline(always)]
+    fn hold_dummy(self) -> CatlaObjectDummyHolder<Self> {
+        CatlaObjectDummyHolder { object: self }
     }
 }

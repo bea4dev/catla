@@ -334,6 +334,7 @@ pub fn codegen(
         &mut StackAllocCodeBuilder::new(&mut code_builder),
         &mut StackAllocCodeBuilder::new(&mut code_builder),
         &mut code_builder,
+        false,
         &allocator,
         errors,
         context,

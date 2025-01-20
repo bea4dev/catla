@@ -3,10 +3,11 @@ use std::ops::Range;
 use allocator_api2::vec::Vec;
 use bumpalo::{collections::String, format, Bump};
 use catla_parser::parser::{
-    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp,
-    CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression,
-    MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, Program,
-    SimplePrimary, Spanned, StatementAST, TranspilerTag, UserTypeKindEnum, VariableBinding,
+    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, BaseTypeInfo, CompareExpression,
+    CompareOp, CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, GenericsDefine,
+    MulOrDivExpression, MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft,
+    PrimaryLeftExpr, Program, SimplePrimary, Spanned, StatementAST, TranspilerTag, TypeInfo,
+    UserTypeKindEnum, VariableBinding,
 };
 use either::Either;
 use fxhash::{FxHashMap, FxHashSet};
@@ -225,8 +226,8 @@ pub(crate) fn add_auto_import<'allocator>(
     ));
 }
 
-pub(crate) fn codegen_program<'allocator>(
-    ast: Program,
+pub(crate) fn codegen_program<'allocator, 'input: 'allocator>(
+    ast: Program<'input, '_>,
     result_bind_var_name: Option<&str>,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_analyze_results: &LifetimeAnalyzeResults,
@@ -455,7 +456,6 @@ pub(crate) fn codegen_program<'allocator>(
                     );
                 } else {
                     code_builder.add_line_str("");
-                    // TODO : add arguments, return type, etc...
 
                     if !is_interface_scope {
                         code_builder.add_str("pub ");
@@ -683,14 +683,14 @@ pub(crate) fn codegen_program<'allocator>(
     }
 }
 
-fn codegen_variable_binding<'allocator>(
-    ast: &VariableBinding,
+fn codegen_variable_binding<'allocator, 'input: 'allocator>(
+    ast: &VariableBinding<'input, '_>,
     code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
 ) {
     match &ast.binding {
         Either::Left(literal) => {
-            code_builder.add_str(String::from_str_in(literal.value, allocator).into_bump_str());
+            code_builder.add_str(literal.value);
         }
         Either::Right(bindings) => {
             code_builder.add_str("(");
@@ -803,8 +803,71 @@ fn codegen_type<'allocator>(
     code_builder.add_line_str(primitive_type_name);
 }
 
-fn codegen_expression<'allocator>(
-    ast: Expression,
+fn codegen_generics_define<'allocator, 'input: 'allocator>(
+    ast: &GenericsDefine<'input, '_>,
+    code_builder: &mut CodeBuilder<'allocator>,
+) {
+    code_builder.add_str("<");
+
+    for generic in ast.elements.iter() {
+        code_builder.add_str(generic.name.value);
+
+        if !generic.bounds.is_empty() {
+            code_builder.add_str(": ");
+
+            for bound in generic.bounds.iter() {
+                
+            }
+        }
+    }
+
+    code_builder.add_str(">");
+}
+
+fn codegen_type_info<'allocator, 'input: 'allocator>(
+    ast: &TypeInfo<'input, '_>,
+    code_builder: &mut CodeBuilder<'allocator>,
+) {
+    match ast {
+        TypeInfo::BaseType(base_type_info) => codegen_base_type_info(base_type_info, code_builder),
+        TypeInfo::ArrayType(array_type_info) => todo!(),
+        TypeInfo::TupleType(tuple_type_info) => {
+            code_builder.add_str("(");
+
+            for type_info in tuple_type_info.types.iter() {
+                
+            }
+        },
+    }
+}
+
+fn codegen_base_type_info<'allocator, 'input: 'allocator>(
+    ast: &BaseTypeInfo<'input, '_>,
+    code_builder: &mut CodeBuilder<'allocator>,
+) {
+    for (index, path) in ast.path.iter().enumerate() {
+        if index != 0 {
+            code_builder.add_str("::");
+        }
+
+        code_builder.add_str(path.value);
+    }
+
+    if let Some(generics) = &ast.generics {
+        code_builder.add_str("<");
+
+        for element in generics.elements.iter() {
+            codegen_type_info(element, code_builder);
+
+            code_builder.add_str(", ");
+        }
+
+        code_builder.add_str(">");
+    }
+}
+
+fn codegen_expression<'allocator, 'input: 'allocator>(
+    ast: Expression<'input, '_>,
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
@@ -941,8 +1004,8 @@ macro_rules! codegen_for_op2 {
         $operator_span_provider:expr,
         $method_name_provider:expr
     ) => {
-        fn $function_name<'allocator>(
-            ast: &$ast_type,
+        fn $function_name<'allocator, 'input: 'allocator>(
+            ast: &$ast_type<'input, '_>,
             result_bind_var_name: Option<&str>,
             as_assign_left: bool,
             type_inference_result: &TypeInferenceResultContainer,
@@ -1117,8 +1180,8 @@ codegen_for_op2!(
     }
 );
 
-fn codegen_factor<'allocator>(
-    ast: &Factor,
+fn codegen_factor<'allocator, 'input: 'allocator>(
+    ast: &Factor<'input, '_>,
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
@@ -1153,8 +1216,8 @@ fn codegen_factor<'allocator>(
     }
 }
 
-fn codegen_primary<'allocator>(
-    ast: &Primary,
+fn codegen_primary<'allocator, 'input: 'allocator>(
+    ast: &Primary<'input, '_>,
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,
@@ -1510,8 +1573,8 @@ fn codegen_primary<'allocator>(
     }
 }
 
-fn codegen_function_call_arguments<'allocator, 'ty>(
-    ast: &FunctionCall,
+fn codegen_function_call_arguments<'allocator, 'input: 'allocator, 'ty>(
+    ast: &FunctionCall<'input, '_>,
     type_inference_result: &'ty TypeInferenceResultContainer,
     lifetime_analyze_results: &LifetimeAnalyzeResults,
     import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
@@ -1566,8 +1629,8 @@ fn codegen_function_call_arguments<'allocator, 'ty>(
     (argument_results, argument_drop_info)
 }
 
-fn codegen_primary_left<'allocator>(
-    ast: &PrimaryLeft,
+fn codegen_primary_left<'allocator, 'input: 'allocator>(
+    ast: &PrimaryLeft<'input, '_>,
     result_bind_var_name: &str,
     as_assign_left: bool,
     type_inference_result: &TypeInferenceResultContainer,

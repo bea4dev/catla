@@ -426,6 +426,7 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         &lifetime_analyze_results,
         &import_element_map,
         &name_resolved_map,
+        &module_entity_type_map,
         &mut errors,
         &module_context,
     );

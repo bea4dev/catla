@@ -16,7 +16,7 @@ use super::{
     context::{TranspileContext, TranspileModuleContext},
     name_resolver::FoundDefineInfo,
     optimizer::lifetime_analyzer::LifetimeAnalyzeResults,
-    semantics::types::type_inference::TypeInferenceResultContainer,
+    semantics::types::{type_inference::TypeInferenceResultContainer, type_info::Type},
     TranspileError,
 };
 
@@ -314,6 +314,7 @@ pub fn codegen(
     lifetime_analyze_results: &LifetimeAnalyzeResults,
     import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_entity_type_map: &FxHashMap<EntityID, Type>,
     errors: &mut Vec<TranspileError>,
     context: &TranspileModuleContext,
 ) {
@@ -330,6 +331,7 @@ pub fn codegen(
         lifetime_analyze_results,
         import_element_map,
         name_resolved_map,
+        module_entity_type_map,
         None,
         &mut StackAllocCodeBuilder::new(&mut code_builder),
         &mut StackAllocCodeBuilder::new(&mut code_builder),

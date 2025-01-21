@@ -3,11 +3,10 @@ use std::ops::Range;
 use allocator_api2::vec::Vec;
 use bumpalo::{collections::String, format, Bump};
 use catla_parser::parser::{
-    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, BaseTypeInfo, CompareExpression,
-    CompareOp, CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, GenericsDefine,
-    MulOrDivExpression, MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft,
-    PrimaryLeftExpr, Program, SimplePrimary, Spanned, StatementAST, TranspilerTag, TypeInfo,
-    UserTypeKindEnum, VariableBinding,
+    AddOrSubExpression, AddOrSubOp, AddOrSubOpKind, AndExpression, CompareExpression, CompareOp,
+    CompareOpKind, Expression, ExpressionEnum, Factor, FunctionCall, MulOrDivExpression,
+    MulOrDivOp, MulOrDivOpKind, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, Program,
+    SimplePrimary, Spanned, StatementAST, TranspilerTag, UserTypeKindEnum, VariableBinding,
 };
 use either::Either;
 use fxhash::{FxHashMap, FxHashSet};
@@ -226,13 +225,14 @@ pub(crate) fn add_auto_import<'allocator>(
     ));
 }
 
-pub(crate) fn codegen_program<'allocator, 'input: 'allocator>(
+pub(crate) fn codegen_program<'allocator, 'input: 'allocator, 'type_map: 'allocator>(
     ast: Program<'input, '_>,
     result_bind_var_name: Option<&str>,
     type_inference_result: &TypeInferenceResultContainer,
     lifetime_analyze_results: &LifetimeAnalyzeResults,
     import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_entity_type_map: &'type_map FxHashMap<EntityID, Type>,
     mut user_type_impl_builder: Option<&mut CodeBuilder<'allocator>>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
@@ -266,6 +266,7 @@ pub(crate) fn codegen_program<'allocator, 'input: 'allocator>(
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
+                    module_entity_type_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -282,6 +283,7 @@ pub(crate) fn codegen_program<'allocator, 'input: 'allocator>(
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
+                    module_entity_type_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -426,6 +428,7 @@ pub(crate) fn codegen_program<'allocator, 'input: 'allocator>(
                                 lifetime_analyze_results,
                                 import_element_map,
                                 name_resolved_map,
+                                module_entity_type_map,
                                 top_stack_alloc_builder,
                                 current_tree_alloc_builder,
                                 code_builder,
@@ -461,12 +464,55 @@ pub(crate) fn codegen_program<'allocator, 'input: 'allocator>(
                         code_builder.add_str("pub ");
                     }
 
-                    let code = format!(
-                        in allocator,
-                        "fn {}() {{",
-                        function_define.name.as_ref().unwrap().value,
-                    );
-                    code_builder.add_str(code.into_bump_str());
+                    code_builder.add_str("fn ");
+                    code_builder.add_str(function_define.name.as_ref().unwrap().value);
+
+                    let function_type = module_entity_type_map
+                        .get(&EntityID::from(function_define))
+                        .unwrap();
+
+                    if let Type::Function {
+                        function_info,
+                        generics: _,
+                    } = function_type
+                    {
+                        if !function_info.generics_define.is_empty() {
+                            code_builder.add_str("<");
+                            for generic in function_info.generics_define.iter() {
+                                code_builder.add_str(generic.name.as_str());
+                            }
+                            code_builder.add_str(">");
+                        }
+
+                        code_builder.add_str("(");
+
+                        let mut argument_type_iterator = function_info.argument_types.iter();
+                        if function_info.is_extension {
+                            argument_type_iterator.next();
+                        }
+
+                        for (argument, argument_type) in function_define
+                            .args
+                            .arguments
+                            .iter()
+                            .zip(argument_type_iterator)
+                        {
+                            codegen_variable_binding(&argument.binding, code_builder, allocator);
+
+                            code_builder.add_str(": ");
+
+                            codegen_type(argument_type, code_builder, allocator);
+
+                            code_builder.add_str(", ");
+                        }
+
+                        code_builder.add_str(")");
+
+                        code_builder.add_str(" -> ");
+                        codegen_type(&function_info.return_type.value, code_builder, allocator);
+
+                        code_builder.add_str("{");
+                    }
 
                     if let Either::Right(block) =
                         function_define.block_or_semicolon.value.as_ref().unwrap()
@@ -491,6 +537,7 @@ pub(crate) fn codegen_program<'allocator, 'input: 'allocator>(
                             lifetime_analyze_results,
                             import_element_map,
                             name_resolved_map,
+                            module_entity_type_map,
                             None,
                             &mut top_stack_alloc_builder,
                             &mut current_tree_alloc_builder,
@@ -629,6 +676,7 @@ pub(crate) fn codegen_program<'allocator, 'input: 'allocator>(
                         lifetime_analyze_results,
                         import_element_map,
                         name_resolved_map,
+                        module_entity_type_map,
                         Some(&mut user_type_impl_builder),
                         top_stack_alloc_builder,
                         current_tree_alloc_builder,
@@ -661,6 +709,7 @@ pub(crate) fn codegen_program<'allocator, 'input: 'allocator>(
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
+                    module_entity_type_map,
                     top_stack_alloc_builder,
                     &mut current_tree_alloc_builder,
                     code_builder,
@@ -683,7 +732,7 @@ pub(crate) fn codegen_program<'allocator, 'input: 'allocator>(
     }
 }
 
-fn codegen_variable_binding<'allocator, 'input: 'allocator>(
+fn codegen_variable_binding<'allocator, 'input: 'allocator, 'type_map: 'allocator>(
     ast: &VariableBinding<'input, '_>,
     code_builder: &mut CodeBuilder<'allocator>,
     allocator: &'allocator Bump,
@@ -803,70 +852,7 @@ fn codegen_type<'allocator>(
     code_builder.add_line_str(primitive_type_name);
 }
 
-fn codegen_generics_define<'allocator, 'input: 'allocator>(
-    ast: &GenericsDefine<'input, '_>,
-    code_builder: &mut CodeBuilder<'allocator>,
-) {
-    code_builder.add_str("<");
-
-    for generic in ast.elements.iter() {
-        code_builder.add_str(generic.name.value);
-
-        if !generic.bounds.is_empty() {
-            code_builder.add_str(": ");
-
-            for bound in generic.bounds.iter() {
-                
-            }
-        }
-    }
-
-    code_builder.add_str(">");
-}
-
-fn codegen_type_info<'allocator, 'input: 'allocator>(
-    ast: &TypeInfo<'input, '_>,
-    code_builder: &mut CodeBuilder<'allocator>,
-) {
-    match ast {
-        TypeInfo::BaseType(base_type_info) => codegen_base_type_info(base_type_info, code_builder),
-        TypeInfo::ArrayType(array_type_info) => todo!(),
-        TypeInfo::TupleType(tuple_type_info) => {
-            code_builder.add_str("(");
-
-            for type_info in tuple_type_info.types.iter() {
-                
-            }
-        },
-    }
-}
-
-fn codegen_base_type_info<'allocator, 'input: 'allocator>(
-    ast: &BaseTypeInfo<'input, '_>,
-    code_builder: &mut CodeBuilder<'allocator>,
-) {
-    for (index, path) in ast.path.iter().enumerate() {
-        if index != 0 {
-            code_builder.add_str("::");
-        }
-
-        code_builder.add_str(path.value);
-    }
-
-    if let Some(generics) = &ast.generics {
-        code_builder.add_str("<");
-
-        for element in generics.elements.iter() {
-            codegen_type_info(element, code_builder);
-
-            code_builder.add_str(", ");
-        }
-
-        code_builder.add_str(">");
-    }
-}
-
-fn codegen_expression<'allocator, 'input: 'allocator>(
+fn codegen_expression<'allocator, 'input: 'allocator, 'type_map: 'allocator>(
     ast: Expression<'input, '_>,
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
@@ -874,6 +860,7 @@ fn codegen_expression<'allocator, 'input: 'allocator>(
     lifetime_analyze_results: &LifetimeAnalyzeResults,
     import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_entity_type_map: &'type_map FxHashMap<EntityID, Type>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
@@ -906,6 +893,7 @@ fn codegen_expression<'allocator, 'input: 'allocator>(
                 lifetime_analyze_results,
                 import_element_map,
                 name_resolved_map,
+                module_entity_type_map,
                 top_stack_alloc_builder,
                 current_tree_alloc_builder,
                 code_builder,
@@ -935,6 +923,7 @@ fn codegen_expression<'allocator, 'input: 'allocator>(
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
+                    module_entity_type_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -1004,7 +993,7 @@ macro_rules! codegen_for_op2 {
         $operator_span_provider:expr,
         $method_name_provider:expr
     ) => {
-        fn $function_name<'allocator, 'input: 'allocator>(
+        fn $function_name<'allocator, 'input: 'allocator, 'type_map: 'allocator>(
             ast: &$ast_type<'input, '_>,
             result_bind_var_name: Option<&str>,
             as_assign_left: bool,
@@ -1012,6 +1001,7 @@ macro_rules! codegen_for_op2 {
             lifetime_analyze_results: &LifetimeAnalyzeResults,
             import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
             name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+            module_entity_type_map: &'type_map FxHashMap<EntityID, Type>,
             top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
             current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
             code_builder: &mut CodeBuilder<'allocator>,
@@ -1028,6 +1018,7 @@ macro_rules! codegen_for_op2 {
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
+                    module_entity_type_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -1046,6 +1037,7 @@ macro_rules! codegen_for_op2 {
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
+                    module_entity_type_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -1069,6 +1061,7 @@ macro_rules! codegen_for_op2 {
                         lifetime_analyze_results,
                         import_element_map,
                         name_resolved_map,
+                        module_entity_type_map,
                         top_stack_alloc_builder,
                         current_tree_alloc_builder,
                         code_builder,
@@ -1180,7 +1173,7 @@ codegen_for_op2!(
     }
 );
 
-fn codegen_factor<'allocator, 'input: 'allocator>(
+fn codegen_factor<'allocator, 'input: 'allocator, 'type_map: 'allocator>(
     ast: &Factor<'input, '_>,
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
@@ -1188,6 +1181,7 @@ fn codegen_factor<'allocator, 'input: 'allocator>(
     lifetime_analyze_results: &LifetimeAnalyzeResults,
     import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_entity_type_map: &'type_map FxHashMap<EntityID, Type>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
@@ -1206,6 +1200,7 @@ fn codegen_factor<'allocator, 'input: 'allocator>(
             lifetime_analyze_results,
             import_element_map,
             name_resolved_map,
+            module_entity_type_map,
             top_stack_alloc_builder,
             current_tree_alloc_builder,
             code_builder,
@@ -1216,7 +1211,7 @@ fn codegen_factor<'allocator, 'input: 'allocator>(
     }
 }
 
-fn codegen_primary<'allocator, 'input: 'allocator>(
+fn codegen_primary<'allocator, 'input: 'allocator, 'type_map: 'allocator>(
     ast: &Primary<'input, '_>,
     result_bind_var_name: Option<&str>,
     as_assign_left: bool,
@@ -1224,6 +1219,7 @@ fn codegen_primary<'allocator, 'input: 'allocator>(
     lifetime_analyze_results: &LifetimeAnalyzeResults,
     import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_entity_type_map: &'type_map FxHashMap<EntityID, Type>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
@@ -1275,6 +1271,7 @@ fn codegen_primary<'allocator, 'input: 'allocator>(
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
+                    module_entity_type_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -1388,6 +1385,7 @@ fn codegen_primary<'allocator, 'input: 'allocator>(
             lifetime_analyze_results,
             import_element_map,
             name_resolved_map,
+            module_entity_type_map,
             top_stack_alloc_builder,
             current_tree_alloc_builder,
             code_builder,
@@ -1456,6 +1454,7 @@ fn codegen_primary<'allocator, 'input: 'allocator>(
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
+                    module_entity_type_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -1573,12 +1572,13 @@ fn codegen_primary<'allocator, 'input: 'allocator>(
     }
 }
 
-fn codegen_function_call_arguments<'allocator, 'input: 'allocator, 'ty>(
+fn codegen_function_call_arguments<'allocator, 'input: 'allocator, 'type_map: 'allocator, 'ty>(
     ast: &FunctionCall<'input, '_>,
     type_inference_result: &'ty TypeInferenceResultContainer,
     lifetime_analyze_results: &LifetimeAnalyzeResults,
     import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_entity_type_map: &'type_map FxHashMap<EntityID, Type>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
@@ -1608,6 +1608,7 @@ fn codegen_function_call_arguments<'allocator, 'input: 'allocator, 'ty>(
                 lifetime_analyze_results,
                 import_element_map,
                 name_resolved_map,
+                module_entity_type_map,
                 top_stack_alloc_builder,
                 current_tree_alloc_builder,
                 code_builder,
@@ -1629,7 +1630,7 @@ fn codegen_function_call_arguments<'allocator, 'input: 'allocator, 'ty>(
     (argument_results, argument_drop_info)
 }
 
-fn codegen_primary_left<'allocator, 'input: 'allocator>(
+fn codegen_primary_left<'allocator, 'input: 'allocator, 'type_map: 'allocator>(
     ast: &PrimaryLeft<'input, '_>,
     result_bind_var_name: &str,
     as_assign_left: bool,
@@ -1637,6 +1638,7 @@ fn codegen_primary_left<'allocator, 'input: 'allocator>(
     lifetime_analyze_results: &LifetimeAnalyzeResults,
     import_element_map: &FxHashMap<EntityID, Spanned<std::string::String>>,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
+    module_entity_type_map: &'type_map FxHashMap<EntityID, Type>,
     top_stack_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     current_tree_alloc_builder: &mut StackAllocCodeBuilder<'allocator>,
     code_builder: &mut CodeBuilder<'allocator>,
@@ -1675,6 +1677,7 @@ fn codegen_primary_left<'allocator, 'input: 'allocator>(
                             lifetime_analyze_results,
                             import_element_map,
                             name_resolved_map,
+                            module_entity_type_map,
                             top_stack_alloc_builder,
                             current_tree_alloc_builder,
                             code_builder,
@@ -1836,6 +1839,7 @@ fn codegen_primary_left<'allocator, 'input: 'allocator>(
                     lifetime_analyze_results,
                     import_element_map,
                     name_resolved_map,
+                    module_entity_type_map,
                     top_stack_alloc_builder,
                     current_tree_alloc_builder,
                     code_builder,
@@ -1927,6 +1931,7 @@ fn codegen_primary_left<'allocator, 'input: 'allocator>(
                         lifetime_analyze_results,
                         import_element_map,
                         name_resolved_map,
+                        module_entity_type_map,
                         top_stack_alloc_builder,
                         current_tree_alloc_builder,
                         code_builder,

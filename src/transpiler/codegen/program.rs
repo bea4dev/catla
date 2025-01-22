@@ -511,7 +511,7 @@ pub(crate) fn codegen_program<'allocator, 'input: 'allocator, 'type_map: 'alloca
                         code_builder.add_str(" -> ");
                         codegen_type(&function_info.return_type.value, code_builder, allocator);
 
-                        code_builder.add_str("{");
+                        code_builder.add_str(" {");
                     }
 
                     if let Either::Right(block) =

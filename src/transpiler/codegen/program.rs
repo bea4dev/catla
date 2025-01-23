@@ -511,6 +511,32 @@ pub(crate) fn codegen_program<'allocator, 'input: 'allocator, 'type_map: 'alloca
                         code_builder.add_str(" -> ");
                         codegen_type(&function_info.return_type.value, code_builder, allocator);
 
+                        {
+                            let where_bounds = function_info.where_bounds.freeze_and_get();
+
+                            if !where_bounds.is_empty() {
+                                code_builder.add_str(" where ");
+
+                                for where_bound in where_bounds.iter() {
+                                    codegen_type(
+                                        &where_bound.target_type.value,
+                                        code_builder,
+                                        allocator,
+                                    );
+                                    code_builder.add_str(": ");
+
+                                    for (index, bound) in where_bound.bounds.iter().enumerate() {
+                                        if index != 0 {
+                                            code_builder.add_str(" + ");
+                                        }
+                                        codegen_type(&bound.ty, code_builder, allocator);
+                                    }
+
+                                    code_builder.add_str(", ");
+                                }
+                            }
+                        }
+
                         code_builder.add_str(" {");
                     }
 

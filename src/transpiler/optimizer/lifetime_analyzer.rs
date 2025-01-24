@@ -1750,6 +1750,44 @@ impl LifetimeEvaluator {
     }
 }
 
+pub struct FunctionReturnTreeAllocPriorInfo {
+    lifetime_tree_element_map: FxHashMap<EntityID, Option<String>>,
+    disabled_element_path: FxHashSet<String>,
+}
+
+impl FunctionReturnTreeAllocPriorInfo {
+    pub fn new() -> Self {
+        Self {
+            lifetime_tree_element_map: FxHashMap::default(),
+            disabled_element_path: FxHashSet::default(),
+        }
+    }
+
+    pub fn collect(
+        &mut self,
+        instance: &LifetimeInstance,
+        tree_ref: LifetimeTreeRef,
+        current_path: String,
+        loop_suppressor: &mut LoopSuppressor,
+    ) {
+        if !loop_suppressor.mark_as_explored(tree_ref) {
+            self.disabled_element_path.insert(current_path);
+            return;
+        }
+
+        let tree_ref = instance.resolve_lifetime_ref(tree_ref);
+        let tree = instance.lifetime_tree_map.get(&tree_ref).unwrap();
+
+        if !tree.is_alloc_point {
+            return;
+        }
+
+        if instance.contains_static_lifetime(tree_ref, &mut LoopSuppressor::new()) {
+            return;
+        }
+    }
+}
+
 pub struct LifetimeAnalyzeResults {
     entity_result_map: FxHashMap<EntityID, LifetimeAnalyzeResult>,
 }

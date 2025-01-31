@@ -235,3 +235,21 @@ let i_convert_0 = if true { error(0) } else { temp }
 
 let nullable: Tree??? = null
 let nullable_field = nullable?.?.?.field
+
+let a = if true {
+    let temp = new Tree { field: null }
+    temp
+} else {
+    let temp = new Tree { field: null }
+    temp
+}
+
+var a = new Tree { field: null }
+a = new Tree { field: null }
+
+function aaaaaaa() -> Tree? {
+    static let temp: Tree? = null
+    return temp
+}
+
+let a = aaaaaaa()

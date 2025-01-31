@@ -1793,7 +1793,13 @@ fn codegen_primary_left<'allocator, 'input: 'allocator, 'type_map: 'allocator>(
                             );
                             code_builder.add_line(code);
                         } else {
-                            unreachable!("unresolved literal!");
+                            let code = format!(
+                                in allocator,
+                                "{} = {};",
+                                &simple_primary_result_temp,
+                                literal.value,
+                            );
+                            code_builder.add_line(code);
                         }
                     }
                 }
@@ -1855,7 +1861,14 @@ fn codegen_primary_left<'allocator, 'input: 'allocator, 'type_map: 'allocator>(
                     );
                     code_builder.add_line(code);
                 }
-                SimplePrimary::LargeThisKeyword(_) => unreachable!(),
+                SimplePrimary::LargeThisKeyword(_) => {
+                    let code = format!(
+                        in allocator,
+                        "{} = Self;",
+                        &simple_primary_result_temp,
+                    );
+                    code_builder.add_line(code);
+                },
             }
 
             if let Some(function_call) = function_call {

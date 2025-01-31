@@ -56,11 +56,12 @@ fn main() {
 
     let context = TranspileContext::new(settings, auto_import, resource_provider);
 
-    transpile("test::main".to_string(), context.clone()).unwrap();
+    transpile("test::test".to_string(), context.clone()).unwrap();
 
     context.print_report();
 
+    /*
     set_current_dir(Path::new(".catla/test")).unwrap();
     set_var("RUSTFLAGS", "-Awarnings");
-    Command::new("cargo").arg("run").spawn().unwrap();
+    Command::new("cargo").arg("run").spawn().unwrap();*/
 }

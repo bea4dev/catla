@@ -11,10 +11,10 @@ use crate::{localize::localizer::LocalizedText, transpiler::error::TranspileRepo
 
 use super::{
     future::{MultiPhaseFuture, SharedManualFuture},
-    optimizer::lifetime_analyzer::LifetimeEvaluator,
+    optimizer::{function_equals::GlobalFunctionEqualsInfo, lifetime_analyzer::LifetimeEvaluator},
     resource::SourceCodeProvider,
     semantics::types::type_info::{ImplementsInfoSet, Type},
-    SourceCode, TranspileError, TranspileWarning,
+    SourceCode, TranspileError, TranspileWarning, NUMBER_OF_TRANSPILE_PHASE,
 };
 
 pub struct TranspileContext {
@@ -24,6 +24,7 @@ pub struct TranspileContext {
     pub source_code_provider: SourceCodeProvider,
     pub module_context_map: Mutex<HashMap<String, Arc<TranspileModuleContext>>>,
     pub lifetime_evaluator: Arc<LifetimeEvaluator>,
+    pub function_equals_info: GlobalFunctionEqualsInfo,
     error_and_warnings: Mutex<HashMap<String, (Vec<TranspileError>, Vec<TranspileWarning>)>>,
     pub(crate) future_runtime: Runtime,
     pub(crate) transpile_phase_future: MultiPhaseFuture,
@@ -50,9 +51,10 @@ impl TranspileContext {
             source_code_provider,
             module_context_map: Mutex::new(HashMap::new()),
             lifetime_evaluator: Arc::new(LifetimeEvaluator::new()),
+            function_equals_info: GlobalFunctionEqualsInfo::new(),
             error_and_warnings: Mutex::new(HashMap::new()),
             future_runtime,
-            transpile_phase_future: MultiPhaseFuture::new(3),
+            transpile_phase_future: MultiPhaseFuture::new(NUMBER_OF_TRANSPILE_PHASE),
             debug_print_lock: Mutex::new(()),
         })
     }
@@ -142,6 +144,16 @@ pub struct TranspileSettings {
 pub struct OptimizationSettings {
     pub lifetime_analyzer: bool,
     pub move_optimizer: bool,
+}
+
+impl OptimizationSettings {
+    pub fn is_required_function_equals_info(&self) -> bool {
+        self.is_required_function_recursive_info()
+    }
+
+    pub fn is_required_function_recursive_info(&self) -> bool {
+        self.lifetime_analyzer
+    }
 }
 
 pub struct AutoImport {

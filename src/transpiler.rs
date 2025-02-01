@@ -10,7 +10,10 @@ use codegen::{cargo::generate_cargo_toml, codegen, codegen_dir_modules};
 use either::Either;
 use error::SimpleError;
 use fxhash::FxHashMap;
-use optimizer::{lifetime_analyzer::debug::print_lifetime_debug_info, optimize};
+use optimizer::{
+    function_recursive::function_call_collector::collect_function_call,
+    lifetime_analyzer::debug::print_lifetime_debug_info, optimize,
+};
 use semantics::types::{
     type_inference::{infer_type_program, TypeInferenceResultContainer},
     type_info::{collect_duplicated_implementation_error, ScopeThisType, Type, WithDefineInfo},
@@ -88,9 +91,12 @@ pub struct SourceCode {
     pub module_name: String,
 }
 
+const NUMBER_OF_TRANSPILE_PHASE: usize = 6;
 const TRANSPILE_PHASE_ANALYZE_SEMANTICS: usize = 0;
-const TRANSPILE_PHASE_LIFETIME_EVAL: usize = 1;
-const TRANSPILE_PHASE_CODE_GEN: usize = 2;
+const TRANSPILE_PHASE_BUILD_GLOBAL_FUNCTION_EQUALS_MAP: usize = 1;
+const TRANSPILE_PHASE_COLLECT_FUNCTION_CALL: usize = 2;
+const TRANSPILE_PHASE_GLOBAL_OPTIMIZE: usize = 3;
+const TRANSPILE_PHASE_CODE_GEN: usize = 5;
 
 pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> Result<(), String> {
     let module_context =
@@ -111,6 +117,8 @@ pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> R
             transpile_module(entry_module_name, module_context).await;
         });
 
+        let optimize_settings = &transpile_context.settings.optimization;
+
         // await until all of semantic analyze task is finished
         transpile_context
             .transpile_phase_future
@@ -118,19 +126,39 @@ pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> R
             .future()
             .await;
 
-        // run lifetime evaluator
-        if transpile_context.settings.optimization.lifetime_analyzer {
-            let lifetime_evaluator = &transpile_context.lifetime_evaluator;
-
-            lifetime_evaluator
+        // build function equals map
+        if optimize_settings.is_required_function_equals_info() {
+            transpile_context
                 .function_equals_info
                 .build_function_equals_map();
-            lifetime_evaluator.eval(&transpile_context).await;
         }
 
         transpile_context
             .transpile_phase_future
-            .phase(TRANSPILE_PHASE_LIFETIME_EVAL)
+            .phase(TRANSPILE_PHASE_BUILD_GLOBAL_FUNCTION_EQUALS_MAP)
+            .force_finish()
+            .await;
+
+        // await until all of collect function call task is finished
+        transpile_context
+            .transpile_phase_future
+            .phase(TRANSPILE_PHASE_COLLECT_FUNCTION_CALL)
+            .future()
+            .await;
+
+        // TODO : global function call task
+
+        // run lifetime evaluator
+        if optimize_settings.lifetime_analyzer {
+            transpile_context
+                .lifetime_evaluator
+                .eval(&transpile_context)
+                .await;
+        }
+
+        transpile_context
+            .transpile_phase_future
+            .phase(TRANSPILE_PHASE_GLOBAL_OPTIMIZE)
             .force_finish()
             .await;
 
@@ -399,11 +427,32 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         .mark_as_finished()
         .await;
 
+    // await until build function equal task is finished
+    module_context
+        .context
+        .transpile_phase_future
+        .phase(TRANSPILE_PHASE_BUILD_GLOBAL_FUNCTION_EQUALS_MAP)
+        .future()
+        .await;
+
+    let optimize_settings = &module_context.context.settings.optimization;
+
+    if optimize_settings.is_required_function_recursive_info() {
+        collect_function_call(ast, &type_inference_results, &module_context);
+    }
+
+    module_context
+        .context
+        .transpile_phase_future
+        .phase(TRANSPILE_PHASE_COLLECT_FUNCTION_CALL)
+        .mark_as_finished()
+        .await;
+
     // await until the lifetime evaluator is finished
     module_context
         .context
         .transpile_phase_future
-        .phase(TRANSPILE_PHASE_LIFETIME_EVAL)
+        .phase(TRANSPILE_PHASE_GLOBAL_OPTIMIZE)
         .future()
         .await;
 

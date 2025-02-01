@@ -2955,17 +2955,13 @@ impl OverrideElementsEnvironment {
                                 .write()
                                 .unwrap() = Some(interface_function_type.define_info.clone());
 
-                            context
-                                .context
-                                .lifetime_evaluator
-                                .function_equals_info
-                                .add_info(
-                                    [(
-                                        interface_function_type.clone(),
-                                        element_function_type.clone(),
-                                    )]
-                                    .into_iter(),
-                                );
+                            context.context.function_equals_info.add_info(
+                                [(
+                                    interface_function_type.clone(),
+                                    element_function_type.clone(),
+                                )]
+                                .into_iter(),
+                            );
                         }
                     }
 

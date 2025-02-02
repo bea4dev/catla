@@ -7,12 +7,12 @@ use fxhash::{FxHashMap, FxHashSet};
 
 use crate::transpiler::{component::EntityID, semantics::types::type_info::FunctionType};
 
-pub struct GlobalFunctionEqualsInfo {
+pub struct FunctionEqualsInfo {
     info: RwLock<Vec<(Arc<FunctionType>, Arc<FunctionType>)>>,
     equals_map: RwLock<FxHashMap<(Arc<String>, EntityID), (Arc<String>, EntityID)>>,
 }
 
-impl GlobalFunctionEqualsInfo {
+impl FunctionEqualsInfo {
     pub fn new() -> Self {
         Self {
             info: RwLock::new(Vec::new()),

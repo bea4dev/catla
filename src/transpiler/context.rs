@@ -11,7 +11,10 @@ use crate::{localize::localizer::LocalizedText, transpiler::error::TranspileRepo
 
 use super::{
     future::{MultiPhaseFuture, SharedManualFuture},
-    optimizer::{function_equals::GlobalFunctionEqualsInfo, lifetime_analyzer::LifetimeEvaluator},
+    optimizer::{
+        function_equals::FunctionEqualsInfo, function_recursive::FunctionRecursiveInfo,
+        lifetime_analyzer::LifetimeEvaluator,
+    },
     resource::SourceCodeProvider,
     semantics::types::type_info::{ImplementsInfoSet, Type},
     SourceCode, TranspileError, TranspileWarning, NUMBER_OF_TRANSPILE_PHASE,
@@ -24,7 +27,8 @@ pub struct TranspileContext {
     pub source_code_provider: SourceCodeProvider,
     pub module_context_map: Mutex<HashMap<String, Arc<TranspileModuleContext>>>,
     pub lifetime_evaluator: Arc<LifetimeEvaluator>,
-    pub function_equals_info: GlobalFunctionEqualsInfo,
+    pub function_equals_info: FunctionEqualsInfo,
+    pub function_recursive_info: FunctionRecursiveInfo,
     error_and_warnings: Mutex<HashMap<String, (Vec<TranspileError>, Vec<TranspileWarning>)>>,
     pub(crate) future_runtime: Runtime,
     pub(crate) transpile_phase_future: MultiPhaseFuture,
@@ -51,7 +55,8 @@ impl TranspileContext {
             source_code_provider,
             module_context_map: Mutex::new(HashMap::new()),
             lifetime_evaluator: Arc::new(LifetimeEvaluator::new()),
-            function_equals_info: GlobalFunctionEqualsInfo::new(),
+            function_equals_info: FunctionEqualsInfo::new(),
+            function_recursive_info: FunctionRecursiveInfo::new(),
             error_and_warnings: Mutex::new(HashMap::new()),
             future_runtime,
             transpile_phase_future: MultiPhaseFuture::new(NUMBER_OF_TRANSPILE_PHASE),

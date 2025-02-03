@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
-    MappingOperator, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr,
-    PrimaryRight, Program, StatementAST,
+    MappingOperator, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary, PrimaryLeft,
+    PrimaryLeftExpr, PrimaryRight, Program, StatementAST,
 };
 use either::Either;
 
@@ -404,11 +404,132 @@ fn collect_function_call_primary_left(
                 }
             }
         }
-        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => todo!(),
-        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => todo!(),
-        PrimaryLeftExpr::NewExpression(new_expression) => todo!(),
-        PrimaryLeftExpr::IfExpression(if_expression) => todo!(),
-        PrimaryLeftExpr::LoopExpression(loop_expression) => todo!(),
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => {
+            if let Ok(expression) = new_array_init_expression.init_expression {
+                collect_function_call_expression(
+                    expression,
+                    type_inference_result,
+                    function_calls,
+                    module_function_call_info,
+                    context,
+                );
+            }
+
+            if let Ok(expression) = new_array_init_expression.length_expression {
+                collect_function_call_expression(
+                    expression,
+                    type_inference_result,
+                    function_calls,
+                    module_function_call_info,
+                    context,
+                );
+            }
+        }
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => {
+            for expression in new_array_expression.value_expressions.iter() {
+                if let Ok(expression) = expression {
+                    collect_function_call_expression(
+                        expression,
+                        type_inference_result,
+                        function_calls,
+                        module_function_call_info,
+                        context,
+                    );
+                }
+            }
+        }
+        PrimaryLeftExpr::NewExpression(new_expression) => {
+            if let Ok(field_assigns) = &new_expression.field_assigns {
+                for field_assign in field_assigns.iter() {
+                    if let Ok(expression) = field_assign.expression {
+                        collect_function_call_expression(
+                            expression,
+                            type_inference_result,
+                            function_calls,
+                            module_function_call_info,
+                            context,
+                        );
+                    }
+                }
+            }
+        }
+        PrimaryLeftExpr::IfExpression(if_expression) => {
+            if let Ok(expression) = if_expression.if_statement.condition {
+                collect_function_call_expression(
+                    expression,
+                    type_inference_result,
+                    function_calls,
+                    module_function_call_info,
+                    context,
+                );
+            }
+            if let Some(block) = &if_expression.if_statement.block.value {
+                collect_function_call_program(
+                    block.program,
+                    type_inference_result,
+                    function_calls,
+                    module_function_call_info,
+                    context,
+                );
+            }
+
+            for chain in if_expression.chain.iter() {
+                if let Some(else_if_or_else) = &chain.else_if_or_else.value {
+                    match else_if_or_else {
+                        Either::Left(if_statement) => {
+                            if let Ok(expression) = if_statement.condition {
+                                collect_function_call_expression(
+                                    expression,
+                                    type_inference_result,
+                                    function_calls,
+                                    module_function_call_info,
+                                    context,
+                                );
+                            }
+                            if let Some(block) = &if_statement.block.value {
+                                collect_function_call_program(
+                                    block.program,
+                                    type_inference_result,
+                                    function_calls,
+                                    module_function_call_info,
+                                    context,
+                                );
+                            }
+                        }
+                        Either::Right(block) => {
+                            collect_function_call_program(
+                                block.program,
+                                type_inference_result,
+                                function_calls,
+                                module_function_call_info,
+                                context,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        PrimaryLeftExpr::LoopExpression(loop_expression) => {
+            if let Ok(block) = &loop_expression.block {
+                collect_function_call_program(
+                    block.program,
+                    type_inference_result,
+                    function_calls,
+                    module_function_call_info,
+                    context,
+                );
+            }
+        }
+    }
+
+    if let Some(mapping_operator) = &ast.mapping_operator {
+        collect_function_call_mapping_operator(
+            mapping_operator,
+            type_inference_result,
+            function_calls,
+            module_function_call_info,
+            context,
+        );
     }
 }
 
@@ -419,6 +540,44 @@ fn collect_function_call_primary_right(
     module_function_call_info: &mut ModuleFunctionCallInfo,
     context: &TranspileModuleContext,
 ) {
+    if let Some((literal, _, function_call)) = &ast.second_expr {
+        if let Some(function_call) = function_call {
+            let function_type = type_inference_result.get_entity_type(EntityID::from(literal));
+
+            if let Type::Function {
+                function_info,
+                generics: _,
+            } = function_type
+            {
+                function_calls.push((
+                    function_info.define_info.module_name.clone(),
+                    function_info.define_info.entity_id,
+                ));
+            }
+
+            if let Ok(args) = &function_call.arg_exprs {
+                for expression in args.iter() {
+                    collect_function_call_expression(
+                        *expression,
+                        type_inference_result,
+                        function_calls,
+                        module_function_call_info,
+                        context,
+                    );
+                }
+            }
+        }
+    }
+
+    if let Some(mapping_operator) = &ast.mapping_operator {
+        collect_function_call_mapping_operator(
+            mapping_operator,
+            type_inference_result,
+            function_calls,
+            module_function_call_info,
+            context,
+        );
+    }
 }
 
 fn collect_function_call_mapping_operator(
@@ -428,4 +587,22 @@ fn collect_function_call_mapping_operator(
     module_function_call_info: &mut ModuleFunctionCallInfo,
     context: &TranspileModuleContext,
 ) {
+    let block = match &ast.value {
+        MappingOperatorKind::NullPropagation => return,
+        MappingOperatorKind::NullUnwrap => return,
+        MappingOperatorKind::NullElvisBlock(block) => &block.value,
+        MappingOperatorKind::ResultPropagation => return,
+        MappingOperatorKind::ResultUnwrap => return,
+        MappingOperatorKind::ResultElvisBlock(block) => &block.value,
+    };
+
+    if let Some(block) = block {
+        collect_function_call_program(
+            block.program,
+            type_inference_result,
+            function_calls,
+            module_function_call_info,
+            context,
+        );
+    }
 }

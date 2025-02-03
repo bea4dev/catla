@@ -1,11 +1,16 @@
 use std::sync::Arc;
 
-use catla_parser::parser::{Expression, ExpressionEnum, OrExpression, Program, StatementAST};
+use catla_parser::parser::{
+    AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
+    MappingOperator, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr,
+    PrimaryRight, Program, StatementAST,
+};
 use either::Either;
 
 use crate::transpiler::{
-    component::EntityID, context::TranspileModuleContext,
-    semantics::types::type_inference::TypeInferenceResultContainer,
+    component::EntityID,
+    context::TranspileModuleContext,
+    semantics::types::{type_inference::TypeInferenceResultContainer, type_info::Type},
 };
 
 use super::ModuleFunctionCallInfo;
@@ -171,7 +176,15 @@ fn collect_function_call_expression(
     context: &TranspileModuleContext,
 ) {
     match ast {
-        ExpressionEnum::OrExpression(or_expression) => todo!(),
+        ExpressionEnum::OrExpression(or_expression) => {
+            collect_function_call_or_expression(
+                or_expression,
+                type_inference_result,
+                function_calls,
+                module_function_call_info,
+                context,
+            );
+        }
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
                 collect_function_call_expression(
@@ -214,8 +227,202 @@ fn collect_function_call_expression(
     }
 }
 
-fn collect_function_call_or_expression(
-    ast: &OrExpression,
+macro_rules! collect_function_call_for_op2 {
+    ($function_name:ident, $ast_type:ident, $next_layer_function_name:ident) => {
+        fn $function_name(
+            ast: &$ast_type,
+            type_inference_result: &TypeInferenceResultContainer,
+            function_calls: &mut Vec<(Arc<String>, EntityID)>,
+            module_function_call_info: &mut ModuleFunctionCallInfo,
+            context: &TranspileModuleContext,
+        ) {
+            $next_layer_function_name(
+                &ast.left_expr,
+                type_inference_result,
+                function_calls,
+                module_function_call_info,
+                context,
+            );
+
+            for (_, right_expr) in ast.right_exprs.iter() {
+                if let Ok(right_expr) = right_expr {
+                    let operator_function_type = type_inference_result
+                        .operator_function_type_map
+                        .get(&EntityID::from(right_expr))
+                        .unwrap();
+
+                    if let Type::Function {
+                        function_info,
+                        generics: _,
+                    } = operator_function_type
+                    {
+                        function_calls.push((
+                            function_info.define_info.module_name.clone(),
+                            function_info.define_info.entity_id,
+                        ));
+                    }
+
+                    $next_layer_function_name(
+                        right_expr,
+                        type_inference_result,
+                        function_calls,
+                        module_function_call_info,
+                        context,
+                    );
+                }
+            }
+        }
+    };
+}
+
+collect_function_call_for_op2!(
+    collect_function_call_or_expression,
+    OrExpression,
+    collect_function_call_and_expression
+);
+
+collect_function_call_for_op2!(
+    collect_function_call_and_expression,
+    AndExpression,
+    collect_function_call_compare_expression
+);
+
+collect_function_call_for_op2!(
+    collect_function_call_compare_expression,
+    CompareExpression,
+    collect_function_call_add_or_sub_expression
+);
+
+collect_function_call_for_op2!(
+    collect_function_call_add_or_sub_expression,
+    AddOrSubExpression,
+    collect_function_call_mul_or_div_expression
+);
+
+collect_function_call_for_op2!(
+    collect_function_call_mul_or_div_expression,
+    MulOrDivExpression,
+    collect_function_call_factor
+);
+
+fn collect_function_call_factor(
+    ast: &Factor,
+    type_inference_result: &TypeInferenceResultContainer,
+    function_calls: &mut Vec<(Arc<String>, EntityID)>,
+    module_function_call_info: &mut ModuleFunctionCallInfo,
+    context: &TranspileModuleContext,
+) {
+    let Ok(primary) = &ast.primary else { return };
+
+    if ast.negative_keyword_span.is_some() {
+        let operator_function_type = type_inference_result
+            .operator_function_type_map
+            .get(&EntityID::from(primary))
+            .unwrap();
+
+        if let Type::Function {
+            function_info,
+            generics: _,
+        } = operator_function_type
+        {
+            function_calls.push((
+                function_info.define_info.module_name.clone(),
+                function_info.define_info.entity_id,
+            ));
+        }
+    }
+
+    collect_function_call_primary(
+        primary,
+        type_inference_result,
+        function_calls,
+        module_function_call_info,
+        context,
+    );
+}
+
+fn collect_function_call_primary(
+    ast: &Primary,
+    type_inference_result: &TypeInferenceResultContainer,
+    function_calls: &mut Vec<(Arc<String>, EntityID)>,
+    module_function_call_info: &mut ModuleFunctionCallInfo,
+    context: &TranspileModuleContext,
+) {
+    collect_function_call_primary_left(
+        &ast.left,
+        type_inference_result,
+        function_calls,
+        module_function_call_info,
+        context,
+    );
+
+    for right_primary in ast.chain.iter() {
+        collect_function_call_primary_right(
+            right_primary,
+            type_inference_result,
+            function_calls,
+            module_function_call_info,
+            context,
+        );
+    }
+}
+
+fn collect_function_call_primary_left(
+    ast: &PrimaryLeft,
+    type_inference_result: &TypeInferenceResultContainer,
+    function_calls: &mut Vec<(Arc<String>, EntityID)>,
+    module_function_call_info: &mut ModuleFunctionCallInfo,
+    context: &TranspileModuleContext,
+) {
+    match &ast.first_expr {
+        PrimaryLeftExpr::Simple((simple_primary, _, function_call)) => {
+            if let Some(function_call) = function_call {
+                let simple_primary_type =
+                    type_inference_result.get_entity_type(EntityID::from(simple_primary));
+
+                if let Type::Function {
+                    function_info,
+                    generics: _,
+                } = simple_primary_type
+                {
+                    function_calls.push((
+                        function_info.define_info.module_name.clone(),
+                        function_info.define_info.entity_id,
+                    ));
+                }
+
+                if let Ok(args) = &function_call.arg_exprs {
+                    for expression in args.iter() {
+                        collect_function_call_expression(
+                            *expression,
+                            type_inference_result,
+                            function_calls,
+                            module_function_call_info,
+                            context,
+                        );
+                    }
+                }
+            }
+        }
+        PrimaryLeftExpr::NewArrayInitExpression(new_array_init_expression) => todo!(),
+        PrimaryLeftExpr::NewArrayExpression(new_array_expression) => todo!(),
+        PrimaryLeftExpr::NewExpression(new_expression) => todo!(),
+        PrimaryLeftExpr::IfExpression(if_expression) => todo!(),
+        PrimaryLeftExpr::LoopExpression(loop_expression) => todo!(),
+    }
+}
+
+fn collect_function_call_primary_right(
+    ast: &PrimaryRight,
+    type_inference_result: &TypeInferenceResultContainer,
+    function_calls: &mut Vec<(Arc<String>, EntityID)>,
+    module_function_call_info: &mut ModuleFunctionCallInfo,
+    context: &TranspileModuleContext,
+) {
+}
+
+fn collect_function_call_mapping_operator(
+    ast: &MappingOperator,
     type_inference_result: &TypeInferenceResultContainer,
     function_calls: &mut Vec<(Arc<String>, EntityID)>,
     module_function_call_info: &mut ModuleFunctionCallInfo,

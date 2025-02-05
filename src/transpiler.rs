@@ -11,8 +11,11 @@ use either::Either;
 use error::SimpleError;
 use fxhash::FxHashMap;
 use optimizer::{
-    function_recursive::function_call_collector::collect_function_call,
-    lifetime_analyzer::debug::print_lifetime_debug_info, optimize,
+    function_recursive::{
+        debug::print_recursive_functions, function_call_collector::collect_function_call,
+    },
+    lifetime_analyzer::debug::print_lifetime_debug_info,
+    optimize,
 };
 use semantics::types::{
     type_inference::{infer_type_program, TypeInferenceResultContainer},
@@ -462,13 +465,13 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         .future()
         .await;
 
-    if module_context
-        .context
-        .settings
-        .optimization
-        .lifetime_analyzer
-    {
-        print_lifetime_debug_info(ast, &module_context);
+    if context.settings.is_transpiler_debug {
+        if optimize_settings.lifetime_analyzer {
+            print_lifetime_debug_info(ast, &module_context);
+        }
+        if optimize_settings.is_required_function_recursive_info() {
+            print_recursive_functions(ast, &module_context);
+        }
     }
 
     let lifetime_analyze_results = context

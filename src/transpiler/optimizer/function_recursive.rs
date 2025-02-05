@@ -1,4 +1,5 @@
 pub mod function_call_collector;
+pub mod debug;
 
 use std::sync::{Arc, RwLock};
 

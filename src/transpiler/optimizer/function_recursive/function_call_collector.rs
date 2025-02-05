@@ -227,6 +227,62 @@ fn collect_function_call_expression(
     }
 }
 
+fn collect_function_call_or_expression(
+    ast: &OrExpression,
+    type_inference_result: &TypeInferenceResultContainer,
+    function_calls: &mut Vec<(Arc<String>, EntityID)>,
+    module_function_call_info: &mut ModuleFunctionCallInfo,
+    context: &TranspileModuleContext,
+) {
+    collect_function_call_and_expression(
+        &ast.left_expr,
+        type_inference_result,
+        function_calls,
+        module_function_call_info,
+        context,
+    );
+
+    for (_, right_expr) in ast.right_exprs.iter() {
+        if let Ok(right_expr) = right_expr {
+            collect_function_call_and_expression(
+                right_expr,
+                type_inference_result,
+                function_calls,
+                module_function_call_info,
+                context,
+            );
+        }
+    }
+}
+
+fn collect_function_call_and_expression(
+    ast: &AndExpression,
+    type_inference_result: &TypeInferenceResultContainer,
+    function_calls: &mut Vec<(Arc<String>, EntityID)>,
+    module_function_call_info: &mut ModuleFunctionCallInfo,
+    context: &TranspileModuleContext,
+) {
+    collect_function_call_compare_expression(
+        &ast.left_expr,
+        type_inference_result,
+        function_calls,
+        module_function_call_info,
+        context,
+    );
+
+    for (_, right_expr) in ast.right_exprs.iter() {
+        if let Ok(right_expr) = right_expr {
+            collect_function_call_compare_expression(
+                right_expr,
+                type_inference_result,
+                function_calls,
+                module_function_call_info,
+                context,
+            );
+        }
+    }
+}
+
 macro_rules! collect_function_call_for_op2 {
     ($function_name:ident, $ast_type:ident, $next_layer_function_name:ident) => {
         fn $function_name(
@@ -274,18 +330,6 @@ macro_rules! collect_function_call_for_op2 {
         }
     };
 }
-
-collect_function_call_for_op2!(
-    collect_function_call_or_expression,
-    OrExpression,
-    collect_function_call_and_expression
-);
-
-collect_function_call_for_op2!(
-    collect_function_call_and_expression,
-    AndExpression,
-    collect_function_call_compare_expression
-);
 
 collect_function_call_for_op2!(
     collect_function_call_compare_expression,

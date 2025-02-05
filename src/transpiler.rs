@@ -146,7 +146,13 @@ pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> R
             .future()
             .await;
 
-        // TODO : global function call task
+        // find recursive function
+        if optimize_settings.is_required_function_recursive_info() {
+            transpile_context
+                .function_recursive_info
+                .eval(&transpile_context)
+                .await;
+        }
 
         // run lifetime evaluator
         if optimize_settings.lifetime_analyzer {

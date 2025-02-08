@@ -7,26 +7,26 @@ use catla_parser::parser::{
 };
 use either::Either;
 use fxhash::{FxHashMap, FxHashSet};
-use hashbrown::{DefaultHashBuilder, HashMap};
+use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
 
 use crate::transpiler::{
     component::EntityID,
     name_resolver::{EnvironmentSeparatorKind, FoundDefineInfo},
 };
 
-pub struct VariableUsers {
-    last_user_map: FxHashSet<EntityID>,
+pub struct VariableUserInfo {
+    cannot_move_variables: FxHashSet<EntityID>,
 }
 
-impl VariableUsers {
+impl VariableUserInfo {
     pub fn new() -> Self {
         Self {
-            last_user_map: FxHashSet::default(),
+            cannot_move_variables: FxHashSet::default(),
         }
     }
 
-    pub fn is_last_user(&self, user: EntityID) -> bool {
-        self.last_user_map.contains(&user)
+    pub fn can_move_variable(&self, user: EntityID) -> bool {
+        !self.cannot_move_variables.contains(&user)
     }
 }
 
@@ -34,6 +34,7 @@ impl VariableUsers {
 struct VariableUserEnvironment<'allocator> {
     variable_user_map:
         HashMap<EntityID, Vec<EntityID, &'allocator Bump>, DefaultHashBuilder, &'allocator Bump>,
+    not_moved_variables: HashSet<EntityID, DefaultHashBuilder, &'allocator Bump>,
     allocator: &'allocator Bump,
 }
 
@@ -41,6 +42,7 @@ impl<'allocator> VariableUserEnvironment<'allocator> {
     fn new(allocator: &'allocator Bump) -> Self {
         Self {
             variable_user_map: HashMap::new_in(allocator),
+            not_moved_variables: HashSet::new_in(allocator),
             allocator,
         }
     }
@@ -56,8 +58,13 @@ impl<'allocator> VariableUserEnvironment<'allocator> {
     }
 
     fn update_with(&mut self, other: Self) {
-        self.variable_user_map
-            .extend(other.variable_user_map);
+        let mut not_moved = HashSet::new_in(self.allocator);
+        for new_entity_id in other.variable_user_map.keys() {
+            not_moved.insert(*new_entity_id);
+        }
+
+        self.variable_user_map.extend(other.variable_user_map);
+        self.not_moved_variables.extend(not_moved);
     }
 
     fn register_use(&mut self, define: EntityID, user: EntityID) {
@@ -67,23 +74,18 @@ impl<'allocator> VariableUserEnvironment<'allocator> {
             .push(user);
     }
 
-    fn export(self) -> VariableUsers {
+    fn export(self) -> VariableUserInfo {
         // into global allocator
-        VariableUsers {
-            last_user_map: self
-                .variable_user_map
-                .into_iter()
-                .map(|(_, values)| values.into_iter())
-                .flatten()
-                .collect(),
+        VariableUserInfo {
+            cannot_move_variables: self.not_moved_variables.into_iter().collect(),
         }
     }
 }
 
-pub fn collect_variable_users(
+pub fn collect_variable_user_info(
     ast: Program,
     name_resolved_map: &FxHashMap<EntityID, FoundDefineInfo>,
-) -> VariableUsers {
+) -> VariableUserInfo {
     let allocator = Bump::new();
 
     let environment = collect_program(ast, name_resolved_map, &allocator);

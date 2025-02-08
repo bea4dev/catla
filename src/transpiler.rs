@@ -11,11 +11,10 @@ use either::Either;
 use error::SimpleError;
 use fxhash::FxHashMap;
 use optimizer::{
-    function_recursive::{
-        debug::print_recursive_functions, function_call_collector::collect_function_call,
-    },
-    lifetime_analyzer::debug::print_lifetime_debug_info,
-    optimize,
+    debug::print_ast_optimizaion_info,
+    function_recursive::function_call_collector::collect_function_call,
+    lifetime_analyzer::collect_lifetime,
+    move_optimization::variable_user_collector::collect_variable_user_info,
 };
 use semantics::types::{
     type_inference::{infer_type_program, TypeInferenceResultContainer},
@@ -158,7 +157,7 @@ pub fn transpile(entry_module_name: String, context: Arc<TranspileContext>) -> R
         }
 
         // run lifetime evaluator
-        if optimize_settings.lifetime_analyzer {
+        if optimize_settings.analyze_lifetime {
             transpile_context
                 .lifetime_evaluator
                 .eval(&transpile_context)
@@ -417,17 +416,31 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         );
     }
 
-    let optimize_result = optimize(
-        ast,
-        &import_element_map,
-        &name_resolved_map,
-        &module_user_type_map,
-        &module_type_info,
-        &module_element_type_maps,
-        &type_inference_results,
-        &allocator,
-        &module_context,
-    );
+    let optimize_settings = &module_context.context.settings.optimization;
+
+    if optimize_settings.analyze_lifetime {
+        let lifetime_source_map = collect_lifetime(
+            ast,
+            &import_element_map,
+            &name_resolved_map,
+            &module_user_type_map,
+            &module_type_info,
+            &module_element_type_maps,
+            &type_inference_results,
+            &allocator,
+            &module_context,
+        );
+
+        context
+            .lifetime_evaluator
+            .add_sources(module_context.module_name.clone(), lifetime_source_map);
+    }
+
+    let variable_move_info = if optimize_settings.is_required_variable_move_info() {
+        Some(collect_variable_user_info(ast, &name_resolved_map))
+    } else {
+        None
+    };
 
     module_context
         .context
@@ -443,8 +456,6 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         .phase(TRANSPILE_PHASE_BUILD_GLOBAL_FUNCTION_EQUALS_MAP)
         .future()
         .await;
-
-    let optimize_settings = &module_context.context.settings.optimization;
 
     if optimize_settings.is_required_function_recursive_info() {
         collect_function_call(ast, &type_inference_results, &module_context);
@@ -466,12 +477,7 @@ async fn transpile_module(module_name: String, module_context: Arc<TranspileModu
         .await;
 
     if context.settings.is_transpiler_debug {
-        if optimize_settings.lifetime_analyzer {
-            print_lifetime_debug_info(ast, &module_context);
-        }
-        if optimize_settings.is_required_function_recursive_info() {
-            print_recursive_functions(ast, &module_context);
-        }
+        print_ast_optimizaion_info(ast, &variable_move_info, &module_context);
     }
 
     let lifetime_analyze_results = context

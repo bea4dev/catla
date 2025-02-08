@@ -24,8 +24,7 @@ fn main() {
     //unsafe { backtrace_on_stack_overflow::enable() };
 
     let optimization = OptimizationSettings {
-        lifetime_analyzer: true,
-        move_optimizer: true,
+        analyze_lifetime: true,
     };
 
     let settings = TranspileSettings {

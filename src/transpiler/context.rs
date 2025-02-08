@@ -147,8 +147,7 @@ pub struct TranspileSettings {
 }
 
 pub struct OptimizationSettings {
-    pub lifetime_analyzer: bool,
-    pub move_optimizer: bool,
+    pub analyze_lifetime: bool,
 }
 
 impl OptimizationSettings {
@@ -157,7 +156,11 @@ impl OptimizationSettings {
     }
 
     pub fn is_required_function_recursive_info(&self) -> bool {
-        self.lifetime_analyzer
+        self.analyze_lifetime
+    }
+
+    pub fn is_required_variable_move_info(&self) -> bool {
+        self.analyze_lifetime
     }
 }
 

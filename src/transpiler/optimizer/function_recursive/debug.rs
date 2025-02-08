@@ -1,10 +1,10 @@
 use std::ops::{Deref, Range};
 
-use ariadne::{Color, Label, Report, ReportKind, Source};
+use ariadne::{Color, Label, ReportBuilder};
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
     FunctionCall, MappingOperator, MappingOperatorKind, MulOrDivExpression, OrExpression, Primary,
-    PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, StatementAST, AST,
+    PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, StatementAST, AST,
 };
 use either::Either;
 
@@ -28,7 +28,11 @@ impl FunctionRecursiveResult {
     }
 }
 
-pub fn print_recursive_functions(ast: Program, context: &TranspileModuleContext) {
+pub(crate) fn print_recursive_functions(
+    ast: Program,
+    builder: &mut ReportBuilder<'_, (String, Range<usize>)>,
+    context: &TranspileModuleContext,
+) {
     let mut results = Vec::new();
 
     collect_recursive_result_program(ast, &mut results, context);
@@ -36,12 +40,6 @@ pub fn print_recursive_functions(ast: Program, context: &TranspileModuleContext)
     if results.is_empty() {
         return;
     }
-
-    let mut builder = Report::build(
-        ReportKind::Custom("Recursive Debug", ariadne::Color::Cyan),
-        context.module_name.deref(),
-        0,
-    );
 
     for result in results {
         let color = if result.is_recursive {
@@ -51,21 +49,11 @@ pub fn print_recursive_functions(ast: Program, context: &TranspileModuleContext)
         };
 
         builder.add_label(
-            Label::new((context.module_name.deref(), result.span))
+            Label::new((context.module_name.deref().clone(), result.span))
                 .with_color(color)
                 .with_message(format!("is_recursive : {}", result.is_recursive)),
         );
     }
-
-    let _lock = context.context.debug_print_lock.lock().unwrap();
-
-    builder
-        .finish()
-        .print((
-            context.module_name.deref(),
-            Source::from(context.source_code.code.as_str()),
-        ))
-        .unwrap();
 }
 
 fn collect_recursive_result_program(
@@ -242,7 +230,17 @@ fn collect_recursive_result_primary_left(
     context: &TranspileModuleContext,
 ) {
     match &ast.first_expr {
-        PrimaryLeftExpr::Simple((_, _, function_call)) => {
+        PrimaryLeftExpr::Simple((simple_primary, _, function_call)) => {
+            if let SimplePrimary::Expressions {
+                expressions,
+                error_tokens: _,
+                span: _,
+            } = simple_primary
+            {
+                for expression in expressions.iter() {
+                    collect_recursive_result_expression(*expression, results, context);
+                }
+            }
             if let Some(function_call) = function_call {
                 collect_recursive_result_function_call(function_call, results, context);
             }

@@ -1,6 +1,6 @@
 use std::ops::{Deref, Range};
 
-use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
+use ariadne::{Color, Fmt, Label, ReportBuilder};
 use catla_parser::parser::{
     AddOrSubExpression, AndExpression, CompareExpression, Expression, ExpressionEnum, Factor,
     FunctionCall, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr,
@@ -10,16 +10,14 @@ use either::Either;
 
 use crate::transpiler::{component::EntityID, context::TranspileModuleContext};
 
-pub fn print_lifetime_debug_info(ast: Program, context: &TranspileModuleContext) {
+pub(crate) fn print_lifetime_debug_info(
+    ast: Program,
+    builder: &mut ReportBuilder<'_, (String, Range<usize>)>,
+    context: &TranspileModuleContext,
+) {
     let mut info = Vec::new();
 
     print_program(ast, &mut info, context);
-
-    let mut builder = Report::build(
-        ReportKind::Custom("Lifetime Debug", ariadne::Color::Cyan),
-        context.module_name.deref(),
-        0,
-    );
 
     if info.is_empty() {
         return;
@@ -41,21 +39,11 @@ pub fn print_lifetime_debug_info(ast: Program, context: &TranspileModuleContext)
         text += contains_static.as_str();
 
         builder.add_label(
-            Label::new((context.module_name.deref(), info.span))
+            Label::new((context.module_name.deref().clone(), info.span))
                 .with_color(color)
                 .with_message(text),
         );
     }
-
-    let _lock = context.context.debug_print_lock.lock().unwrap();
-
-    builder
-        .finish()
-        .print((
-            context.module_name.deref(),
-            Source::from(context.source_code.code.as_str()),
-        ))
-        .unwrap();
 }
 
 struct LifetimeInfo {
@@ -99,6 +87,17 @@ enum AllocationType {
     Stack,
     Heap,
     Unknown,
+}
+
+pub(crate) fn collect_lifetime_info(
+    ast: Program,
+    context: &TranspileModuleContext,
+) -> Vec<LifetimeInfo> {
+    let mut lifetime_info = Vec::new();
+
+    print_program(ast, &mut lifetime_info, context);
+
+    lifetime_info
 }
 
 fn print_program(ast: Program, info: &mut Vec<LifetimeInfo>, context: &TranspileModuleContext) {

@@ -160,7 +160,7 @@ fn collect_variable_info_expression(
     match ast {
         ExpressionEnum::OrExpression(or_expression) => {
             collect_variable_info_or_expression(or_expression, variable_move_info, info);
-        },
+        }
         ExpressionEnum::ReturnExpression(return_expression) => {
             if let Some(expression) = return_expression.expression {
                 collect_variable_info_expression(expression, variable_move_info, info);

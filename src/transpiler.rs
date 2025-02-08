@@ -14,7 +14,7 @@ use optimizer::{
     debug::print_ast_optimizaion_info,
     function_recursive::function_call_collector::collect_function_call,
     lifetime_analyzer::collect_lifetime,
-    move_optimization::variable_user_collector::collect_variable_user_info,
+    variable_users::variable_user_collector::collect_variable_user_info,
 };
 use semantics::types::{
     type_inference::{infer_type_program, TypeInferenceResultContainer},

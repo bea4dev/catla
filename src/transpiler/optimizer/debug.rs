@@ -8,7 +8,7 @@ use crate::transpiler::context::TranspileModuleContext;
 use super::{
     function_recursive::debug::print_recursive_functions,
     lifetime_analyzer::debug::print_lifetime_debug_info,
-    move_optimization::{
+    variable_users::{
         debug::print_variable_user_info, variable_user_collector::VariableUserInfo,
     },
 };

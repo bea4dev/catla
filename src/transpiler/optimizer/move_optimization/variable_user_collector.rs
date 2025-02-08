@@ -60,7 +60,9 @@ impl<'allocator> VariableUserEnvironment<'allocator> {
     fn update_with(&mut self, other: Self) {
         let mut not_moved = HashSet::new_in(self.allocator);
         for new_entity_id in other.variable_user_map.keys() {
-            not_moved.insert(*new_entity_id);
+            if self.variable_user_map.contains_key(new_entity_id) {
+                not_moved.insert(*new_entity_id);
+            }
         }
 
         self.variable_user_map.extend(other.variable_user_map);

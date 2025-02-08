@@ -13,6 +13,7 @@ use crate::transpiler::{component::EntityID, context::TranspileModuleContext};
 pub(crate) fn print_lifetime_debug_info(
     ast: Program,
     builder: &mut ReportBuilder<'_, (String, Range<usize>)>,
+    has_element: &mut bool,
     context: &TranspileModuleContext,
 ) {
     let mut info = Vec::new();
@@ -22,6 +23,7 @@ pub(crate) fn print_lifetime_debug_info(
     if info.is_empty() {
         return;
     }
+    *has_element = true;
 
     for info in info {
         let (color, text) = match info.alloc_type {
@@ -87,17 +89,6 @@ enum AllocationType {
     Stack,
     Heap,
     Unknown,
-}
-
-pub(crate) fn collect_lifetime_info(
-    ast: Program,
-    context: &TranspileModuleContext,
-) -> Vec<LifetimeInfo> {
-    let mut lifetime_info = Vec::new();
-
-    print_program(ast, &mut lifetime_info, context);
-
-    lifetime_info
 }
 
 fn print_program(ast: Program, info: &mut Vec<LifetimeInfo>, context: &TranspileModuleContext) {

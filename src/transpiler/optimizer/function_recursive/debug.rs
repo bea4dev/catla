@@ -31,6 +31,7 @@ impl FunctionRecursiveResult {
 pub(crate) fn print_recursive_functions(
     ast: Program,
     builder: &mut ReportBuilder<'_, (String, Range<usize>)>,
+    has_element: &mut bool,
     context: &TranspileModuleContext,
 ) {
     let mut results = Vec::new();
@@ -40,6 +41,7 @@ pub(crate) fn print_recursive_functions(
     if results.is_empty() {
         return;
     }
+    *has_element = true;
 
     for result in results {
         let color = if result.is_recursive {

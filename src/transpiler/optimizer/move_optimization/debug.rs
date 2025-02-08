@@ -22,11 +22,17 @@ pub(crate) fn print_variable_user_info(
     ast: Program,
     variable_move_info: &VariableUserInfo,
     builder: &mut ReportBuilder<'_, (String, Range<usize>)>,
+    has_element: &mut bool,
     context: &TranspileModuleContext,
 ) {
     let mut info = Vec::new();
 
     collect_variable_info_program(ast, variable_move_info, &mut info);
+
+    if info.is_empty() {
+        return;
+    }
+    *has_element = true;
 
     for info in info {
         let color = if info.can_move {

@@ -1,0 +1,7 @@
+[package]
+name = "catla_grammar"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bnf_rules = "0.1.7"

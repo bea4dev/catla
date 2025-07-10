@@ -1,86 +1,49 @@
 use std::ops::Range;
 
+use extension_fn::extension_fn;
+use regex::Regex;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
-    Function,
-    Static,
-    Private,
-    Suspend,
-    Native,
-    Acyclic,
-    Open,
-    New,
-    Drop,
-    Mutex,
-    ParenthesisLeft,
-    ParenthesisRight,
-    BraceLeft,
-    BraceRight,
-    BracketLeft,
-    BracketRight,
+    /// #
     Hash,
-    Class,
-    Struct,
-    Interface,
-    Type,
-    Override,
-    Implements,
-    For,
-    Where,
-    Import,
-    DoubleColon,
-    Comma,
-    Loop,
-    While,
-    Var,
-    Let,
-    This,
-    LargeThis,
-    Equal,
-    Exchange,
-    Or,
-    And,
-    EqEqual,
-    NotEqual,
-    GreaterThan,
-    GreaterOrEq,
-    LessThan,
-    LessOrEq,
-    Plus,
-    Minus,
-    Star,
-    Slash,
-    VerticalBar,
-    Dot,
-    Null,
-    InterrogationMark,
-    ExclamationMark,
-    InterrogationElvis,
-    ExclamationElvis,
-    Colon,
-    If,
-    Else,
-    Return,
-    True,
-    False,
-    FatArrow,
-    ThinArrow,
-    Literal,
-    StringLiteral,
-    Semicolon,
+    /// [
+    BracketLeft,
+    /// ]
+    BracketRight,
+    /// function
+    Function,
+
     LineFeed,
     Whitespace,
+    Comment,
     UnexpectedCharacter,
     None,
 }
 
+static TOKENIZERS: &[Tokenizer] = &[
+    Tokenizer::Keyword(TokenKind::Hash, "#"),
+    Tokenizer::Keyword(TokenKind::BracketLeft, "["),
+    Tokenizer::Keyword(TokenKind::BracketRight, "]"),
+    Tokenizer::Keyword(TokenKind::Function, "function"),
+    Tokenizer::Regex(TokenKind::LineFeed, r"\n|\r"),
+    Tokenizer::Regex(TokenKind::Whitespace, r"[ 　\t]+"),
+    Tokenizer::Regex(TokenKind::Comment, r"//[^\n\r]*(\n|\r|\r\n)"),
+    Tokenizer::Regex(TokenKind::Comment, r"/\*.*\*/"),
+];
+
 enum Tokenizer {
     Keyword(TokenKind, &'static str),
-    Functional(TokenKind, fn(current_input: &str) -> usize),
+    Regex(TokenKind, &'static str),
 }
 
 impl Tokenizer {
-    fn tokenize(&self, current_input: &str) -> (TokenKind, usize) {
+    fn tokenize(
+        &self,
+        current_input: &str,
+        index: usize,
+        regex_cache: &mut [Option<Regex>],
+    ) -> (TokenKind, usize) {
         return match self {
             Tokenizer::Keyword(kind, keyword) => {
                 let mut input_chars = current_input.chars();
@@ -103,163 +66,19 @@ impl Tokenizer {
                 }
                 (kind.clone(), current_byte_length) // accept
             }
-            Tokenizer::Functional(kind, tokenizer) => (kind.clone(), tokenizer(current_input)),
-        };
-    }
-}
+            Tokenizer::Regex(kind, regex) => {
+                let regex = (&mut regex_cache[index])
+                    .get_or_insert_with(|| Regex::new(format!("^({})", regex).as_str()).unwrap());
 
-static TOKENIZERS: &[Tokenizer] = &[
-    Tokenizer::Keyword(TokenKind::Function, "function"),
-    Tokenizer::Keyword(TokenKind::Static, "static"),
-    Tokenizer::Keyword(TokenKind::Private, "private"),
-    Tokenizer::Keyword(TokenKind::Suspend, "suspend"),
-    Tokenizer::Keyword(TokenKind::Native, "native"),
-    Tokenizer::Keyword(TokenKind::Acyclic, "acyclic"),
-    Tokenizer::Keyword(TokenKind::Open, "open"),
-    Tokenizer::Keyword(TokenKind::New, "new"),
-    Tokenizer::Keyword(TokenKind::Drop, "drop"),
-    Tokenizer::Keyword(TokenKind::Mutex, "mutex"),
-    Tokenizer::Keyword(TokenKind::ParenthesisLeft, "("),
-    Tokenizer::Keyword(TokenKind::ParenthesisRight, ")"),
-    Tokenizer::Keyword(TokenKind::BraceLeft, "{"),
-    Tokenizer::Keyword(TokenKind::BraceRight, "}"),
-    Tokenizer::Keyword(TokenKind::BracketLeft, "["),
-    Tokenizer::Keyword(TokenKind::BracketRight, "]"),
-    Tokenizer::Keyword(TokenKind::Hash, "#"),
-    Tokenizer::Keyword(TokenKind::Class, "class"),
-    Tokenizer::Keyword(TokenKind::Struct, "struct"),
-    Tokenizer::Keyword(TokenKind::Interface, "interface"),
-    Tokenizer::Keyword(TokenKind::Type, "type"),
-    Tokenizer::Keyword(TokenKind::Override, "override"),
-    Tokenizer::Keyword(TokenKind::Implements, "implements"),
-    Tokenizer::Keyword(TokenKind::For, "for"),
-    Tokenizer::Keyword(TokenKind::Where, "where"),
-    Tokenizer::Keyword(TokenKind::Import, "import"),
-    Tokenizer::Keyword(TokenKind::DoubleColon, "::"),
-    Tokenizer::Keyword(TokenKind::Comma, ","),
-    Tokenizer::Keyword(TokenKind::Loop, "loop"),
-    Tokenizer::Keyword(TokenKind::Var, "var"),
-    Tokenizer::Keyword(TokenKind::Let, "let"),
-    Tokenizer::Keyword(TokenKind::This, "this"),
-    Tokenizer::Keyword(TokenKind::LargeThis, "This"),
-    Tokenizer::Keyword(TokenKind::Equal, "="),
-    Tokenizer::Keyword(TokenKind::Exchange, "<=>"),
-    Tokenizer::Keyword(TokenKind::Or, "or"),
-    Tokenizer::Keyword(TokenKind::And, "and"),
-    Tokenizer::Keyword(TokenKind::EqEqual, "=="),
-    Tokenizer::Keyword(TokenKind::NotEqual, "!="),
-    Tokenizer::Keyword(TokenKind::GreaterThan, ">"),
-    Tokenizer::Keyword(TokenKind::GreaterOrEq, ">="),
-    Tokenizer::Keyword(TokenKind::LessThan, "<"),
-    Tokenizer::Keyword(TokenKind::LessOrEq, "<="),
-    Tokenizer::Keyword(TokenKind::Plus, "+"),
-    Tokenizer::Keyword(TokenKind::Minus, "-"),
-    Tokenizer::Keyword(TokenKind::Star, "*"),
-    Tokenizer::Keyword(TokenKind::Slash, "/"),
-    Tokenizer::Keyword(TokenKind::VerticalBar, "|"),
-    Tokenizer::Keyword(TokenKind::Dot, "."),
-    Tokenizer::Keyword(TokenKind::Null, "null"),
-    Tokenizer::Keyword(TokenKind::InterrogationMark, "?"),
-    Tokenizer::Keyword(TokenKind::ExclamationMark, "!"),
-    Tokenizer::Keyword(TokenKind::InterrogationElvis, "?:"),
-    Tokenizer::Keyword(TokenKind::ExclamationElvis, "!:"),
-    Tokenizer::Keyword(TokenKind::Colon, ":"),
-    Tokenizer::Keyword(TokenKind::If, "if"),
-    Tokenizer::Keyword(TokenKind::Else, "else"),
-    Tokenizer::Keyword(TokenKind::Return, "return"),
-    Tokenizer::Keyword(TokenKind::True, "true"),
-    Tokenizer::Keyword(TokenKind::False, "false"),
-    Tokenizer::Keyword(TokenKind::FatArrow, "=>"),
-    Tokenizer::Keyword(TokenKind::ThinArrow, "->"),
-    Tokenizer::Functional(TokenKind::Literal, literal_tokenizer),
-    Tokenizer::Functional(TokenKind::StringLiteral, string_literal_tokenizer),
-    Tokenizer::Keyword(TokenKind::Semicolon, ";"),
-    Tokenizer::Keyword(TokenKind::LineFeed, "\r"),
-    Tokenizer::Keyword(TokenKind::LineFeed, "\n"),
-    Tokenizer::Keyword(TokenKind::LineFeed, "\r\n"),
-    Tokenizer::Functional(TokenKind::Whitespace, whitespace_tokenizer),
-];
+                let length = match regex.find(current_input) {
+                    Some(matched) => matched.end(),
+                    None => 0,
+                };
 
-fn literal_tokenizer(current_input: &str) -> usize {
-    let mut input_chars = current_input.chars();
-    let mut current_byte_length = 0;
-    let mut is_all_char_numeric = true;
-    loop {
-        let current_char = match input_chars.next() {
-            Some(c) => c,
-            _ => break,
-        };
-
-        if !(current_char == '_' || current_char.is_alphanumeric()) {
-            // for float value
-            if is_all_char_numeric && current_char == '.' {
-                match input_chars.next() {
-                    Some(next_char) => {
-                        if next_char.is_numeric() {
-                            current_byte_length += current_char.len_utf8();
-                            current_byte_length += next_char.len_utf8();
-                            continue;
-                        } else {
-                            break;
-                        }
-                    }
-                    _ => break,
-                }
-            } else {
-                break;
+                (kind.clone(), length)
             }
-        }
-
-        if !current_char.is_numeric() {
-            is_all_char_numeric = false;
-        }
-
-        current_byte_length += current_char.len_utf8();
-    }
-
-    current_byte_length
-}
-
-fn whitespace_tokenizer(current_input: &str) -> usize {
-    let mut input_chars = current_input.chars();
-    let mut current_byte_length = 0;
-    loop {
-        let current_char = match input_chars.next() {
-            Some(c) => c,
-            _ => break,
         };
-        if !(current_char != '\n' && current_char != '\r' && current_char.is_whitespace()) {
-            break;
-        }
-        current_byte_length += current_char.len_utf8();
     }
-
-    current_byte_length
-}
-
-fn string_literal_tokenizer(current_input: &str) -> usize {
-    let mut input_chars = current_input.chars();
-    let mut current_byte_length = 1;
-
-    match input_chars.next() {
-        Some('"') => {},
-        _ => return 0
-    }
-
-    loop {
-        let current_char = match input_chars.next() {
-            Some(c) => c,
-            _ => break,
-        };
-
-        current_byte_length += current_char.len_utf8();
-
-        if current_char == '"' {
-            break;
-        }
-    }
-
-    current_byte_length
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -269,17 +88,73 @@ pub struct Token<'input> {
     pub span: Range<usize>,
 }
 
+#[extension_fn(Option<Token<'_>>)]
+pub fn get_kind(&self) -> TokenKind {
+    self.as_ref()
+        .map(|token| token.kind)
+        .unwrap_or(TokenKind::None)
+}
+
 pub struct Lexer<'input> {
     source: &'input str,
     current_byte_position: usize,
+    regex_cache: Box<[Option<Regex>]>,
+    current_token_cache: Option<Token<'input>>,
+    pub comments: Vec<Range<usize>>,
+    pub ignore_whitespace: bool,
+    pub ignore_comment: bool,
 }
 
 impl<'input> Lexer<'input> {
-    pub fn new(source: &'input str) -> Lexer<'input> {
-        return Self {
+    pub fn new(source: &'input str) -> Self {
+        Self {
             source,
             current_byte_position: 0,
-        };
+            regex_cache: vec![None; TOKENIZERS.len()].into_boxed_slice(),
+            current_token_cache: None,
+            comments: Vec::new(),
+            ignore_whitespace: true,
+            ignore_comment: true,
+        }
+    }
+
+    pub fn current(&mut self) -> Option<Token<'input>> {
+        let anchor = self.cast_anchor();
+
+        // move to next temporarily
+        self.current_token_cache = self.next();
+
+        // back to anchor position
+        self.current_byte_position = anchor.byte_position;
+
+        self.current_token_cache.clone()
+    }
+
+    pub fn cast_anchor(&self) -> Anchor {
+        Anchor {
+            byte_position: self.current_byte_position,
+        }
+    }
+
+    pub fn skip_line_feed(&mut self) {
+        loop {
+            if let TokenKind::LineFeed = self.current().get_kind() {
+                self.next();
+                continue;
+            } else {
+                return;
+            }
+        }
+    }
+
+    pub fn back_to_anchor(&mut self, anchor: Anchor) {
+        self.current_byte_position = anchor.byte_position;
+        self.current_token_cache = None;
+    }
+
+    pub fn enable_comment_token(mut self) -> Self {
+        self.ignore_comment = false;
+        self
     }
 }
 
@@ -287,6 +162,12 @@ impl<'input> Iterator for Lexer<'input> {
     type Item = Token<'input>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // take cache
+        if let Some(token) = self.current_token_cache.take() {
+            self.current_byte_position = token.span.end;
+            return Some(token);
+        }
+
         loop {
             if self.current_byte_position == self.source.len() {
                 return None;
@@ -296,8 +177,9 @@ impl<'input> Iterator for Lexer<'input> {
 
             let mut current_max_length = 0;
             let mut current_token_kind = TokenKind::Whitespace;
-            for tokenizer in TOKENIZERS.iter() {
-                let result = tokenizer.tokenize(current_input);
+
+            for (index, tokenizer) in TOKENIZERS.iter().enumerate() {
+                let result = tokenizer.tokenize(current_input, index, &mut self.regex_cache);
                 let token_kind = result.0;
                 let byte_length = result.1;
 
@@ -310,8 +192,15 @@ impl<'input> Iterator for Lexer<'input> {
             let start_position = self.current_byte_position;
 
             let token = if current_max_length == 0 {
-                self.current_byte_position += 1;
-                let end_position = start_position + 1;
+                let char_length = self.source[start_position..]
+                    .chars()
+                    .next()
+                    .unwrap()
+                    .len_utf8();
+
+                self.current_byte_position += char_length;
+                let end_position = start_position + char_length;
+
                 Token {
                     kind: TokenKind::UnexpectedCharacter,
                     text: &self.source[start_position..end_position],
@@ -320,11 +209,18 @@ impl<'input> Iterator for Lexer<'input> {
             } else {
                 self.current_byte_position += current_max_length;
 
-                if current_token_kind == TokenKind::Whitespace {
+                if current_token_kind == TokenKind::Whitespace && self.ignore_whitespace {
+                    continue;
+                }
+
+                if current_token_kind == TokenKind::Comment && self.ignore_comment {
+                    self.comments
+                        .push(start_position..self.current_byte_position);
                     continue;
                 }
 
                 let end_position = self.current_byte_position;
+
                 Token {
                     kind: current_token_kind,
                     text: &self.source[start_position..end_position],
@@ -337,3 +233,23 @@ impl<'input> Iterator for Lexer<'input> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Anchor {
+    byte_position: usize,
+}
+
+impl Anchor {
+    pub fn elapsed(&self, lexer: &Lexer) -> Range<usize> {
+        // skip until not whitespace
+        let floor = lexer.source[self.byte_position..]
+            .chars()
+            .take_while(|char| char.is_whitespace())
+            .map(|char| char.len_utf8())
+            .sum::<usize>();
+
+        let start = self.byte_position + floor;
+        let end = lexer.current_byte_position.max(start);
+
+        start..end
+    }
+}

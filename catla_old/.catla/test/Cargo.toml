@@ -1,0 +1,8 @@
+[package]
+name = "test"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+catla_std = { path = "../catla_std" }
+catla_transpile_std = { path = "../../catla_transpile_std" }

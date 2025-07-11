@@ -10,7 +10,7 @@ bnf_rules! {
 
     program             ::= [ statement ] { end_of_statement [ statement ] }
 
-    statement           ::= { [ documents ] transpiler_tag } (
+    statement           ::= documents { transpiler_tag } (
                                 assignment
                                 | swap_statement
                                 | import_statement
@@ -18,10 +18,10 @@ bnf_rules! {
                                 | drop_statement
                                 | expression
                                 | impl_interface
-                                | type_define
+                                | type_alias
                             )
 
-    documents           ::= r"///[^\n\r]*(\n|\r|\r\n)"
+    documents           ::= { r"///[^\n\r]*(\n|\r|\r\n)" }
     // comments         ::= r"//[^\n\r]*" | r"/\*.*\*/"  /* ignored in lexer */
 
     define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define )
@@ -53,7 +53,7 @@ bnf_rules! {
     impl_interface      ::= "implements" [ generics_define ] type_info [ line_feed ] "for" [ line_feed ] type_info
                             [ line_feed ] [ where_clause ] block
 
-    type_define         ::= "type" literal [ generics_define ] "=" type_info
+    type_alias          ::= "type" literal [ generics_define ] "=" type_info
 
     generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
     generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ]
@@ -150,7 +150,7 @@ bnf_rules! {
     type_info           ::= array_type_info | base_type_info | tuple_type_info
     tuple_type_info     ::= "(" [ line_feed ] type_info [ line_feed ] { "," [ line_feed ] [ type_info [ line_feed ] ] } ")"
     array_type_info     ::= "[" [ line_feed ] type_info [ line_feed ] "]"
-    base_type_info      ::= ( literal | "This" ) { "::" [ line_feed ] literal } [ generics_info ] { type_attribute }
+    base_type_info      ::= ( literal | "This" ) { ( "::" | r"(\n|\r)+::" ) [ line_feed ] literal } [ generics_info ] { type_attribute }
     type_attribute      ::= "?" | ( "!" [ generics_info ] )
     generics_info       ::= "<" [ line_feed ] [ type_info [ line_feed ] ]
                             { "," [ line_feed ] [ type_info [ line_feed ] ] } ">"

@@ -12,7 +12,7 @@ bnf_rules! {
 
     statement           ::= { [ documents ] transpiler_tag } (
                                 assignment
-                                | exchange_statement
+                                | swap_statement
                                 | import_statement
                                 | define_with_attr
                                 | drop_statement
@@ -22,7 +22,7 @@ bnf_rules! {
                             )
 
     documents           ::= r"///[^\n\r]*(\n|\r|\r\n)"
-    // comments         ::= r"//[^\n\r]*(\n|\r|\r\n)" | r"/\*.*\*/"  /* ignored in lexer */
+    // comments         ::= r"//[^\n\r]*" | r"/\*.*\*/"  /* ignored in lexer */
 
     define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define )
 
@@ -76,7 +76,7 @@ bnf_rules! {
 
     assignment          ::= expression "=" [ line_feed ] expression
 
-    exchange_statement  ::= expression "<=>" [ line_feed ] expression
+    swap_statement      ::= expression "<=>" [ line_feed ] expression
 
     expression          ::= return_expression | closure | or_expr
     or_expr             ::= and_expr { "or" [ line_feed ] and_expr }
@@ -97,7 +97,7 @@ bnf_rules! {
                             )
                             [ mapping_operator ]
 
-    primary_right       ::= ( "." | "::" ) [ line_feed ] 
+    primary_right       ::= ( "." | "::" | r"(\n|\r)+\." | r"(\n|\r)+::" )
                             ( literal [ ":" generics_info ] [ function_call ] | mapping_operator )
 
     simple_primary      ::= "(" [ line_feed ] expression [ line_feed ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
@@ -112,7 +112,7 @@ bnf_rules! {
                             | "?" "!"
                             | "!"
                             | "!" "!"
-                            | ( "?" | "!" ) ":" block
+                            | ( "?:" | "!:" ) block
 
     if_expression       ::= if_statement { "else" ( if_statement | block ) }
     if_statement        ::= "if" expression block
@@ -128,7 +128,7 @@ bnf_rules! {
     function_call       ::= "(" [ [ line_feed ] expression [ line_feed ] ]
                             { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
 
-    new_expression      ::= "new" [ "acyclic" ] ( literal | "This" ) { "::" [ line_feed ] literal } field_assign
+    new_expression      ::= "new" [ "acyclic" ] ( literal | "This" ) { ( "::" | r"(\n|\r)+::" ) [ line_feed ] literal } field_assign
     field_assign        ::= "{"
                                 [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ]
                                 { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] }
@@ -157,7 +157,7 @@ bnf_rules! {
 
     literal             ::= r"\w+"
     end_of_statement    ::= line_feed | ";"
-    line_feed           ::= r"\n|\r"
+    line_feed           ::= r"(\n|\r)+"
 
     string_literal      ::= r#""([^"\\]|\\.)*""# | r"'([^'\\]|\\.)*'"
 }

@@ -5,30 +5,211 @@ use regex::Regex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
+    /// function
+    Function,
+    /// var
+    Var,
+    /// let
+    Let,
+    /// null
+    Null,
+    /// true
+    True,
+    /// false
+    False,
+    /// this
+    This,
+    /// This
+    LargeThis,
+    /// where
+    Where,
+    /// new
+    New,
+    /// drop
+    Drop,
+    /// mutex
+    Mutex,
+    /// static
+    Static,
+    /// private
+    Private,
+    /// suspend
+    Suspend,
+    /// native
+    Native,
+    /// acyclic
+    Acyclic,
+    /// open
+    Open,
+    /// override
+    Override,
+    /// class
+    Class,
+    /// struct
+    Struct,
+    /// interface
+    Interface,
+    /// implements
+    Implements,
+    /// for
+    For,
+    /// type
+    Type,
+    /// import
+    Import,
+    /// or
+    Or,
+    /// and
+    And,
+    /// if
+    If,
+    /// else
+    Else,
+    /// loop
+    Loop,
+    /// return
+    Return,
+    /// +
+    Plus,
+    /// -
+    Minus,
+    /// *
+    Asterisk,
+    /// /
+    Slash,
+    /// =
+    Equal,
+    /// ==
+    DoubleEqual,
+    /// !=
+    NotEqual,
     /// #
     Hash,
+    /// ?
+    QuestionMark,
+    /// !
+    ExclamationMark,
+    /// ?:
+    QuestionElvis,
+    /// !:
+    ExclamationElvis,
+    /// :
+    Colon,
+    /// ::
+    DoubleColon,
+    /// ;
+    SemiColon,
+    /// ,
+    Comma,
+    /// |
+    VerticalLine,
+    /// ->
+    ThinArrow,
+    /// =>
+    FatArrow,
+    /// <=>
+    Swap,
+    /// <
+    LessThan,
+    /// >
+    GreaterThan,
+    /// <=
+    LessThanOrEqual,
+    /// >=
+    GreaterThanOrEqual,
+    /// (
+    ParenthesesLeft,
+    /// )
+    ParenthesesRight,
     /// [
     BracketLeft,
     /// ]
     BracketRight,
-    /// function
-    Function,
-
+    /// {
+    BraceLeft,
+    /// }
+    BraceRight,
+    /// e.g. normal_literal
+    Literal,
+    /// e.g. "string literal"
+    StringLiteral,
+    /// e.g. /// docs
+    Document,
+    /// e.g. \n
     LineFeed,
+    /// e.g. ' '
     Whitespace,
+    /// e.g. // comment
     Comment,
     UnexpectedCharacter,
     None,
 }
 
 static TOKENIZERS: &[Tokenizer] = &[
+    Tokenizer::Keyword(TokenKind::Function, "function"),
+    Tokenizer::Keyword(TokenKind::Var, "var"),
+    Tokenizer::Keyword(TokenKind::Let, "let"),
+    Tokenizer::Keyword(TokenKind::Null, "null"),
+    Tokenizer::Keyword(TokenKind::True, "true"),
+    Tokenizer::Keyword(TokenKind::False, "false"),
+    Tokenizer::Keyword(TokenKind::This, "this"),
+    Tokenizer::Keyword(TokenKind::LargeThis, "This"),
+    Tokenizer::Keyword(TokenKind::Where, "where"),
+    Tokenizer::Keyword(TokenKind::New, "new"),
+    Tokenizer::Keyword(TokenKind::Drop, "drop"),
+    Tokenizer::Keyword(TokenKind::Mutex, "mutex"),
+    Tokenizer::Keyword(TokenKind::Static, "static"),
+    Tokenizer::Keyword(TokenKind::Private, "private"),
+    Tokenizer::Keyword(TokenKind::Suspend, "suspend"),
+    Tokenizer::Keyword(TokenKind::Native, "native"),
+    Tokenizer::Keyword(TokenKind::Acyclic, "acyclic"),
+    Tokenizer::Keyword(TokenKind::Open, "open"),
+    Tokenizer::Keyword(TokenKind::Override, "override"),
+    Tokenizer::Keyword(TokenKind::Class, "class"),
+    Tokenizer::Keyword(TokenKind::Struct, "struct"),
+    Tokenizer::Keyword(TokenKind::Interface, "interface"),
+    Tokenizer::Keyword(TokenKind::Implements, "implements"),
+    Tokenizer::Keyword(TokenKind::For, "for"),
+    Tokenizer::Keyword(TokenKind::Type, "type"),
+    Tokenizer::Keyword(TokenKind::Import, "import"),
+    Tokenizer::Keyword(TokenKind::Or, "or"),
+    Tokenizer::Keyword(TokenKind::And, "and"),
+    Tokenizer::Keyword(TokenKind::If, "if"),
+    Tokenizer::Keyword(TokenKind::Else, "else"),
+    Tokenizer::Keyword(TokenKind::Loop, "loop"),
+    Tokenizer::Keyword(TokenKind::Return, "return"),
+    Tokenizer::Keyword(TokenKind::Plus, "+"),
+    Tokenizer::Keyword(TokenKind::Minus, "-"),
+    Tokenizer::Keyword(TokenKind::Asterisk, "*"),
+    Tokenizer::Keyword(TokenKind::Slash, "/"),
+    Tokenizer::Keyword(TokenKind::Equal, "="),
+    Tokenizer::Keyword(TokenKind::DoubleEqual, "=="),
+    Tokenizer::Keyword(TokenKind::NotEqual, "!="),
     Tokenizer::Keyword(TokenKind::Hash, "#"),
+    Tokenizer::Keyword(TokenKind::Colon, ":"),
+    Tokenizer::Keyword(TokenKind::DoubleColon, "::"),
+    Tokenizer::Keyword(TokenKind::SemiColon, ";"),
+    Tokenizer::Keyword(TokenKind::Comma, ","),
+    Tokenizer::Keyword(TokenKind::VerticalLine, "|"),
+    Tokenizer::Keyword(TokenKind::ThinArrow, "->"),
+    Tokenizer::Keyword(TokenKind::FatArrow, "=>"),
+    Tokenizer::Keyword(TokenKind::Swap, "<=>"),
+    Tokenizer::Keyword(TokenKind::LessThan, "<"),
+    Tokenizer::Keyword(TokenKind::GreaterThan, ">"),
+    Tokenizer::Keyword(TokenKind::LessThanOrEqual, "<="),
+    Tokenizer::Keyword(TokenKind::GreaterThanOrEqual, ">="),
+    Tokenizer::Keyword(TokenKind::ParenthesesLeft, "("),
+    Tokenizer::Keyword(TokenKind::ParenthesesRight, ")"),
     Tokenizer::Keyword(TokenKind::BracketLeft, "["),
     Tokenizer::Keyword(TokenKind::BracketRight, "]"),
-    Tokenizer::Keyword(TokenKind::Function, "function"),
+    Tokenizer::Keyword(TokenKind::BraceLeft, "{"),
+    Tokenizer::Keyword(TokenKind::BraceRight, "}"),
+    Tokenizer::Regex(TokenKind::Literal, r"\w+"),
+    Tokenizer::Regex(TokenKind::StringLiteral, r#""([^"\\]|\\.)*""#),
+    Tokenizer::Regex(TokenKind::Document, r"///[^\n\r]*(\n|\r|\r\n)"),
     Tokenizer::Regex(TokenKind::LineFeed, r"\n|\r"),
     Tokenizer::Regex(TokenKind::Whitespace, r"[ 　\t]+"),
-    Tokenizer::Regex(TokenKind::Comment, r"//[^\n\r]*(\n|\r|\r\n)"),
+    Tokenizer::Regex(TokenKind::Comment, r"//[^\n\r]*"),
     Tokenizer::Regex(TokenKind::Comment, r"/\*.*\*/"),
 ];
 
@@ -251,5 +432,27 @@ impl Anchor {
         let end = lexer.current_byte_position.max(start);
 
         start..end
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::lexer::Lexer;
+
+    #[test]
+    fn lexer() {
+        let source = "
+function <T> identity(value: T) -> T {
+    return 
+}
+
+let func = |value| => test(value)
+";
+
+        let lexer = Lexer::new(source);
+
+        for token in lexer {
+            println!("{:?}: {}", token.kind, token.text.replace("\n", "\\n"));
+        }
     }
 }

@@ -211,7 +211,96 @@ pub struct SwapStatement<'input, 'allocator> {
 }
 
 #[derive(Debug)]
-pub enum Expression<'input, 'allocator> {}
+pub enum Expression<'input, 'allocator> {
+    Return(),
+    Closure(),
+    Or(),
+}
+
+#[derive(Debug)]
+pub struct OrExpression<'input, 'allocator> {
+    pub left: AndExpression<'input, 'allocator>,
+    pub chain: Vec<AndExpression<'input, 'allocator>, &'allocator Bump>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct AndExpression<'input, 'allocator> {
+    pub left: EqualsExpression<'input, 'allocator>,
+    pub chain: Vec<EqualsExpression<'input, 'allocator>, &'allocator Bump>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct EqualsExpression<'input, 'allocator> {
+    pub left: LessOrGreaterExpression<'input, 'allocator>,
+    pub chain: Vec<
+        (
+            Spanned<EqualOrNotEqual>,
+            LessOrGreaterExpression<'input, 'allocator>,
+        ),
+        &'allocator Bump,
+    >,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EqualOrNotEqual {
+    Equal,
+    NotEqual,
+}
+
+#[derive(Debug)]
+pub struct LessOrGreaterExpression<'input, 'allocator> {
+    pub left: AddOrSubExpression<'input, 'allocator>,
+    pub chain: Vec<
+        (
+            Spanned<LessOrGreater>,
+            AddOrSubExpression<'input, 'allocator>,
+        ),
+        &'allocator Bump,
+    >,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LessOrGreater {
+    LessThan,
+    GreaterThan,
+    LessThanOrEqual,
+    GreaterThanOrEqual,
+}
+
+#[derive(Debug)]
+pub struct AddOrSubExpression<'input, 'allocator> {
+    pub left: MulOrDivExpression<'input, 'allocator>,
+    pub chain: Vec<(Spanned<AddOrSub>, MulOrDivExpression<'input, 'allocator>), &'allocator Bump>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddOrSub {
+    Add,
+    Sub,
+}
+
+#[derive(Debug)]
+pub struct MulOrDivExpression<'input, 'allocator> {
+    pub left: Factor<'input, 'allocator>,
+    pub chain: Vec<(Spanned<MulOrDiv>, Factor<'input, 'allocator>), &'allocator Bump>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MulOrDiv {
+    Mul,
+    Div,
+}
+
+#[derive(Debug)]
+pub struct Factor<'input, 'allocator> {
+    
+}
 
 #[derive(Debug)]
 pub struct GenericsDefine<'input, 'allocator> {

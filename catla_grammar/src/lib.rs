@@ -98,10 +98,11 @@ bnf_rules! {
                             [ mapping_operator ]
 
     primary_right       ::= ( "." | "::" | r"(\n|\r)+\." | r"(\n|\r)+::" )
-                            ( literal [ ":" generics_info ] [ function_call ] | mapping_operator )
+                            [ literal [ ":" generics_info ] [ function_call ] ] [ mapping_operator ]
 
     simple_primary      ::= "(" [ line_feed ] expression [ line_feed ] { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
                             | literal
+                            | string_literal
                             | "null"
                             | "true"
                             | "false"

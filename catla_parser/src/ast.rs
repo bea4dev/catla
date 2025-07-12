@@ -212,9 +212,9 @@ pub struct SwapStatement<'input, 'allocator> {
 
 #[derive(Debug)]
 pub enum Expression<'input, 'allocator> {
-    Return(),
-    Closure(),
-    Or(),
+    Return(&'allocator ReturnExpression<'input, 'allocator>),
+    Closure(&'allocator Closure<'input, 'allocator>),
+    Or(&'allocator OrExpression<'input, 'allocator>),
 }
 
 #[derive(Debug)]
@@ -299,7 +299,224 @@ pub enum MulOrDiv {
 
 #[derive(Debug)]
 pub struct Factor<'input, 'allocator> {
-    
+    pub minus: Spanned<bool>,
+    pub primary: Primary<'input, 'allocator>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct Primary<'input, 'allocator> {
+    pub left: PrimaryLeft<'input, 'allocator>,
+    pub chain: Vec<PrimaryRight<'input, 'allocator>, &'allocator Bump>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct PrimaryLeft<'input, 'allocator> {
+    pub first: PrimaryLeftExpr<'input, 'allocator>,
+    pub mapping_operator: Option<MappingOperator<'input, 'allocator>>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub enum PrimaryLeftExpr<'input, 'allocator> {
+    Simple {
+        left: SimplePrimary<'input, 'allocator>,
+        generics: Option<GenericsInfo<'input, 'allocator>>,
+        function_call: Option<FunctionCall<'input, 'allocator>>,
+        span: Range<usize>,
+    },
+    NewObject {
+        new_object: NewObjectExpression<'input, 'allocator>,
+    },
+    NewArray {
+        new_array: NewArrayExpression<'input, 'allocator>,
+    },
+    NewArrayCreate {
+        new_array_create: NewArrayCreateExpression<'input, 'allocator>,
+    },
+    If {
+        if_expression: IfExpression<'input, 'allocator>,
+    },
+    Loop {
+        loop_expression: LoopExpression<'input, 'allocator>,
+    },
+}
+
+#[derive(Debug)]
+pub enum SimplePrimary<'input, 'allocator> {
+    Tuple {
+        expressions: Vec<Expression<'input, 'allocator>, &'allocator Bump>,
+        span: Range<usize>,
+    },
+    Literal(Literal<'input>),
+    StringLiteral(Literal<'input>),
+    Null(Range<usize>),
+    True(Range<usize>),
+    False(Range<usize>),
+    This(Range<usize>),
+    LargeThis(Range<usize>),
+}
+
+#[derive(Debug)]
+pub struct FunctionCall<'input, 'allocator> {
+    pub arguments: Vec<Expression<'input, 'allocator>, &'allocator Bump>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct PrimaryRight<'input, 'allocator> {
+    pub separator: Spanned<PrimarySeparator>,
+    pub second: Option<PrimaryRightExpr<'input, 'allocator>>,
+    pub mapping_operator: Option<MappingOperator<'input, 'allocator>>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct PrimaryRightExpr<'input, 'allocator> {
+    pub literal: Literal<'input>,
+    pub generics: Option<GenericsInfo<'input, 'allocator>>,
+    pub function_call: Option<FunctionCall<'input, 'allocator>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimarySeparator {
+    Dot,
+    DoubleColon,
+}
+
+#[derive(Debug)]
+pub enum MappingOperator<'input, 'allocator> {
+    NullPropagation {
+        span: Range<usize>,
+    },
+    NullUnwrap {
+        span: Range<usize>,
+    },
+    NullElvis {
+        block: Block<'input, 'allocator>,
+        span: Range<usize>,
+    },
+    ResultPropagation {
+        span: Range<usize>,
+    },
+    ResultUnwrap {
+        span: Range<usize>,
+    },
+    ResultElvis {
+        block: Block<'input, 'allocator>,
+        span: Range<usize>,
+    },
+}
+
+#[derive(Debug)]
+pub struct IfExpression<'input, 'allocator> {
+    pub first: IfStatement<'input, 'allocator>,
+    pub chain: Vec<ElseChain<'input, 'allocator>>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct IfStatement<'input, 'allocator> {
+    pub if_keyword: Range<usize>,
+    pub condition: Expression<'input, 'allocator>,
+    pub block: Block<'input, 'allocator>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub enum ElseChain<'input, 'allocator> {
+    ElseIf {
+        if_statement: IfStatement<'input, 'allocator>,
+    },
+    Else {
+        block: Block<'input, 'allocator>,
+    },
+}
+
+#[derive(Debug)]
+pub struct LoopExpression<'input, 'allocator> {
+    pub loop_keyword: Range<usize>,
+    pub block: Block<'input, 'allocator>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct Closure<'input, 'allocator> {
+    pub arguments: ClosureArgumentsOrLiteral<'input, 'allocator>,
+    pub expression_or_block: ExpressionOrBlock<'input, 'allocator>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub enum ExpressionOrBlock<'input, 'allocator> {
+    Expression(Expression<'input, 'allocator>),
+    Block(Block<'input, 'allocator>),
+}
+
+#[derive(Debug)]
+pub enum ClosureArgumentsOrLiteral<'input, 'allocator> {
+    ClosureArgument(ClosureArguments<'input, 'allocator>),
+    Literal(Literal<'input>),
+}
+
+#[derive(Debug)]
+pub struct ClosureArguments<'input, 'allocator> {
+    pub arguments: Vec<FunctionArgumentOrLiteral<'input, 'allocator>, &'allocator Bump>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub enum FunctionArgumentOrLiteral<'input, 'allocator> {
+    FunctionArgument(FunctionArgument<'input, 'allocator>),
+    Literal(Literal<'input>),
+}
+
+#[derive(Debug)]
+pub struct NewObjectExpression<'input, 'allocator> {
+    pub new: Range<usize>,
+    pub acyclic: Option<Range<usize>>,
+    pub path: Vec<Literal<'input>, &'allocator Bump>,
+    pub field_assign: FieldAssign<'input, 'allocator>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct FieldAssign<'input, 'allocator> {
+    pub elements: Vec<FieldAssignElement<'input, 'allocator>, &'allocator Bump>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct FieldAssignElement<'input, 'allocator> {
+    pub field: Literal<'input>,
+    pub expression: Expression<'input, 'allocator>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct NewArrayExpression<'input, 'allocator> {
+    pub new: Range<usize>,
+    pub acyclic: Option<Range<usize>>,
+    pub elements: Vec<Expression<'input, 'allocator>, &'allocator Bump>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct NewArrayCreateExpression<'input, 'allocator> {
+    pub new: Range<usize>,
+    pub acyclic: Option<Range<usize>>,
+    pub for_closure: Option<Range<usize>>,
+    pub init_expression: Expression<'input, 'allocator>,
+    pub length_expression: Expression<'input, 'allocator>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct ReturnExpression<'input, 'allocator> {
+    pub return_keyword: Range<usize>,
+    pub expression: Option<Expression<'input, 'allocator>>,
+    pub span: Range<usize>,
 }
 
 #[derive(Debug)]

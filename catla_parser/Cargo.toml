@@ -6,7 +6,5 @@ edition = "2024"
 [dependencies]
 bumpalo = { version = "3.17.0", features = ["allocator-api2"] }
 allocator-api2 = "0.2.21"
-hashbrown = "0.15.4"
-fxhash = "0.2.1"
 regex = "1.11.1"
 extension-fn = "1.2.0"

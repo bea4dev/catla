@@ -2,13 +2,14 @@ use allocator_api2::vec::Vec;
 use bumpalo::Bump;
 
 use crate::{
-    ast::{Program, StatementWithTagAndDocs},
+    ast::Program,
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
-    parser::statement::parse_statement,
+    parser::statement::parse_statement_with_tag_and_docs,
 };
 
 pub(crate) mod expression;
+pub(crate) mod literal;
 pub(crate) mod statement;
 
 pub fn parse_program<'input, 'allocator>(
@@ -22,7 +23,7 @@ pub fn parse_program<'input, 'allocator>(
     let mut statements = Vec::new_in(allocator);
 
     loop {
-        match parse_statement(lexer, errors, allocator) {
+        match parse_statement_with_tag_and_docs(lexer, errors, allocator) {
             Some(statement) => {
                 statements.push(statement);
             }

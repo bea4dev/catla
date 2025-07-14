@@ -11,6 +11,14 @@ pub struct ParseError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseErrorKind {
     ExtraStatementTokens,
+    MissingExpressionIn2OpChain,
+    MissingExpressionIn1Op,
+    MissingGenericsInfoAfterColon,
+    MissingBlockInElvis,
+    UnclosedParen,
+    UnclosedBrace,
+    InvalidFunctionCallFormat,
+    InvalidTupleExprFormat,
 }
 
 pub(crate) fn recover_until(

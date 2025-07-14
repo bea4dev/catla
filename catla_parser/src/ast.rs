@@ -299,8 +299,8 @@ pub enum MulOrDiv {
 
 #[derive(Debug)]
 pub struct Factor<'input, 'allocator> {
-    pub minus: Spanned<bool>,
-    pub primary: Primary<'input, 'allocator>,
+    pub minus: Option<Range<usize>>,
+    pub primary: Result<Primary<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 
@@ -394,7 +394,7 @@ pub enum MappingOperator<'input, 'allocator> {
         span: Range<usize>,
     },
     NullElvis {
-        block: Block<'input, 'allocator>,
+        block: Result<Block<'input, 'allocator>, ()>,
         span: Range<usize>,
     },
     ResultPropagation {
@@ -404,7 +404,7 @@ pub enum MappingOperator<'input, 'allocator> {
         span: Range<usize>,
     },
     ResultElvis {
-        block: Block<'input, 'allocator>,
+        block: Result<Block<'input, 'allocator>, ()>,
         span: Range<usize>,
     },
 }

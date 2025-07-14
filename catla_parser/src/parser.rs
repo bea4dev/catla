@@ -11,6 +11,7 @@ use crate::{
 pub(crate) mod expression;
 pub(crate) mod literal;
 pub(crate) mod statement;
+pub(crate) mod types;
 
 pub fn parse_program<'input, 'allocator>(
     lexer: &mut Lexer<'input>,

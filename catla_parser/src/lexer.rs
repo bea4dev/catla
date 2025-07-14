@@ -93,6 +93,8 @@ pub enum TokenKind {
     QuestionElvis,
     /// !:
     ExclamationElvis,
+    /// .
+    Dot,
     /// :
     Colon,
     /// ::
@@ -186,6 +188,11 @@ static TOKENIZERS: &[Tokenizer] = &[
     Tokenizer::Keyword(TokenKind::DoubleEqual, "=="),
     Tokenizer::Keyword(TokenKind::NotEqual, "!="),
     Tokenizer::Keyword(TokenKind::Hash, "#"),
+    Tokenizer::Keyword(TokenKind::QuestionMark, "?"),
+    Tokenizer::Keyword(TokenKind::ExclamationMark, "!"),
+    Tokenizer::Keyword(TokenKind::QuestionElvis, "?:"),
+    Tokenizer::Keyword(TokenKind::ExclamationElvis, "!:"),
+    Tokenizer::Keyword(TokenKind::Dot, "."),
     Tokenizer::Keyword(TokenKind::Colon, ":"),
     Tokenizer::Keyword(TokenKind::DoubleColon, "::"),
     Tokenizer::Keyword(TokenKind::SemiColon, ";"),

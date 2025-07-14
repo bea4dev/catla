@@ -11,10 +11,15 @@ pub struct ParseError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseErrorKind {
     ExtraStatementTokens,
+    ExtraDoubleColonInPath,
     MissingExpressionIn2OpChain,
     MissingExpressionIn1Op,
     MissingGenericsInfoAfterColon,
     MissingBlockInElvis,
+    MissingTypeNameInNewObjectExpr,
+    MissingFieldAssignInNewObjectExpr,
+    MissingColonInFieldAssign,
+    MissingExpressionInFieldAssign,
     UnclosedParen,
     UnclosedBrace,
     InvalidFunctionCallFormat,

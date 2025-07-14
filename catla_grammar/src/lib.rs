@@ -129,10 +129,9 @@ bnf_rules! {
     function_call       ::= "(" [ [ line_feed ] expression [ line_feed ] ]
                             { "," [ line_feed ] [ expression [ line_feed ] ] } ")"
 
-    new_expression      ::= "new" [ "acyclic" ] ( literal | "This" ) { ( "::" | r"(\n|\r)+::" ) [ line_feed ] literal } field_assign
+    new_expression      ::= "new" [ "acyclic" ] ( literal | "This" ) { "::" literal } [ line_feed ] field_assign
     field_assign        ::= "{"
-                                [ [ line_feed ] literal ":" [ line_feed ] expression [ line_feed ] ]
-                                { "," [ line_feed ] [ literal ":" [ line_feed ] expression [ line_feed ] ] }
+                                [ [ line_feed ] literal ":" expression { ( "," | line_feed ) [ literal ":" expression ] } ]
                             "}"
 
     new_array_expr      ::= "new" [ "acyclic" ] "{"

@@ -15,7 +15,9 @@ mod test {
     #[test]
     fn parser() {
         let source = r#"
-aaa?.bbb?: { 100 }
+new Test {
+    field: 100
+}
         "#;
 
         let mut lexer = Lexer::new(source);

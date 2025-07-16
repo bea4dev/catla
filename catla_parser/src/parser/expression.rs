@@ -783,6 +783,8 @@ fn parse_new_object_expression<'input, 'allocator>(
     }
     lexer.next();
 
+    lexer.skip_line_feed();
+
     let mut elements = Vec::new_in(allocator);
 
     loop {
@@ -821,10 +823,14 @@ fn parse_new_object_expression<'input, 'allocator>(
             span: anchor.elapsed(lexer),
         });
 
-        if lexer.current().get_kind() != TokenKind::Comma {
+        if lexer.current().get_kind() != TokenKind::Comma
+            && lexer.current().get_kind() != TokenKind::LineFeed
+        {
             break;
         }
         lexer.next();
+
+        lexer.skip_line_feed();
     }
 
     if lexer.current().get_kind() != TokenKind::BraceRight {

@@ -4,10 +4,10 @@ use bumpalo::Bump;
 use crate::{
     ast::{
         AddOrSub, AddOrSubExpression, AndExpression, Block, EqualOrNotEqual, EqualsExpression,
-        Expression, Factor, FieldAssign, FunctionCall, LessOrGreater, LessOrGreaterExpression,
-        MappingOperator, MulOrDiv, MulOrDivExpression, NewObjectExpression, OrExpression, Primary,
-        PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimaryRightExpr, PrimarySeparator,
-        SimplePrimary, Spanned,
+        Expression, Factor, FieldAssign, FieldAssignElement, FunctionCall, LessOrGreater,
+        LessOrGreaterExpression, MappingOperator, MulOrDiv, MulOrDivExpression,
+        NewObjectExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
+        PrimaryRightExpr, PrimarySeparator, SimplePrimary, Spanned,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
@@ -385,6 +385,12 @@ fn parse_primary_left_expr<'input, 'allocator>(
         });
     }
 
+    if let Some(new_object_expr) = parse_new_object_expression(lexer, errors, allocator) {
+        return Some(PrimaryLeftExpr::NewObject {
+            new_object: new_object_expr,
+        });
+    }
+
     None
 }
 
@@ -754,6 +760,8 @@ fn parse_new_object_expression<'input, 'allocator>(
 
     lexer.skip_line_feed();
 
+    let field_assign_anchor = lexer.cast_anchor();
+
     if lexer.current().get_kind() != TokenKind::BraceLeft {
         let error = recover_until(
             lexer,
@@ -775,7 +783,11 @@ fn parse_new_object_expression<'input, 'allocator>(
     }
     lexer.next();
 
+    let mut elements = Vec::new_in(allocator);
+
     loop {
+        let anchor = lexer.cast_anchor();
+
         let literal = match lexer.current().get_kind() {
             TokenKind::Literal => lexer.parse_as_literal(),
             _ => break,
@@ -803,10 +815,44 @@ fn parse_new_object_expression<'input, 'allocator>(
 
             continue;
         };
+        elements.push(FieldAssignElement {
+            field: literal,
+            expression,
+            span: anchor.elapsed(lexer),
+        });
 
         if lexer.current().get_kind() != TokenKind::Comma {
             break;
         }
         lexer.next();
     }
+
+    if lexer.current().get_kind() != TokenKind::BraceRight {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::BraceRight],
+            ParseErrorKind::InvalidFieldAssignFormat,
+        );
+        errors.push(error);
+    }
+
+    if lexer.current().get_kind() != TokenKind::BraceRight {
+        let error = ParseError {
+            kind: ParseErrorKind::UnclosedBrace,
+            span: lexer.cast_anchor().elapsed(lexer),
+        };
+        errors.push(error);
+    }
+    lexer.next();
+
+    Some(NewObjectExpression {
+        new,
+        acyclic,
+        path,
+        field_assign: FieldAssign {
+            elements,
+            span: field_assign_anchor.elapsed(lexer),
+        },
+        span: anchor.elapsed(lexer),
+    })
 }

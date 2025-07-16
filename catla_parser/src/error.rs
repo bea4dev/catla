@@ -24,6 +24,7 @@ pub enum ParseErrorKind {
     UnclosedBrace,
     InvalidFunctionCallFormat,
     InvalidTupleExprFormat,
+    InvalidFieldAssignFormat,
 }
 
 pub(crate) fn recover_until(

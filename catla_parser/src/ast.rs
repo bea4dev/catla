@@ -332,8 +332,8 @@ pub enum PrimaryLeftExpr<'input, 'allocator> {
     NewArray {
         new_array: NewArrayExpression<'input, 'allocator>,
     },
-    NewArrayCreate {
-        new_array_create: NewArrayCreateExpression<'input, 'allocator>,
+    NewArrayInit {
+        new_array_init: NewArrayInitExpression<'input, 'allocator>,
     },
     If {
         if_expression: IfExpression<'input, 'allocator>,
@@ -503,12 +503,12 @@ pub struct NewArrayExpression<'input, 'allocator> {
 }
 
 #[derive(Debug)]
-pub struct NewArrayCreateExpression<'input, 'allocator> {
+pub struct NewArrayInitExpression<'input, 'allocator> {
     pub new: Range<usize>,
     pub acyclic: Option<Range<usize>>,
-    pub for_closure: Option<Range<usize>>,
-    pub init_expression: Expression<'input, 'allocator>,
-    pub length_expression: Expression<'input, 'allocator>,
+    pub for_keyword: Option<Range<usize>>,
+    pub init_expression: Result<Expression<'input, 'allocator>, ()>,
+    pub length_expression: Result<Expression<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 

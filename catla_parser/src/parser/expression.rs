@@ -6,8 +6,8 @@ use crate::{
         AddOrSub, AddOrSubExpression, AndExpression, Block, EqualOrNotEqual, EqualsExpression,
         Expression, Factor, FieldAssign, FieldAssignElement, FunctionCall, LessOrGreater,
         LessOrGreaterExpression, MappingOperator, MulOrDiv, MulOrDivExpression,
-        NewObjectExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
-        PrimaryRightExpr, PrimarySeparator, SimplePrimary, Spanned,
+        NewArrayInitExpression, NewObjectExpression, OrExpression, Primary, PrimaryLeft,
+        PrimaryLeftExpr, PrimaryRight, PrimaryRightExpr, PrimarySeparator, SimplePrimary, Spanned,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
@@ -391,6 +391,12 @@ fn parse_primary_left_expr<'input, 'allocator>(
         });
     }
 
+    if let Some(new_array_init_expression) = parse_new_array_init_expr(lexer, errors, allocator) {
+        return Some(PrimaryLeftExpr::NewArrayInit {
+            new_array_init: new_array_init_expression,
+        });
+    }
+
     None
 }
 
@@ -715,6 +721,11 @@ fn parse_new_object_expression<'input, 'allocator>(
 
     let first_literal = match lexer.current().get_kind() {
         TokenKind::LargeThis | TokenKind::Literal => lexer.parse_as_literal(),
+        TokenKind::BracketLeft => {
+            // maybe NewArrayInitExpression
+            lexer.back_to_anchor(anchor);
+            return None;
+        }
         _ => {
             let error = recover_until(
                 lexer,
@@ -859,6 +870,109 @@ fn parse_new_object_expression<'input, 'allocator>(
             elements,
             span: field_assign_anchor.elapsed(lexer),
         },
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_new_array_init_expr<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<NewArrayInitExpression<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::New {
+        return None;
+    }
+    let new = lexer.next().unwrap().span;
+
+    let acyclic = match lexer.current().get_kind() {
+        TokenKind::Acyclic => Some(lexer.next().unwrap().span),
+        _ => None,
+    };
+
+    let for_keyword = match lexer.current().get_kind() {
+        TokenKind::For => Some(lexer.next().unwrap().span),
+        _ => None,
+    };
+
+    if lexer.current().get_kind() != TokenKind::BracketLeft {
+        lexer.back_to_anchor(anchor);
+        return None;
+    }
+    lexer.next();
+
+    let init_expression = match parse_expression(lexer, errors, allocator) {
+        Some(expression) => Ok(expression),
+        None => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::SemiColon, TokenKind::BracketRight],
+                ParseErrorKind::MissingInitExpression,
+            );
+            errors.push(error);
+
+            if let TokenKind::BracketRight | TokenKind::None = lexer.current().get_kind() {
+                lexer.next();
+                return Some(NewArrayInitExpression {
+                    new,
+                    acyclic,
+                    for_keyword,
+                    init_expression: Err(()),
+                    length_expression: Err(()),
+                    span: anchor.elapsed(lexer),
+                });
+            }
+
+            Err(())
+        }
+    };
+
+    if lexer.current().get_kind() != TokenKind::SemiColon {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::SemiColon, TokenKind::BracketRight],
+            ParseErrorKind::MissingSemiColonInArrayInitExpression,
+        );
+        errors.push(error);
+
+        if let TokenKind::BracketRight | TokenKind::None = lexer.current().get_kind() {
+            lexer.next();
+            return Some(NewArrayInitExpression {
+                new,
+                acyclic,
+                for_keyword,
+                init_expression,
+                length_expression: Err(()),
+                span: anchor.elapsed(lexer),
+            });
+        }
+    }
+    lexer.next();
+
+    let length_expression = match parse_expression(lexer, errors, allocator) {
+        Some(expression) => Ok(expression),
+        None => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::BracketRight],
+                ParseErrorKind::MissingLengthExpression,
+            );
+            errors.push(error);
+            Err(())
+        }
+    };
+
+    if lexer.current().get_kind() == TokenKind::BracketRight {
+        lexer.next();
+    }
+
+    Some(NewArrayInitExpression {
+        new,
+        acyclic,
+        for_keyword,
+        init_expression,
+        length_expression,
         span: anchor.elapsed(lexer),
     })
 }

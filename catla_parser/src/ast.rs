@@ -23,7 +23,7 @@ pub type Literal<'input> = Spanned<&'input str>;
 
 #[derive(Debug)]
 pub struct Program<'input, 'allocator> {
-    pub statements: Vec<StatementWithTagAndDocs<'input, 'allocator>, &'allocator Bump>,
+    pub statements: &'allocator [StatementWithTagAndDocs<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -36,7 +36,7 @@ pub struct StatementWithTagAndDocs<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct Documents<'input, 'allocator> {
-    pub documents: Vec<&'input str, &'allocator Bump>,
+    pub documents: &'allocator [&'input str],
     pub span: Range<usize>,
 }
 
@@ -54,7 +54,7 @@ pub enum Statement<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct DefineWithAttribute<'input, 'allocator> {
-    pub attribute: Vec<Spanned<StatementAttribute>, &'allocator Bump>,
+    pub attribute: &'allocator [Spanned<StatementAttribute>],
     pub define: Define<'input, 'allocator>,
     pub span: Range<usize>,
 }
@@ -80,7 +80,7 @@ pub struct FunctionDefine<'input, 'allocator> {
 #[derive(Debug)]
 pub struct FunctionArguments<'input, 'allocator> {
     pub this_mulability: Option<ThisMutability>,
-    pub arguments: Vec<FunctionArgument<'input, 'allocator>, &'allocator Bump>,
+    pub arguments: &'allocator [FunctionArgument<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -116,14 +116,14 @@ pub enum StatementAttribute {
 
 #[derive(Debug)]
 pub struct WhereClause<'input, 'allocator> {
-    pub elements: Vec<WhereElement<'input, 'allocator>, &'allocator Bump>,
+    pub elements: &'allocator [WhereElement<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub struct WhereElement<'input, 'allocator> {
     pub target_type: TypeInfo<'input, 'allocator>,
-    pub bounds: Vec<TypeInfo<'input, 'allocator>, &'allocator Bump>,
+    pub bounds: &'allocator [TypeInfo<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -145,7 +145,7 @@ pub struct UserTypeDefine<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct SuperTypeInfo<'input, 'allocator> {
-    pub types: Vec<TypeInfo<'input, 'allocator>, &'allocator Bump>,
+    pub types: &'allocator [TypeInfo<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -169,8 +169,8 @@ pub struct TypeAlias<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct ImportStatement<'input, 'allocator> {
-    pub path: Vec<Literal<'input>, &'allocator Bump>,
-    pub elements: Vec<Literal<'input>, &'allocator Bump>,
+    pub path: &'allocator [Literal<'input>],
+    pub elements: &'allocator [Literal<'input>],
     pub span: Range<usize>,
 }
 
@@ -220,27 +220,24 @@ pub enum Expression<'input, 'allocator> {
 #[derive(Debug)]
 pub struct OrExpression<'input, 'allocator> {
     pub left: AndExpression<'input, 'allocator>,
-    pub chain: Vec<AndExpression<'input, 'allocator>, &'allocator Bump>,
+    pub chain: &'allocator [AndExpression<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub struct AndExpression<'input, 'allocator> {
     pub left: EqualsExpression<'input, 'allocator>,
-    pub chain: Vec<EqualsExpression<'input, 'allocator>, &'allocator Bump>,
+    pub chain: &'allocator [EqualsExpression<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub struct EqualsExpression<'input, 'allocator> {
     pub left: LessOrGreaterExpression<'input, 'allocator>,
-    pub chain: Vec<
-        (
-            Spanned<EqualOrNotEqual>,
-            LessOrGreaterExpression<'input, 'allocator>,
-        ),
-        &'allocator Bump,
-    >,
+    pub chain: &'allocator [(
+        Spanned<EqualOrNotEqual>,
+        LessOrGreaterExpression<'input, 'allocator>,
+    )],
     pub span: Range<usize>,
 }
 
@@ -253,13 +250,10 @@ pub enum EqualOrNotEqual {
 #[derive(Debug)]
 pub struct LessOrGreaterExpression<'input, 'allocator> {
     pub left: AddOrSubExpression<'input, 'allocator>,
-    pub chain: Vec<
-        (
-            Spanned<LessOrGreater>,
-            AddOrSubExpression<'input, 'allocator>,
-        ),
-        &'allocator Bump,
-    >,
+    pub chain: &'allocator [(
+        Spanned<LessOrGreater>,
+        AddOrSubExpression<'input, 'allocator>,
+    )],
     pub span: Range<usize>,
 }
 
@@ -274,7 +268,7 @@ pub enum LessOrGreater {
 #[derive(Debug)]
 pub struct AddOrSubExpression<'input, 'allocator> {
     pub left: MulOrDivExpression<'input, 'allocator>,
-    pub chain: Vec<(Spanned<AddOrSub>, MulOrDivExpression<'input, 'allocator>), &'allocator Bump>,
+    pub chain: &'allocator [(Spanned<AddOrSub>, MulOrDivExpression<'input, 'allocator>)],
     pub span: Range<usize>,
 }
 
@@ -287,7 +281,7 @@ pub enum AddOrSub {
 #[derive(Debug)]
 pub struct MulOrDivExpression<'input, 'allocator> {
     pub left: Factor<'input, 'allocator>,
-    pub chain: Vec<(Spanned<MulOrDiv>, Factor<'input, 'allocator>), &'allocator Bump>,
+    pub chain: &'allocator [(Spanned<MulOrDiv>, Factor<'input, 'allocator>)],
     pub span: Range<usize>,
 }
 
@@ -307,7 +301,7 @@ pub struct Factor<'input, 'allocator> {
 #[derive(Debug)]
 pub struct Primary<'input, 'allocator> {
     pub left: PrimaryLeft<'input, 'allocator>,
-    pub chain: Vec<PrimaryRight<'input, 'allocator>, &'allocator Bump>,
+    pub chain: &'allocator [PrimaryRight<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -360,7 +354,7 @@ pub enum SimplePrimary<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct FunctionCall<'input, 'allocator> {
-    pub arguments: Vec<Expression<'input, 'allocator>, &'allocator Bump>,
+    pub arguments: &'allocator [Expression<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -412,15 +406,15 @@ pub enum MappingOperator<'input, 'allocator> {
 #[derive(Debug)]
 pub struct IfExpression<'input, 'allocator> {
     pub first: IfStatement<'input, 'allocator>,
-    pub chain: Vec<ElseChain<'input, 'allocator>>,
+    pub chain: &'allocator [ElseChain<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub struct IfStatement<'input, 'allocator> {
     pub if_keyword: Range<usize>,
-    pub condition: Expression<'input, 'allocator>,
-    pub block: Block<'input, 'allocator>,
+    pub condition: Result<Expression<'input, 'allocator>, ()>,
+    pub block: Result<Block<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 
@@ -462,7 +456,7 @@ pub enum ClosureArgumentsOrLiteral<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct ClosureArguments<'input, 'allocator> {
-    pub arguments: Vec<FunctionArgumentOrLiteral<'input, 'allocator>, &'allocator Bump>,
+    pub arguments: &'allocator [FunctionArgumentOrLiteral<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -476,14 +470,14 @@ pub enum FunctionArgumentOrLiteral<'input, 'allocator> {
 pub struct NewObjectExpression<'input, 'allocator> {
     pub new: Range<usize>,
     pub acyclic: Option<Range<usize>>,
-    pub path: Vec<Literal<'input>, &'allocator Bump>,
+    pub path: &'allocator [Literal<'input>],
     pub field_assign: FieldAssign<'input, 'allocator>,
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub struct FieldAssign<'input, 'allocator> {
-    pub elements: Vec<FieldAssignElement<'input, 'allocator>, &'allocator Bump>,
+    pub elements: &'allocator [FieldAssignElement<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -498,7 +492,7 @@ pub struct FieldAssignElement<'input, 'allocator> {
 pub struct NewArrayExpression<'input, 'allocator> {
     pub new: Range<usize>,
     pub acyclic: Option<Range<usize>>,
-    pub elements: Vec<Expression<'input, 'allocator>, &'allocator Bump>,
+    pub elements: &'allocator [Expression<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -521,14 +515,14 @@ pub struct ReturnExpression<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct GenericsDefine<'input, 'allocator> {
-    pub elements: Vec<GenericsElement<'input, 'allocator>, &'allocator Bump>,
+    pub elements: &'allocator [GenericsElement<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub struct GenericsElement<'input, 'allocator> {
     pub name: Literal<'input>,
-    pub bounds: Vec<TypeInfo<'input, 'allocator>, &'allocator Bump>,
+    pub bounds: &'allocator [TypeInfo<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -547,7 +541,7 @@ pub struct ArrayTypeInfo<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct BaseTypeInfo<'input, 'allocator> {
-    pub path: Vec<Literal<'input>, &'allocator Bump>,
+    pub path: &'allocator [Literal<'input>],
     pub generics: GenericsInfo<'input, 'allocator>,
     pub attribute: TypeAttribute<'input, 'allocator>,
     pub span: Range<usize>,
@@ -555,7 +549,7 @@ pub struct BaseTypeInfo<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct GenericsInfo<'input, 'allocator> {
-    pub types: Vec<TypeInfo<'input, 'allocator>, &'allocator Bump>,
+    pub types: &'allocator [TypeInfo<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
@@ -572,7 +566,7 @@ pub enum TypeAttribute<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct TupleTypeInfo<'input, 'allocator> {
-    pub types: Vec<TypeInfo<'input, 'allocator>, &'allocator Bump>,
+    pub types: &'allocator [TypeInfo<'input, 'allocator>],
     pub span: Range<usize>,
 }
 

@@ -3,11 +3,12 @@ use bumpalo::Bump;
 
 use crate::{
     ast::{
-        AddOrSub, AddOrSubExpression, AndExpression, Block, EqualOrNotEqual, EqualsExpression,
-        Expression, Factor, FieldAssign, FieldAssignElement, FunctionCall, LessOrGreater,
-        LessOrGreaterExpression, MappingOperator, MulOrDiv, MulOrDivExpression,
-        NewArrayInitExpression, NewObjectExpression, OrExpression, Primary, PrimaryLeft,
-        PrimaryLeftExpr, PrimaryRight, PrimaryRightExpr, PrimarySeparator, SimplePrimary, Spanned,
+        AddOrSub, AddOrSubExpression, AndExpression, Block, ElseChain, EqualOrNotEqual,
+        EqualsExpression, Expression, Factor, FieldAssign, FieldAssignElement, FunctionCall,
+        IfExpression, IfStatement, LessOrGreater, LessOrGreaterExpression, MappingOperator,
+        MulOrDiv, MulOrDivExpression, NewArrayExpression, NewArrayInitExpression,
+        NewObjectExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
+        PrimaryRightExpr, PrimarySeparator, SimplePrimary, Spanned,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
@@ -56,6 +57,7 @@ fn parse_or_expression<'input, 'allocator>(
 
         chain.push(right);
     }
+    let chain = allocator.alloc(chain).as_slice();
 
     Some(OrExpression {
         left,
@@ -80,7 +82,6 @@ fn parse_and_expression<'input, 'allocator>(
             break;
         }
         lexer.next();
-
         let Some(right) = parse_equals_expression(lexer, errors, allocator) else {
             let error = recover_until(
                 lexer,
@@ -93,6 +94,7 @@ fn parse_and_expression<'input, 'allocator>(
 
         chain.push(right);
     }
+    let chain = allocator.alloc(chain).as_slice();
 
     Some(AndExpression {
         left,
@@ -132,6 +134,7 @@ fn parse_equals_expression<'input, 'allocator>(
 
         chain.push((equals, right));
     }
+    let chain = allocator.alloc(chain).as_slice();
 
     Some(EqualsExpression {
         left,
@@ -173,6 +176,7 @@ fn parse_less_or_greater_expression<'input, 'allocator>(
 
         chain.push((less_or_greater, right));
     }
+    let chain = allocator.alloc(chain).as_slice();
 
     Some(LessOrGreaterExpression {
         left,
@@ -212,6 +216,7 @@ fn parse_add_or_sub_expression<'input, 'allocator>(
 
         chain.push((add_or_sub, right));
     }
+    let chain = allocator.alloc(chain).as_slice();
 
     Some(AddOrSubExpression {
         left,
@@ -251,6 +256,7 @@ fn parse_mul_or_div_expression<'input, 'allocator>(
 
         chain.push((mul_or_div, right));
     }
+    let chain = allocator.alloc(chain).as_slice();
 
     Some(MulOrDivExpression {
         left,
@@ -317,6 +323,7 @@ fn parse_primary<'input, 'allocator>(
 
         chain.push(right);
     }
+    let chain = allocator.alloc(chain).as_slice();
 
     Some(Primary {
         left,
@@ -385,16 +392,26 @@ fn parse_primary_left_expr<'input, 'allocator>(
         });
     }
 
+    if let Some(new_array_init_expression) = parse_new_array_init_expr(lexer, errors, allocator) {
+        return Some(PrimaryLeftExpr::NewArrayInit {
+            new_array_init: new_array_init_expression,
+        });
+    }
+
+    if let Some(new_array_expression) = parse_new_array_expression(lexer, errors, allocator) {
+        return Some(PrimaryLeftExpr::NewArray {
+            new_array: new_array_expression,
+        });
+    }
+
     if let Some(new_object_expr) = parse_new_object_expression(lexer, errors, allocator) {
         return Some(PrimaryLeftExpr::NewObject {
             new_object: new_object_expr,
         });
     }
 
-    if let Some(new_array_init_expression) = parse_new_array_init_expr(lexer, errors, allocator) {
-        return Some(PrimaryLeftExpr::NewArrayInit {
-            new_array_init: new_array_init_expression,
-        });
+    if let Some(if_expression) = parse_if_expression(lexer, errors, allocator) {
+        return Some(PrimaryLeftExpr::If { if_expression });
     }
 
     None
@@ -642,6 +659,7 @@ fn parse_function_call<'input, 'allocator>(
         }
         lexer.next();
     }
+    let arguments = allocator.alloc(arguments).as_slice();
 
     if lexer.current().get_kind() != TokenKind::ParenthesesRight {
         let error = recover_until(
@@ -737,9 +755,9 @@ fn parse_new_object_expression<'input, 'allocator>(
             return Some(NewObjectExpression {
                 new,
                 acyclic,
-                path: Vec::new_in(allocator),
+                path: allocator.alloc(Vec::new_in(allocator)),
                 field_assign: FieldAssign {
-                    elements: Vec::new_in(allocator),
+                    elements: allocator.alloc(Vec::new_in(allocator)),
                     span: lexer.cast_anchor().elapsed(lexer),
                 },
                 span: anchor.elapsed(lexer),
@@ -768,6 +786,7 @@ fn parse_new_object_expression<'input, 'allocator>(
 
         path.push(literal);
     }
+    let path = allocator.alloc(path).as_slice();
 
     lexer.skip_line_feed();
 
@@ -786,7 +805,7 @@ fn parse_new_object_expression<'input, 'allocator>(
             acyclic,
             path,
             field_assign: FieldAssign {
-                elements: Vec::new_in(allocator),
+                elements: allocator.alloc(Vec::new_in(allocator)).as_slice(),
                 span: lexer.cast_anchor().elapsed(lexer),
             },
             span: anchor.elapsed(lexer),
@@ -843,6 +862,7 @@ fn parse_new_object_expression<'input, 'allocator>(
 
         lexer.skip_line_feed();
     }
+    let elements = allocator.alloc(elements).as_slice();
 
     if lexer.current().get_kind() != TokenKind::BraceRight {
         let error = recover_until(
@@ -975,4 +995,184 @@ fn parse_new_array_init_expr<'input, 'allocator>(
         length_expression,
         span: anchor.elapsed(lexer),
     })
+}
+
+fn parse_new_array_expression<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<NewArrayExpression<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::New {
+        return None;
+    }
+    let new = lexer.next().unwrap().span;
+
+    let acyclic = match lexer.current().get_kind() {
+        TokenKind::Acyclic => Some(lexer.next().unwrap().span),
+        _ => None,
+    };
+
+    if lexer.current().get_kind() != TokenKind::BraceLeft {
+        lexer.back_to_anchor(anchor);
+        return None;
+    }
+    lexer.next();
+
+    let mut elements = Vec::new_in(allocator);
+    loop {
+        let Some(expression) = parse_expression(lexer, errors, allocator) else {
+            if lexer.current().get_kind() == TokenKind::BraceRight {
+                break;
+            }
+
+            let error = recover_until(
+                lexer,
+                &[TokenKind::Comma, TokenKind::BraceRight],
+                ParseErrorKind::InvalidExpressionInNewArrayExpr,
+            );
+            errors.push(error);
+
+            match lexer.current().get_kind() {
+                TokenKind::Comma => continue,
+                _ => break,
+            }
+        };
+        elements.push(expression);
+
+        match lexer.current().get_kind() {
+            TokenKind::Comma => {
+                lexer.next();
+            }
+            TokenKind::BraceRight => break,
+            _ => {}
+        }
+    }
+    let elements = allocator.alloc(elements).as_slice();
+
+    if lexer.current().get_kind() == TokenKind::BraceRight {
+        lexer.next();
+    } else {
+        let error = recover_until(lexer, &[], ParseErrorKind::UnclosedBrace);
+        errors.push(error);
+    }
+
+    Some(NewArrayExpression {
+        new,
+        acyclic,
+        elements,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_if_expression<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<IfExpression<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    let Some(first) = parse_if_statement(lexer, errors, allocator) else {
+        return None;
+    };
+
+    let mut chain = Vec::new_in(allocator);
+    loop {
+        if lexer.current().get_kind() != TokenKind::Else {
+            break;
+        }
+        lexer.next();
+
+        let Some(else_chain) = parse_else_chain(lexer, errors, allocator) else {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed, TokenKind::SemiColon],
+                ParseErrorKind::MissingElseChain,
+            );
+            errors.push(error);
+            break;
+        };
+        chain.push(else_chain);
+    }
+    let chain = allocator.alloc(chain).as_slice();
+
+    Some(IfExpression {
+        first,
+        chain,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_if_statement<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<IfStatement<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::If {
+        return None;
+    }
+    let if_keyword = lexer.next().unwrap().span;
+
+    let condition = match parse_expression(lexer, errors, allocator) {
+        Some(condition) => Ok(condition),
+        None => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::BraceLeft, TokenKind::LineFeed],
+                ParseErrorKind::MissingIfCondition,
+            );
+            errors.push(error);
+
+            match lexer.current().get_kind() {
+                TokenKind::BraceLeft => Err(()),
+                _ => {
+                    return Some(IfStatement {
+                        if_keyword,
+                        condition: Err(()),
+                        block: Err(()),
+                        span: anchor.elapsed(lexer),
+                    });
+                }
+            }
+        }
+    };
+
+    let block = match parse_block(lexer, errors, allocator) {
+        Some(block) => Ok(block),
+        None => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed, TokenKind::SemiColon],
+                ParseErrorKind::MissingIfBlock,
+            );
+            errors.push(error);
+
+            Err(())
+        }
+    };
+
+    Some(IfStatement {
+        if_keyword,
+        condition,
+        block,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_else_chain<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<ElseChain<'input, 'allocator>> {
+    if let Some(if_statement) = parse_if_statement(lexer, errors, allocator) {
+        return Some(ElseChain::ElseIf { if_statement });
+    }
+    if let Some(block) = parse_block(lexer, errors, allocator) {
+        return Some(ElseChain::Else { block });
+    }
+
+    None
 }

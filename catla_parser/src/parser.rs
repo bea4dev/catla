@@ -48,6 +48,7 @@ pub fn parse_program<'input, 'allocator>(
 
         lexer.skip_line_feed();
     }
+    let statements = allocator.alloc(statements).as_slice();
 
     allocator.alloc(Program {
         statements,

@@ -15,7 +15,11 @@ mod test {
     #[test]
     fn parser() {
         let source = r#"
-new [0; 100]
+if true {
+    new Test {}
+} else {
+    new Test {}
+}
         "#;
 
         let mut lexer = Lexer::new(source);

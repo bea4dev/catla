@@ -42,6 +42,7 @@ pub(crate) fn parse_documents<'input, 'allocator>(
         }
         documents.push(lexer.next().unwrap().text);
     }
+    let documents = allocator.alloc(documents).as_slice();
 
     Documents {
         documents,

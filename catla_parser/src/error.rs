@@ -23,12 +23,16 @@ pub enum ParseErrorKind {
     MissingInitExpression,
     MissingLengthExpression,
     MissingSemiColonInArrayInitExpression,
+    MissingElseChain,
+    MissingIfCondition,
+    MissingIfBlock,
     UnclosedParen,
     UnclosedBrace,
     UnclosedBracket,
     InvalidFunctionCallFormat,
     InvalidTupleExprFormat,
     InvalidFieldAssignFormat,
+    InvalidExpressionInNewArrayExpr,
 }
 
 pub(crate) fn recover_until(
@@ -41,7 +45,7 @@ pub(crate) fn recover_until(
     loop {
         let token = lexer.current();
 
-        if until.contains(&token.get_kind()) {
+        if token.is_none() || until.contains(&token.get_kind()) {
             break;
         }
 

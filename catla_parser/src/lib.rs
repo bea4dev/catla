@@ -15,9 +15,7 @@ mod test {
     #[test]
     fn parser() {
         let source = r#"
-if true {
-    new Test {}
-} else {
+loop {
     new Test {}
 }
         "#;

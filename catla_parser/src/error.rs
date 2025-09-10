@@ -26,6 +26,7 @@ pub enum ParseErrorKind {
     MissingElseChain,
     MissingIfCondition,
     MissingIfBlock,
+    MissingLoopBlock,
     UnclosedParen,
     UnclosedBrace,
     UnclosedBracket,

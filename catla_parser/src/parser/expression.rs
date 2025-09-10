@@ -5,8 +5,8 @@ use crate::{
     ast::{
         AddOrSub, AddOrSubExpression, AndExpression, Block, ElseChain, EqualOrNotEqual,
         EqualsExpression, Expression, Factor, FieldAssign, FieldAssignElement, FunctionCall,
-        IfExpression, IfStatement, LessOrGreater, LessOrGreaterExpression, MappingOperator,
-        MulOrDiv, MulOrDivExpression, NewArrayExpression, NewArrayInitExpression,
+        IfExpression, IfStatement, LessOrGreater, LessOrGreaterExpression, LoopExpression,
+        MappingOperator, MulOrDiv, MulOrDivExpression, NewArrayExpression, NewArrayInitExpression,
         NewObjectExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
         PrimaryRightExpr, PrimarySeparator, SimplePrimary, Spanned,
     },
@@ -414,6 +414,10 @@ fn parse_primary_left_expr<'input, 'allocator>(
         return Some(PrimaryLeftExpr::If { if_expression });
     }
 
+    if let Some(loop_expression) = parse_loop_expression(lexer, errors, allocator) {
+        return Some(PrimaryLeftExpr::Loop { loop_expression });
+    }
+
     None
 }
 
@@ -442,6 +446,7 @@ fn parse_simple_primary<'input, 'allocator>(
                 }
                 lexer.next();
             }
+            let expressions = allocator.alloc(expressions).as_slice();
 
             if lexer.current().get_kind() != TokenKind::ParenthesesRight {
                 let error = recover_until(
@@ -1175,4 +1180,37 @@ fn parse_else_chain<'input, 'allocator>(
     }
 
     None
+}
+
+fn parse_loop_expression<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<LoopExpression<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::Loop {
+        return None;
+    }
+    let loop_keyword = lexer.next().unwrap().span;
+
+    let block = match parse_block(lexer, errors, allocator) {
+        Some(block) => Ok(block),
+        None => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed, TokenKind::SemiColon],
+                ParseErrorKind::MissingLoopBlock,
+            );
+            errors.push(error);
+
+            Err(())
+        }
+    };
+
+    Some(LoopExpression {
+        loop_keyword,
+        block,
+        span: anchor.elapsed(lexer),
+    })
 }

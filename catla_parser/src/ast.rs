@@ -1,8 +1,5 @@
 use std::ops::Range;
 
-use allocator_api2::vec::Vec;
-use bumpalo::Bump;
-
 #[derive(Debug)]
 pub struct Spanned<T> {
     pub value: T,
@@ -94,7 +91,7 @@ pub struct FunctionArgument<'input, 'allocator> {
 #[derive(Debug)]
 pub enum VariableBinding<'input, 'allocator> {
     Literal(Literal<'input>),
-    Binding(Vec<VariableBinding<'input, 'allocator>, &'allocator Bump>),
+    Binding(&'allocator [VariableBinding<'input, 'allocator>]),
 }
 
 #[derive(Debug)]
@@ -340,7 +337,7 @@ pub enum PrimaryLeftExpr<'input, 'allocator> {
 #[derive(Debug)]
 pub enum SimplePrimary<'input, 'allocator> {
     Tuple {
-        expressions: Vec<Expression<'input, 'allocator>, &'allocator Bump>,
+        expressions: &'allocator [Expression<'input, 'allocator>],
         span: Range<usize>,
     },
     Literal(Literal<'input>),
@@ -431,7 +428,7 @@ pub enum ElseChain<'input, 'allocator> {
 #[derive(Debug)]
 pub struct LoopExpression<'input, 'allocator> {
     pub loop_keyword: Range<usize>,
-    pub block: Block<'input, 'allocator>,
+    pub block: Result<Block<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 

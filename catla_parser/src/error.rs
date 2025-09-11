@@ -27,13 +27,16 @@ pub enum ParseErrorKind {
     MissingIfCondition,
     MissingIfBlock,
     MissingLoopBlock,
-    UnclosedParen,
+    MissingRightExprInAssign,
+    MissingRightExprInSwap,
+    MissingPathInImport,
+    MissingDefineAfterAttribute,
     UnclosedBrace,
-    UnclosedBracket,
-    InvalidFunctionCallFormat,
-    InvalidTupleExprFormat,
-    InvalidFieldAssignFormat,
-    InvalidExpressionInNewArrayExpr,
+    InvalidFunctionCallFormatOrUnclosedParen,
+    InvalidTupleExprFormatOrUnclosedParen,
+    InvalidFieldAssignFormatOrUnclosedBrace,
+    InvalidExpressionInNewArrayExprOrUnclosedBrace,
+    InvalidImportElementsOrUnclosed,
 }
 
 pub(crate) fn recover_until(

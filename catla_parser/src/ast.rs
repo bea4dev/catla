@@ -52,7 +52,7 @@ pub enum Statement<'input, 'allocator> {
 #[derive(Debug)]
 pub struct DefineWithAttribute<'input, 'allocator> {
     pub attribute: &'allocator [Spanned<StatementAttribute>],
-    pub define: Define<'input, 'allocator>,
+    pub define: Result<Define<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 
@@ -60,11 +60,12 @@ pub struct DefineWithAttribute<'input, 'allocator> {
 pub enum Define<'input, 'allocator> {
     Function(FunctionDefine<'input, 'allocator>),
     UserType(UserTypeDefine<'input, 'allocator>),
-    Variable(),
+    Variable(VariableDefine<'input, 'allocator>),
 }
 
 #[derive(Debug)]
 pub struct FunctionDefine<'input, 'allocator> {
+    pub function: Range<usize>,
     pub generics: GenericsDefine<'input, 'allocator>,
     pub name: Literal<'input>,
     pub arguments: FunctionArguments<'input, 'allocator>,
@@ -166,8 +167,9 @@ pub struct TypeAlias<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct ImportStatement<'input, 'allocator> {
+    pub import: Range<usize>,
     pub path: &'allocator [Literal<'input>],
-    pub elements: &'allocator [Literal<'input>],
+    pub elements: Option<&'allocator [Literal<'input>]>,
     pub span: Range<usize>,
 }
 
@@ -196,14 +198,14 @@ pub enum LetVar {
 #[derive(Debug)]
 pub struct Assignment<'input, 'allocator> {
     pub left: Expression<'input, 'allocator>,
-    pub right: Expression<'input, 'allocator>,
+    pub right: Result<Expression<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub struct SwapStatement<'input, 'allocator> {
     pub left: Expression<'input, 'allocator>,
-    pub right: Expression<'input, 'allocator>,
+    pub right: Result<Expression<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 

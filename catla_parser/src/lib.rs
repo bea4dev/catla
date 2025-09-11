@@ -15,9 +15,7 @@ mod test {
     #[test]
     fn parser() {
         let source = r#"
-loop {
-    new Test {}
-}
+import test::test::{Test, Test}
         "#;
 
         let mut lexer = Lexer::new(source);

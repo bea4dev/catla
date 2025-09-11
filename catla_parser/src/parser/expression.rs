@@ -452,22 +452,11 @@ fn parse_simple_primary<'input, 'allocator>(
                 let error = recover_until(
                     lexer,
                     &[TokenKind::ParenthesesRight],
-                    ParseErrorKind::InvalidTupleExprFormat,
+                    ParseErrorKind::InvalidTupleExprFormatOrUnclosedParen,
                 );
                 errors.push(error);
             }
-
-            if lexer.current().get_kind() != TokenKind::ParenthesesRight {
-                let error = ParseError {
-                    kind: ParseErrorKind::UnclosedParen,
-                    span: lexer.cast_anchor().elapsed(lexer),
-                };
-                errors.push(error);
-            }
-
-            if lexer.current().get_kind() == TokenKind::ParenthesesRight {
-                lexer.next();
-            }
+            lexer.next();
 
             SimplePrimary::Tuple {
                 expressions,
@@ -670,22 +659,11 @@ fn parse_function_call<'input, 'allocator>(
         let error = recover_until(
             lexer,
             &[TokenKind::ParenthesesRight],
-            ParseErrorKind::InvalidFunctionCallFormat,
+            ParseErrorKind::InvalidFunctionCallFormatOrUnclosedParen,
         );
         errors.push(error);
     }
-
-    if lexer.current().get_kind() != TokenKind::ParenthesesRight {
-        let error = ParseError {
-            kind: ParseErrorKind::UnclosedParen,
-            span: lexer.cast_anchor().elapsed(lexer),
-        };
-        errors.push(error);
-    }
-
-    if lexer.current().get_kind() == TokenKind::ParenthesesRight {
-        lexer.next();
-    }
+    lexer.next();
 
     Some(FunctionCall {
         arguments,
@@ -873,16 +851,8 @@ fn parse_new_object_expression<'input, 'allocator>(
         let error = recover_until(
             lexer,
             &[TokenKind::BraceRight],
-            ParseErrorKind::InvalidFieldAssignFormat,
+            ParseErrorKind::InvalidFieldAssignFormatOrUnclosedBrace,
         );
-        errors.push(error);
-    }
-
-    if lexer.current().get_kind() != TokenKind::BraceRight {
-        let error = ParseError {
-            kind: ParseErrorKind::UnclosedBrace,
-            span: lexer.cast_anchor().elapsed(lexer),
-        };
         errors.push(error);
     }
     lexer.next();
@@ -1028,21 +998,7 @@ fn parse_new_array_expression<'input, 'allocator>(
     let mut elements = Vec::new_in(allocator);
     loop {
         let Some(expression) = parse_expression(lexer, errors, allocator) else {
-            if lexer.current().get_kind() == TokenKind::BraceRight {
-                break;
-            }
-
-            let error = recover_until(
-                lexer,
-                &[TokenKind::Comma, TokenKind::BraceRight],
-                ParseErrorKind::InvalidExpressionInNewArrayExpr,
-            );
-            errors.push(error);
-
-            match lexer.current().get_kind() {
-                TokenKind::Comma => continue,
-                _ => break,
-            }
+            break;
         };
         elements.push(expression);
 
@@ -1056,12 +1012,15 @@ fn parse_new_array_expression<'input, 'allocator>(
     }
     let elements = allocator.alloc(elements).as_slice();
 
-    if lexer.current().get_kind() == TokenKind::BraceRight {
-        lexer.next();
-    } else {
-        let error = recover_until(lexer, &[], ParseErrorKind::UnclosedBrace);
+    if lexer.current().get_kind() != TokenKind::BraceRight {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::Comma, TokenKind::BraceRight],
+            ParseErrorKind::InvalidExpressionInNewArrayExprOrUnclosedBrace,
+        );
         errors.push(error);
     }
+    lexer.next();
 
     Some(NewArrayExpression {
         new,

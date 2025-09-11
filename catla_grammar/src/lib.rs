@@ -147,10 +147,11 @@ bnf_rules! {
 
     type_tag            ::= ":" type_info
     function_type_tag   ::= "->" type_info
-    type_info           ::= array_type_info | base_type_info | tuple_type_info
+
+    type_info           ::= ( array_type_info | base_type_info | tuple_type_info | "This" ) { type_attribute }
     tuple_type_info     ::= "(" [ line_feed ] type_info [ line_feed ] { "," [ line_feed ] [ type_info [ line_feed ] ] } ")"
     array_type_info     ::= "[" [ line_feed ] type_info [ line_feed ] "]"
-    base_type_info      ::= ( literal | "This" ) { ( "::" | r"(\n|\r)+::" ) [ line_feed ] literal } [ generics_info ] { type_attribute }
+    base_type_info      ::= literal { "::" literal } [ generics_info ]
     type_attribute      ::= "?" | ( "!" [ generics_info ] )
     generics_info       ::= "<" [ line_feed ] [ type_info [ line_feed ] ]
                             { "," [ line_feed ] [ type_info [ line_feed ] ] } ">"

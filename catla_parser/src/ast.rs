@@ -526,23 +526,30 @@ pub struct GenericsElement<'input, 'allocator> {
 }
 
 #[derive(Debug)]
-pub enum TypeInfo<'input, 'allocator> {
+pub struct TypeInfo<'input, 'allocator> {
+    pub base: TypeInfoBase<'input, 'allocator>,
+    pub attributes: &'allocator [TypeAttribute<'input, 'allocator>],
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub enum TypeInfoBase<'input, 'allocator> {
     Array(ArrayTypeInfo<'input, 'allocator>),
     Base(BaseTypeInfo<'input, 'allocator>),
     Tuple(TupleTypeInfo<'input, 'allocator>),
+    This(Literal<'input>),
 }
 
 #[derive(Debug)]
 pub struct ArrayTypeInfo<'input, 'allocator> {
-    pub base_type: &'allocator TypeInfo<'input, 'allocator>,
+    pub base_type: Result<&'allocator TypeInfo<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub struct BaseTypeInfo<'input, 'allocator> {
     pub path: &'allocator [Literal<'input>],
-    pub generics: GenericsInfo<'input, 'allocator>,
-    pub attribute: TypeAttribute<'input, 'allocator>,
+    pub generics: Option<GenericsInfo<'input, 'allocator>>,
     pub span: Range<usize>,
 }
 
@@ -558,7 +565,7 @@ pub enum TypeAttribute<'input, 'allocator> {
         span: Range<usize>,
     },
     Result {
-        generics: GenericsInfo<'input, 'allocator>,
+        generics: Option<GenericsInfo<'input, 'allocator>>,
         span: Range<usize>,
     },
 }

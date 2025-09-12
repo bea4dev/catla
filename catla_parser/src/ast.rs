@@ -66,9 +66,9 @@ pub enum Define<'input, 'allocator> {
 #[derive(Debug)]
 pub struct FunctionDefine<'input, 'allocator> {
     pub function: Range<usize>,
-    pub generics: GenericsDefine<'input, 'allocator>,
-    pub name: Literal<'input>,
-    pub arguments: FunctionArguments<'input, 'allocator>,
+    pub generics: Option<GenericsDefine<'input, 'allocator>>,
+    pub name: Result<Literal<'input>, ()>,
+    pub arguments: Result<FunctionArguments<'input, 'allocator>, ()>,
     pub return_type: Option<TypeTag<'input, 'allocator>>,
     pub where_clause: Option<WhereClause<'input, 'allocator>>,
     pub block: Option<Block<'input, 'allocator>>,

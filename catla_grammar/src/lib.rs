@@ -31,7 +31,7 @@ bnf_rules! {
     function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments
                             [ function_type_tag ] [ line_feed ] [ where_clause ] ( block | ";" )
 
-    function_arguments  ::= "(" [ line_feed ] [ ( this_mutability | function_argument) [ line_feed ] ]
+    function_arguments  ::= "(" [ line_feed ] [ ( this_mutability | function_argument ) [ line_feed ] ]
                             { "," [ line_feed ] [ function_argument ] } ")"
 
     this_mutability     ::= ( "var" | "let" ) "this"
@@ -56,8 +56,7 @@ bnf_rules! {
     type_alias          ::= "type" literal [ generics_define ] "=" type_info
 
     generics_define     ::= "<" [ line_feed ] [ generics_element ] { "," [ line_feed ] [ generics_element ] } ">"
-    generics_element    ::= literal [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ]
-                            { "+" [ line_feed ] type_info [ line_feed ] } ]
+    generics_element    ::= literal [ ":" type_info { "+" type_info } ]
 
     import_statement    ::= "import" literal { "::" [ line_feed ] ( literal | import_elements ) }
 

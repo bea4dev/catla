@@ -3,13 +3,11 @@ use bumpalo::Bump;
 
 use crate::{
     ast::{
-        Assignment, Define, DefineWithAttribute, Documents, FunctionDefine, ImportStatement,
-        Spanned, Statement, StatementAttribute, StatementWithTagAndDocs, SwapStatement,
-        UserTypeDefine, VariableDefine,
+        Assignment, Define, DefineWithAttribute, Documents, FunctionArgument, FunctionArguments, FunctionDefine, ImportStatement, Spanned, Statement, StatementAttribute, StatementWithTagAndDocs, SwapStatement, UserTypeDefine, VariableDefine
     },
-    error::{ParseError, ParseErrorKind, recover_until},
+    error::{recover_until, ParseError, ParseErrorKind},
     lexer::{GetKind, Lexer, TokenKind},
-    parser::{expression::parse_expression, literal::ParseAsLiteral},
+    parser::{expression::parse_expression, literal::ParseAsLiteral, types::parse_generics_define},
 };
 
 pub(crate) fn parse_statement_with_tag_and_docs<'input, 'allocator>(
@@ -335,16 +333,64 @@ fn parse_function_define<'input, 'allocator>(
     }
     let function = lexer.next().unwrap().span;
 
+    let generics = parse_generics_define(lexer, errors, allocator);
+
+    if lexer.current().get_kind() != TokenKind::Literal {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::LineFeed, TokenKind::SemiColon],
+            ParseErrorKind::MissingFunctionName,
+        );
+        errors.push(error);
+
+        return Some(FunctionDefine {
+            function,
+            generics,
+            name: Err(()),
+            arguments: Err(()),
+            return_type: None,
+            where_clause: None,
+            block: None,
+            span: anchor.elapsed(lexer),
+        });
+    }
+    let name = lexer.parse_as_literal();
+
     Some(FunctionDefine {
         function,
-        generics: (),
-        name: (),
+        generics,
+        name: Ok(name),
         arguments: (),
         return_type: (),
         where_clause: (),
         block: (),
         span: (),
     })
+}
+
+fn parse_function_arguments<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<FunctionArguments<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::ParenthesesLeft {
+        return None;
+    }
+    lexer.next();
+
+    lexer.skip_line_feed();
+
+
+}
+
+fn parse_function_argument<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<FunctionArgument<'input, 'allocator>> {
+    None
 }
 
 fn parse_user_type_define<'input, 'allocator>(

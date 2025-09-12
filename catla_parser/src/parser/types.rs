@@ -3,8 +3,8 @@ use bumpalo::Bump;
 
 use crate::{
     ast::{
-        ArrayTypeInfo, BaseTypeInfo, GenericsInfo, TupleTypeInfo, TypeAttribute, TypeInfo,
-        TypeInfoBase,
+        ArrayTypeInfo, BaseTypeInfo, GenericsDefine, GenericsElement, GenericsInfo, TupleTypeInfo,
+        TypeAttribute, TypeInfo, TypeInfoBase,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
@@ -246,4 +246,93 @@ fn parse_type_attribute<'input, 'allocator>(
         }
         _ => None,
     }
+}
+
+pub(crate) fn parse_generics_define<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<GenericsDefine<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::LessThan {
+        return None;
+    }
+    lexer.next();
+
+    lexer.skip_line_feed();
+
+    let mut elements = Vec::new_in(allocator);
+
+    loop {
+        let Some(element) = parse_generics_element(lexer, errors, allocator) else {
+            break;
+        };
+        elements.push(element);
+
+        if lexer.current().get_kind() != TokenKind::Comma {
+            break;
+        }
+        lexer.next();
+    }
+
+    let elements = allocator.alloc(elements).as_slice();
+
+    if lexer.current().get_kind() != TokenKind::GreaterThan {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::GreaterThan],
+            ParseErrorKind::InvalidGenericsDefineOrUnclosedGreaterThan,
+        );
+        errors.push(error);
+    }
+    lexer.next();
+
+    Some(GenericsDefine {
+        elements,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_generics_element<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<GenericsElement<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::Literal {
+        return None;
+    }
+    let name = lexer.parse_as_literal();
+
+    if lexer.current().get_kind() != TokenKind::Colon {
+        return Some(GenericsElement {
+            name,
+            bounds: allocator.alloc(Vec::new_in(allocator)).as_slice(),
+            span: anchor.elapsed(lexer),
+        });
+    }
+
+    let mut bounds = Vec::new_in(allocator);
+
+    loop {
+        let Some(bound) = parse_type_info(lexer, errors, allocator) else {
+            break;
+        };
+        bounds.push(bound);
+
+        if lexer.current().get_kind() != TokenKind::Plus {
+            break;
+        }
+        lexer.next();
+    }
+
+    let bounds = allocator.alloc(bounds).as_slice();
+
+    Some(GenericsElement {
+        name,
+        bounds,
+        span: anchor.elapsed(lexer),
+    })
 }

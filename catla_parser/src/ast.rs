@@ -77,7 +77,7 @@ pub struct FunctionDefine<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct FunctionArguments<'input, 'allocator> {
-    pub this_mulability: Option<ThisMutability>,
+    pub this_mutability: Option<ThisMutability>,
     pub arguments: &'allocator [FunctionArgument<'input, 'allocator>],
     pub span: Range<usize>,
 }

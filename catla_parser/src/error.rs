@@ -33,6 +33,7 @@ pub enum ParseErrorKind {
     MissingDefineAfterAttribute,
     MissingBaseTypeInArrayType,
     MissingFunctionName,
+    MissingThisInThisMutability,
     UnclosedBrace,
     InvalidFunctionCallFormatOrUnclosedParen,
     InvalidTupleExprFormatOrUnclosedParen,
@@ -43,6 +44,7 @@ pub enum ParseErrorKind {
     InvalidArrayTypeOrUnclosedBracket,
     InvalidYupleOrUnclosedParen,
     InvalidGenericsDefineOrUnclosedGreaterThan,
+    InvalidFunctionArgumentOrUnclosedParen,
 }
 
 pub(crate) fn recover_until(

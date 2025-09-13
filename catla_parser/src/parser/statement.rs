@@ -3,9 +3,11 @@ use bumpalo::Bump;
 
 use crate::{
     ast::{
-        Assignment, Define, DefineWithAttribute, Documents, FunctionArgument, FunctionArguments, FunctionDefine, ImportStatement, Spanned, Statement, StatementAttribute, StatementWithTagAndDocs, SwapStatement, UserTypeDefine, VariableDefine
+        Assignment, Define, DefineWithAttribute, Documents, FunctionArgument, FunctionArguments,
+        FunctionDefine, ImportStatement, Spanned, Statement, StatementAttribute,
+        StatementWithTagAndDocs, SwapStatement, ThisMutability, UserTypeDefine, VariableDefine,
     },
-    error::{recover_until, ParseError, ParseErrorKind},
+    error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
     parser::{expression::parse_expression, literal::ParseAsLiteral, types::parse_generics_define},
 };
@@ -382,7 +384,67 @@ fn parse_function_arguments<'input, 'allocator>(
 
     lexer.skip_line_feed();
 
+    let this_mutability = parse_this_mutability(lexer, errors);
 
+    let mut arguments = Vec::new_in(allocator);
+
+    loop {
+        if lexer.current().get_kind() != TokenKind::Comma {
+            break;
+        }
+        lexer.skip_line_feed();
+
+        let Some(argument) = parse_function_argument(lexer, errors, allocator) else {
+            break;
+        };
+        arguments.push(argument);
+    }
+
+    let arguments = allocator.alloc(arguments).as_slice();
+
+    if lexer.current().get_kind() != TokenKind::ParenthesesRight {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::ParenthesesRight],
+            ParseErrorKind::InvalidFunctionArgumentOrUnclosedParen,
+        );
+        errors.push(error);
+    }
+    lexer.next();
+
+    Some(FunctionArguments {
+        this_mutability,
+        arguments,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_this_mutability<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+) -> Option<ThisMutability> {
+    let anchor = lexer.cast_anchor();
+
+    let is_mutable = match lexer.current().get_kind() {
+        TokenKind::Let => false,
+        TokenKind::Var => true,
+        _ => return None,
+    };
+
+    if lexer.current().get_kind() == TokenKind::This {
+        lexer.next();
+    } else {
+        let error = ParseError {
+            kind: ParseErrorKind::MissingThisInThisMutability,
+            span: anchor.elapsed(lexer),
+        };
+        errors.push(error);
+    }
+
+    Some(ThisMutability {
+        is_mutable,
+        span: anchor.elapsed(lexer),
+    })
 }
 
 fn parse_function_argument<'input, 'allocator>(

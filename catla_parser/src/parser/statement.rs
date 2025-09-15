@@ -507,7 +507,7 @@ fn parse_this_mutability<'input, 'allocator>(
     })
 }
 
-fn parse_function_argument<'input, 'allocator>(
+pub(crate) fn parse_function_argument<'input, 'allocator>(
     lexer: &mut Lexer<'input>,
     errors: &mut std::vec::Vec<ParseError>,
     allocator: &'allocator Bump,
@@ -518,17 +518,9 @@ fn parse_function_argument<'input, 'allocator>(
         return None;
     };
 
-    let type_tag = match parse_type_tag(ParseTypeTagKind::Normal, lexer, errors, allocator) {
-        Some(type_tag) => Ok(type_tag),
-        None => {
-            let error = ParseError {
-                kind: ParseErrorKind::MissingTypeTagInFunctionArgument,
-                span: anchor.elapsed(lexer),
-            };
-            errors.push(error);
-
-            Err(())
-        }
+    let Some(type_tag) = parse_type_tag(ParseTypeTagKind::Normal, lexer, errors, allocator) else {
+        lexer.back_to_anchor(anchor);
+        return None;
     };
 
     Some(FunctionArgument {

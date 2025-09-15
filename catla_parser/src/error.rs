@@ -37,6 +37,8 @@ pub enum ParseErrorKind {
     MissingTypeTagInFunctionArgument,
     MissingFunctionArguments,
     MissingBlockOrSemiClonInFunctionDefine,
+    MissingFatArrowInClosure,
+    MissingExpressionOrBlockInClosure,
     UnclosedBrace,
     InvalidFunctionCallFormatOrUnclosedParen,
     InvalidTupleExprFormatOrUnclosedParen,
@@ -50,6 +52,7 @@ pub enum ParseErrorKind {
     InvalidFunctionArgumentOrUnclosedParen,
     InvalidTypeTag,
     InvalidVariableBindingOrUnclosedParen,
+    InvalidClosureArgumentOrUnclosedVerticalLine,
 }
 
 pub(crate) fn recover_until(

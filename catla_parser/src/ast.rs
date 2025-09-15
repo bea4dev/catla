@@ -85,7 +85,7 @@ pub struct FunctionArguments<'input, 'allocator> {
 #[derive(Debug)]
 pub struct FunctionArgument<'input, 'allocator> {
     pub binding: VariableBinding<'input, 'allocator>,
-    pub type_tag: Result<TypeTag<'input, 'allocator>, ()>,
+    pub type_tag: TypeTag<'input, 'allocator>,
     pub span: Range<usize>,
 }
 
@@ -440,7 +440,7 @@ pub struct LoopExpression<'input, 'allocator> {
 #[derive(Debug)]
 pub struct Closure<'input, 'allocator> {
     pub arguments: ClosureArgumentsOrLiteral<'input, 'allocator>,
-    pub expression_or_block: ExpressionOrBlock<'input, 'allocator>,
+    pub expression_or_block: Result<ExpressionOrBlock<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 
@@ -452,7 +452,7 @@ pub enum ExpressionOrBlock<'input, 'allocator> {
 
 #[derive(Debug)]
 pub enum ClosureArgumentsOrLiteral<'input, 'allocator> {
-    ClosureArgument(ClosureArguments<'input, 'allocator>),
+    ClosureArguments(ClosureArguments<'input, 'allocator>),
     Literal(Literal<'input>),
 }
 

@@ -3,16 +3,21 @@ use bumpalo::Bump;
 
 use crate::{
     ast::{
-        AddOrSub, AddOrSubExpression, AndExpression, Block, ElseChain, EqualOrNotEqual,
-        EqualsExpression, Expression, Factor, FieldAssign, FieldAssignElement, FunctionCall,
-        IfExpression, IfStatement, LessOrGreater, LessOrGreaterExpression, LoopExpression,
-        MappingOperator, MulOrDiv, MulOrDivExpression, NewArrayExpression, NewArrayInitExpression,
-        NewObjectExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
-        PrimaryRightExpr, PrimarySeparator, ReturnExpression, SimplePrimary, Spanned,
+        AddOrSub, AddOrSubExpression, AndExpression, Block, Closure, ClosureArguments,
+        ClosureArgumentsOrLiteral, ElseChain, EqualOrNotEqual, EqualsExpression, Expression,
+        ExpressionOrBlock, Factor, FieldAssign, FieldAssignElement, FunctionArgumentOrLiteral,
+        FunctionCall, IfExpression, IfStatement, LessOrGreater, LessOrGreaterExpression,
+        LoopExpression, MappingOperator, MulOrDiv, MulOrDivExpression, NewArrayExpression,
+        NewArrayInitExpression, NewObjectExpression, OrExpression, Primary, PrimaryLeft,
+        PrimaryLeftExpr, PrimaryRight, PrimaryRightExpr, PrimarySeparator, ReturnExpression,
+        SimplePrimary, Spanned,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
-    parser::{literal::ParseAsLiteral, parse_program, types::parse_generics_info},
+    parser::{
+        literal::ParseAsLiteral, parse_program, statement::parse_function_argument,
+        types::parse_generics_info,
+    },
 };
 
 pub(crate) fn parse_expression<'input, 'allocator>(
@@ -26,6 +31,10 @@ pub(crate) fn parse_expression<'input, 'allocator>(
 
     if let Some(or_expression) = parse_or_expression(lexer, errors, allocator) {
         return Some(Expression::Or(allocator.alloc(or_expression)));
+    }
+
+    if let Some(closure) = parse_closure(lexer, errors, allocator) {
+        return Some(Expression::Closure(allocator.alloc(closure)));
     }
 
     None
@@ -1195,6 +1204,115 @@ fn parse_return_expression<'input, 'allocator>(
     Some(ReturnExpression {
         return_keyword,
         expression,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_closure<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<Closure<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    let arguments = match lexer.current().get_kind() {
+        TokenKind::Literal => ClosureArgumentsOrLiteral::Literal(lexer.parse_as_literal()),
+        TokenKind::VerticalLine => ClosureArgumentsOrLiteral::ClosureArguments(
+            parse_closure_arguments(lexer, errors, allocator).unwrap(),
+        ),
+        _ => return None,
+    };
+
+    if lexer.current().get_kind() != TokenKind::FatArrow {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::LineFeed, TokenKind::SemiColon],
+            ParseErrorKind::MissingFatArrowInClosure,
+        );
+        errors.push(error);
+
+        return Some(Closure {
+            arguments,
+            expression_or_block: Err(()),
+            span: anchor.elapsed(lexer),
+        });
+    }
+    lexer.next();
+
+    let expression_or_block = match parse_block(lexer, errors, allocator) {
+        Some(block) => Ok(ExpressionOrBlock::Block(block)),
+        None => match parse_expression(lexer, errors, allocator) {
+            Some(expression) => Ok(ExpressionOrBlock::Expression(expression)),
+            None => {
+                let error = recover_until(
+                    lexer,
+                    &[TokenKind::LineFeed, TokenKind::SemiColon],
+                    ParseErrorKind::MissingExpressionOrBlockInClosure,
+                );
+                errors.push(error);
+
+                Err(())
+            }
+        },
+    };
+
+    Some(Closure {
+        arguments,
+        expression_or_block,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_closure_arguments<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<ClosureArguments<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::VerticalLine {
+        return None;
+    }
+    lexer.next();
+
+    lexer.skip_line_feed();
+
+    let mut arguments = Vec::new_in(allocator);
+
+    loop {
+        let argument = match parse_function_argument(lexer, errors, allocator) {
+            Some(argument) => FunctionArgumentOrLiteral::FunctionArgument(argument),
+            None => match lexer.current().get_kind() {
+                TokenKind::Literal => FunctionArgumentOrLiteral::Literal(lexer.parse_as_literal()),
+                _ => break,
+            },
+        };
+        arguments.push(argument);
+
+        if lexer.current().get_kind() != TokenKind::Comma {
+            break;
+        }
+        lexer.next();
+
+        lexer.skip_line_feed();
+    }
+
+    lexer.skip_line_feed();
+
+    let arguments = allocator.alloc(arguments).as_slice();
+
+    if lexer.current().get_kind() != TokenKind::VerticalLine {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::VerticalLine],
+            ParseErrorKind::InvalidClosureArgumentOrUnclosedVerticalLine,
+        );
+        errors.push(error);
+    }
+    lexer.next();
+
+    Some(ClosureArguments {
+        arguments,
         span: anchor.elapsed(lexer),
     })
 }

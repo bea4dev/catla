@@ -15,9 +15,7 @@ mod test {
     #[test]
     fn parser() {
         let source = r#"
-suspend function <T> test((value1, value2): (T, int)) -> T where T: Iterator<int> {
-    return value
-}
+|a: int, b: int| => a + b
         "#;
 
         let mut lexer = Lexer::new(source);

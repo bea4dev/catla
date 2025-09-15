@@ -8,7 +8,7 @@ use crate::{
         IfExpression, IfStatement, LessOrGreater, LessOrGreaterExpression, LoopExpression,
         MappingOperator, MulOrDiv, MulOrDivExpression, NewArrayExpression, NewArrayInitExpression,
         NewObjectExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight,
-        PrimaryRightExpr, PrimarySeparator, SimplePrimary, Spanned,
+        PrimaryRightExpr, PrimarySeparator, ReturnExpression, SimplePrimary, Spanned,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
@@ -20,6 +20,10 @@ pub(crate) fn parse_expression<'input, 'allocator>(
     errors: &mut std::vec::Vec<ParseError>,
     allocator: &'allocator Bump,
 ) -> Option<Expression<'input, 'allocator>> {
+    if let Some(return_expression) = parse_return_expression(lexer, errors, allocator) {
+        return Some(Expression::Return(allocator.alloc(return_expression)));
+    }
+
     if let Some(or_expression) = parse_or_expression(lexer, errors, allocator) {
         return Some(Expression::Or(allocator.alloc(or_expression)));
     }
@@ -671,7 +675,7 @@ fn parse_function_call<'input, 'allocator>(
     })
 }
 
-fn parse_block<'input, 'allocator>(
+pub(crate) fn parse_block<'input, 'allocator>(
     lexer: &mut Lexer<'input>,
     errors: &mut std::vec::Vec<ParseError>,
     allocator: &'allocator Bump,
@@ -1170,6 +1174,27 @@ fn parse_loop_expression<'input, 'allocator>(
     Some(LoopExpression {
         loop_keyword,
         block,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_return_expression<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<ReturnExpression<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::Return {
+        return None;
+    }
+    let return_keyword = lexer.next().unwrap().span;
+
+    let expression = parse_expression(lexer, errors, allocator);
+
+    Some(ReturnExpression {
+        return_keyword,
+        expression,
         span: anchor.elapsed(lexer),
     })
 }

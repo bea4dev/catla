@@ -4,7 +4,7 @@ use bumpalo::Bump;
 use crate::{
     ast::{
         ArrayTypeInfo, BaseTypeInfo, GenericsDefine, GenericsElement, GenericsInfo, TupleTypeInfo,
-        TypeAttribute, TypeInfo, TypeInfoBase,
+        TypeAttribute, TypeInfo, TypeInfoBase, TypeTag, WhereClause, WhereElement,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
@@ -332,6 +332,135 @@ fn parse_generics_element<'input, 'allocator>(
 
     Some(GenericsElement {
         name,
+        bounds,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ParseTypeTagKind {
+    Normal,
+    Arrow,
+}
+
+pub(crate) fn parse_type_tag<'input, 'allocator>(
+    kind: ParseTypeTagKind,
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<TypeTag<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    match kind {
+        ParseTypeTagKind::Normal => {
+            if lexer.current().get_kind() != TokenKind::Colon {
+                return None;
+            }
+        }
+        ParseTypeTagKind::Arrow => {
+            if lexer.current().get_kind() != TokenKind::ThinArrow {
+                return None;
+            }
+        }
+    }
+    lexer.next();
+
+    let type_info = match parse_type_info(lexer, errors, allocator) {
+        Some(type_info) => Ok(type_info),
+        None => {
+            let error = ParseError {
+                kind: ParseErrorKind::InvalidTypeTag,
+                span: anchor.elapsed(lexer),
+            };
+            errors.push(error);
+
+            Err(())
+        }
+    };
+
+    Some(TypeTag {
+        type_info,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+pub(crate) fn parse_where_clause<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<WhereClause<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::Where {
+        return None;
+    }
+    lexer.next();
+
+    lexer.skip_line_feed();
+
+    let mut elements = Vec::new_in(allocator);
+
+    loop {
+        let Some(element) = parse_where_element(lexer, errors, allocator) else {
+            break;
+        };
+        elements.push(element);
+
+        if lexer.current().get_kind() != TokenKind::Comma {
+            break;
+        }
+        lexer.next();
+
+        lexer.skip_line_feed();
+    }
+
+    lexer.skip_line_feed();
+
+    let elements = allocator.alloc(elements).as_slice();
+
+    Some(WhereClause {
+        elements,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_where_element<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<WhereElement<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    let Some(target_type) = parse_type_info(lexer, errors, allocator) else {
+        return None;
+    };
+
+    if lexer.current().get_kind() != TokenKind::Colon {
+        return Some(WhereElement {
+            target_type,
+            bounds: allocator.alloc(Vec::new_in(allocator)),
+            span: anchor.elapsed(lexer),
+        });
+    }
+    lexer.next();
+
+    let mut bounds = Vec::new_in(allocator);
+
+    loop {
+        let Some(bound) = parse_type_info(lexer, errors, allocator) else {
+            break;
+        };
+        bounds.push(bound);
+
+        if lexer.current().get_kind() != TokenKind::Plus {
+            break;
+        }
+    }
+
+    let bounds = allocator.alloc(bounds).as_slice();
+
+    Some(WhereElement {
+        target_type,
         bounds,
         span: anchor.elapsed(lexer),
     })

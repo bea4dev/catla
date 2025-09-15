@@ -5,11 +5,16 @@ use crate::{
     ast::{
         Assignment, Define, DefineWithAttribute, Documents, FunctionArgument, FunctionArguments,
         FunctionDefine, ImportStatement, Spanned, Statement, StatementAttribute,
-        StatementWithTagAndDocs, SwapStatement, ThisMutability, UserTypeDefine, VariableDefine,
+        StatementWithTagAndDocs, SwapStatement, ThisMutability, UserTypeDefine, VariableBinding,
+        VariableDefine,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
-    parser::{expression::parse_expression, literal::ParseAsLiteral, types::parse_generics_define},
+    parser::{
+        expression::{parse_block, parse_expression},
+        literal::ParseAsLiteral,
+        types::{ParseTypeTagKind, parse_generics_define, parse_type_tag, parse_where_clause},
+    },
 };
 
 pub(crate) fn parse_statement_with_tag_and_docs<'input, 'allocator>(
@@ -71,6 +76,10 @@ fn parse_statement<'input, 'allocator>(
         return Some(Statement::Import(import));
     }
 
+    if let Some(define_with_attribute) = parse_define_with_attribute(lexer, errors, allocator) {
+        return Some(Statement::DefineWithAttribute(define_with_attribute));
+    }
+
     if let Some(expression) = parse_expression(lexer, errors, allocator) {
         return Some(Statement::Expression(expression));
     }
@@ -124,9 +133,13 @@ fn parse_swap_statement<'input, 'allocator>(
     let anchor = lexer.cast_anchor();
 
     let Some(left) = parse_expression(lexer, errors, allocator) else {
-        lexer.back_to_anchor(anchor);
         return None;
     };
+
+    if lexer.current().get_kind() != TokenKind::Swap {
+        lexer.back_to_anchor(anchor);
+        return None;
+    }
     lexer.next();
 
     let right = match parse_expression(lexer, errors, allocator) {
@@ -358,15 +371,55 @@ fn parse_function_define<'input, 'allocator>(
     }
     let name = lexer.parse_as_literal();
 
+    let Some(arguments) = parse_function_arguments(lexer, errors, allocator) else {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::LineFeed, TokenKind::SemiColon],
+            ParseErrorKind::MissingFunctionArguments,
+        );
+        errors.push(error);
+
+        return Some(FunctionDefine {
+            function,
+            generics,
+            name: Ok(name),
+            arguments: Err(()),
+            return_type: None,
+            where_clause: None,
+            block: None,
+            span: anchor.elapsed(lexer),
+        });
+    };
+
+    let return_type = parse_type_tag(ParseTypeTagKind::Arrow, lexer, errors, allocator);
+
+    let where_clause = parse_where_clause(lexer, errors, allocator);
+
+    let block = match lexer.current().get_kind() {
+        TokenKind::BraceLeft => parse_block(lexer, errors, allocator),
+        TokenKind::SemiColon => {
+            lexer.next();
+            None
+        }
+        _ => {
+            let error = ParseError {
+                kind: ParseErrorKind::MissingBlockOrSemiClonInFunctionDefine,
+                span: anchor.elapsed(lexer),
+            };
+            errors.push(error);
+            None
+        }
+    };
+
     Some(FunctionDefine {
         function,
         generics,
         name: Ok(name),
-        arguments: (),
-        return_type: (),
-        where_clause: (),
-        block: (),
-        span: (),
+        arguments: Ok(arguments),
+        return_type,
+        where_clause,
+        block,
+        span: anchor.elapsed(lexer),
     })
 }
 
@@ -386,18 +439,25 @@ fn parse_function_arguments<'input, 'allocator>(
 
     let this_mutability = parse_this_mutability(lexer, errors);
 
+    if let Some(_) = &this_mutability {
+        if lexer.current().get_kind() == TokenKind::Comma {
+            lexer.next();
+        }
+        lexer.skip_line_feed();
+    }
+
     let mut arguments = Vec::new_in(allocator);
 
     loop {
-        if lexer.current().get_kind() != TokenKind::Comma {
-            break;
-        }
-        lexer.skip_line_feed();
-
         let Some(argument) = parse_function_argument(lexer, errors, allocator) else {
             break;
         };
         arguments.push(argument);
+
+        if lexer.current().get_kind() != TokenKind::Comma {
+            break;
+        }
+        lexer.skip_line_feed();
     }
 
     let arguments = allocator.alloc(arguments).as_slice();
@@ -452,7 +512,83 @@ fn parse_function_argument<'input, 'allocator>(
     errors: &mut std::vec::Vec<ParseError>,
     allocator: &'allocator Bump,
 ) -> Option<FunctionArgument<'input, 'allocator>> {
-    None
+    let anchor = lexer.cast_anchor();
+
+    let Some(binding) = parse_variable_binding(lexer, errors, allocator) else {
+        return None;
+    };
+
+    let type_tag = match parse_type_tag(ParseTypeTagKind::Normal, lexer, errors, allocator) {
+        Some(type_tag) => Ok(type_tag),
+        None => {
+            let error = ParseError {
+                kind: ParseErrorKind::MissingTypeTagInFunctionArgument,
+                span: anchor.elapsed(lexer),
+            };
+            errors.push(error);
+
+            Err(())
+        }
+    };
+
+    Some(FunctionArgument {
+        binding,
+        type_tag,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_variable_binding<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<VariableBinding<'input, 'allocator>> {
+    match lexer.current().get_kind() {
+        TokenKind::Literal => Some(VariableBinding::Literal(lexer.parse_as_literal())),
+        TokenKind::ParenthesesLeft => {
+            let anchor = lexer.cast_anchor();
+
+            lexer.next();
+
+            lexer.skip_line_feed();
+
+            let mut bindings = Vec::new_in(allocator);
+
+            loop {
+                let Some(binding) = parse_variable_binding(lexer, errors, allocator) else {
+                    break;
+                };
+                bindings.push(binding);
+
+                if lexer.current().get_kind() != TokenKind::Comma {
+                    break;
+                }
+                lexer.next();
+
+                lexer.skip_line_feed();
+            }
+
+            lexer.skip_line_feed();
+
+            if lexer.current().get_kind() != TokenKind::ParenthesesRight {
+                let error = recover_until(
+                    lexer,
+                    &[TokenKind::ParenthesesRight],
+                    ParseErrorKind::InvalidVariableBindingOrUnclosedParen,
+                );
+                errors.push(error);
+            }
+            lexer.next();
+
+            let bindings = allocator.alloc(bindings).as_slice();
+
+            Some(VariableBinding::Binding {
+                bindings,
+                span: anchor.elapsed(lexer),
+            })
+        }
+        _ => None,
+    }
 }
 
 fn parse_user_type_define<'input, 'allocator>(

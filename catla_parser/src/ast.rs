@@ -85,14 +85,17 @@ pub struct FunctionArguments<'input, 'allocator> {
 #[derive(Debug)]
 pub struct FunctionArgument<'input, 'allocator> {
     pub binding: VariableBinding<'input, 'allocator>,
-    pub type_tag: TypeTag<'input, 'allocator>,
+    pub type_tag: Result<TypeTag<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub enum VariableBinding<'input, 'allocator> {
     Literal(Literal<'input>),
-    Binding(&'allocator [VariableBinding<'input, 'allocator>]),
+    Binding {
+        bindings: &'allocator [VariableBinding<'input, 'allocator>],
+        span: Range<usize>,
+    },
 }
 
 #[derive(Debug)]
@@ -578,6 +581,6 @@ pub struct TupleTypeInfo<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct TypeTag<'input, 'allocator> {
-    pub type_info: TypeInfo<'input, 'allocator>,
+    pub type_info: Result<TypeInfo<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }

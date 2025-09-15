@@ -38,8 +38,7 @@ bnf_rules! {
     function_argument   ::= variable_binding type_tag
 
     where_clause        ::= "where" [ line_feed ] [ where_element ] { "," [ line_feed ] [ where_element ] }
-    where_element       ::= type_info [ line_feed ] [ ":" [ line_feed ] type_info [ line_feed ]
-                            { "+" [ line_feed ] type_info [ line_feed ] } ]
+    where_element       ::= type_info [ ":" type_info { "+" type_info } ]
 
     memory_manage_attr  ::= "new" | "drop" | "mutex"
 

@@ -1,10 +1,11 @@
+# !tyml @cargo/Cargo
 [package]
 name = "catla_parser"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bumpalo = { version = "3.17.0", features = ["allocator-api2"] }
+bumpalo = { version = "3.17.0", features = [ "allocator-api2" ] }
 allocator-api2 = "0.2.21"
 regex = "1.11.1"
 extension-fn = "1.2.0"

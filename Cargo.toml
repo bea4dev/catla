@@ -2,6 +2,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "catla_grammar",
-    "catla_parser"
+    "src/catla_grammar", "src/catla_name_resolver",
+    "src/catla_parser"
 ]

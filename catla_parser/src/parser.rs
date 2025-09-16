@@ -31,22 +31,30 @@ pub fn parse_program<'input, 'allocator>(
             None => {
                 let current = lexer.current().get_kind();
 
-                if until.contains(&current) {
+                if current == TokenKind::None || until.contains(&current) {
                     break;
-                }
-
-                if current != TokenKind::LineFeed {
-                    let error = recover_until(
-                        lexer,
-                        &[TokenKind::LineFeed],
-                        ParseErrorKind::ExtraStatementTokens,
-                    );
-                    errors.push(error);
                 }
             }
         }
 
-        lexer.skip_line_feed();
+        let mut has_separator = false;
+        loop {
+            if let TokenKind::LineFeed | TokenKind::SemiColon = lexer.current().get_kind() {
+                has_separator = true;
+                lexer.next();
+                continue;
+            }
+            break;
+        }
+
+        if !has_separator {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed, TokenKind::SemiColon],
+                ParseErrorKind::ExtraStatementTokens,
+            );
+            errors.push(error);
+        }
     }
     let statements = allocator.alloc(statements).as_slice();
 

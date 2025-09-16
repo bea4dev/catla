@@ -313,6 +313,7 @@ fn parse_generics_element<'input, 'allocator>(
             span: anchor.elapsed(lexer),
         });
     }
+    lexer.next();
 
     let mut bounds = Vec::new_in(allocator);
 
@@ -455,6 +456,7 @@ fn parse_where_element<'input, 'allocator>(
         if lexer.current().get_kind() != TokenKind::Plus {
             break;
         }
+        lexer.next();
     }
 
     let bounds = allocator.alloc(bounds).as_slice();

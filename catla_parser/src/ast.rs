@@ -46,7 +46,6 @@ pub enum Statement<'input, 'allocator> {
     Drop(DropStatement<'input, 'allocator>),
     Expression(Expression<'input, 'allocator>),
     Implements(Implements<'input, 'allocator>),
-    TypeAlias(TypeAlias<'input, 'allocator>),
 }
 
 #[derive(Debug)]
@@ -61,6 +60,7 @@ pub enum Define<'input, 'allocator> {
     Function(FunctionDefine<'input, 'allocator>),
     UserType(UserTypeDefine<'input, 'allocator>),
     Variable(VariableDefine<'input, 'allocator>),
+    TypeAlias(TypeAlias<'input, 'allocator>),
 }
 
 #[derive(Debug)]
@@ -100,7 +100,7 @@ pub enum VariableBinding<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct ThisMutability {
-    pub is_mutable: bool,
+    pub is_mutable: Spanned<bool>,
     pub span: Range<usize>,
 }
 
@@ -136,12 +136,20 @@ pub struct Block<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct UserTypeDefine<'input, 'allocator> {
-    pub name: Literal<'input>,
-    pub generics: GenericsDefine<'input, 'allocator>,
-    pub super_type: SuperTypeInfo<'input, 'allocator>,
-    pub where_clause: WhereClause<'input, 'allocator>,
-    pub block: Block<'input, 'allocator>,
+    pub kind: Spanned<UserTypeKind>,
+    pub name: Result<Literal<'input>, ()>,
+    pub generics: Option<GenericsDefine<'input, 'allocator>>,
+    pub super_type: Option<SuperTypeInfo<'input, 'allocator>>,
+    pub where_clause: Option<WhereClause<'input, 'allocator>>,
+    pub block: Result<Block<'input, 'allocator>, ()>,
     pub span: Range<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserTypeKind {
+    Class,
+    Struct,
+    Interface,
 }
 
 #[derive(Debug)]
@@ -152,19 +160,21 @@ pub struct SuperTypeInfo<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct Implements<'input, 'allocator> {
-    pub generics: GenericsDefine<'input, 'allocator>,
-    pub interface: TypeInfo<'input, 'allocator>,
-    pub target: TypeInfo<'input, 'allocator>,
-    pub where_clause: WhereClause<'input, 'allocator>,
-    pub block: Block<'input, 'allocator>,
+    pub implements: Range<usize>,
+    pub generics: Option<GenericsDefine<'input, 'allocator>>,
+    pub interface: Result<TypeInfo<'input, 'allocator>, ()>,
+    pub target: Result<TypeInfo<'input, 'allocator>, ()>,
+    pub where_clause: Option<WhereClause<'input, 'allocator>>,
+    pub block: Result<Block<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub struct TypeAlias<'input, 'allocator> {
-    pub name: Literal<'input>,
-    pub generics: GenericsDefine<'input, 'allocator>,
-    pub alias_type: TypeInfo<'input, 'allocator>,
+    pub type_keyword: Range<usize>,
+    pub name: Result<Literal<'input>, ()>,
+    pub generics: Option<GenericsDefine<'input, 'allocator>>,
+    pub alias_type: Result<TypeInfo<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 
@@ -178,16 +188,17 @@ pub struct ImportStatement<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct DropStatement<'input, 'allocator> {
-    pub acyclic: Spanned<bool>,
-    pub expression: Expression<'input, 'allocator>,
+    pub drop: Range<usize>,
+    pub acyclic: Option<Range<usize>>,
+    pub expression: Result<Expression<'input, 'allocator>, ()>,
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
 pub struct VariableDefine<'input, 'allocator> {
     pub let_var: Spanned<LetVar>,
-    pub binding: VariableBinding<'input, 'allocator>,
-    pub type_tag: TypeTag<'input, 'allocator>,
+    pub binding: Result<VariableBinding<'input, 'allocator>, ()>,
+    pub type_tag: Option<TypeTag<'input, 'allocator>>,
     pub expression: Option<Expression<'input, 'allocator>>,
     pub span: Range<usize>,
 }

@@ -18,13 +18,12 @@ bnf_rules! {
                                 | drop_statement
                                 | expression
                                 | impl_interface
-                                | type_alias
                             )
 
     documents           ::= { r"///[^\n\r]*(\n|\r|\r\n)" }
     // comments         ::= r"//[^\n\r]*" | r"/\*.*\*/"  /* ignored in lexer */
 
-    define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define )
+    define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define | type_alias )
 
     transpiler_tag      ::= "#" "[" literal "]"
 
@@ -47,7 +46,7 @@ bnf_rules! {
     user_type_define    ::= ( "class" | "struct" | "interface" ) literal [ generics_define [ line_feed ] ]
                             [ super_type_info ] [ where_clause ] block
 
-    super_type_info     ::= ":" [ line_feed ] type_info [ line_feed ] { "," [ type_info [ line_feed ] ] }
+    super_type_info     ::= ":" [ line_feed ] [ type_info ] { "," [ type_info ] }
 
     impl_interface      ::= "implements" [ generics_define ] type_info [ line_feed ] "for" [ line_feed ] type_info
                             [ line_feed ] [ where_clause ] block

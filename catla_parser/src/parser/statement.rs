@@ -3,17 +3,20 @@ use bumpalo::Bump;
 
 use crate::{
     ast::{
-        Assignment, Define, DefineWithAttribute, Documents, FunctionArgument, FunctionArguments,
-        FunctionDefine, ImportStatement, Spanned, Statement, StatementAttribute,
-        StatementWithTagAndDocs, SwapStatement, ThisMutability, UserTypeDefine, VariableBinding,
-        VariableDefine,
+        Assignment, Define, DefineWithAttribute, Documents, DropStatement, FunctionArgument,
+        FunctionArguments, FunctionDefine, Implements, ImportStatement, LetVar, Spanned, Statement,
+        StatementAttribute, StatementWithTagAndDocs, SuperTypeInfo, SwapStatement, ThisMutability,
+        TypeAlias, UserTypeDefine, UserTypeKind, VariableBinding, VariableDefine,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
     parser::{
         expression::{parse_block, parse_expression},
         literal::ParseAsLiteral,
-        types::{ParseTypeTagKind, parse_generics_define, parse_type_tag, parse_where_clause},
+        types::{
+            ParseTypeTagKind, parse_generics_define, parse_type_info, parse_type_tag,
+            parse_where_clause,
+        },
     },
 };
 
@@ -80,8 +83,16 @@ fn parse_statement<'input, 'allocator>(
         return Some(Statement::DefineWithAttribute(define_with_attribute));
     }
 
+    if let Some(drop) = parse_drop_statement(lexer, errors, allocator) {
+        return Some(Statement::Drop(drop));
+    }
+
     if let Some(expression) = parse_expression(lexer, errors, allocator) {
         return Some(Statement::Expression(expression));
+    }
+
+    if let Some(implements) = parse_implements(lexer, errors, allocator) {
+        return Some(Statement::Implements(implements));
     }
 
     None
@@ -289,23 +300,24 @@ fn parse_define_with_attribute<'input, 'allocator>(
         attributes.push(attribute);
     }
 
-    if attributes.is_empty() {
-        return None;
-    }
-
     let attribute = allocator.alloc(attributes).as_slice();
 
     let define = match parse_define(lexer, errors, allocator) {
         Some(define) => Ok(define),
         None => {
-            let error = recover_until(
-                lexer,
-                &[TokenKind::LineFeed, TokenKind::SemiColon],
-                ParseErrorKind::MissingDefineAfterAttribute,
-            );
-            errors.push(error);
+            if attribute.is_empty() {
+                lexer.back_to_anchor(anchor);
+                return None;
+            } else {
+                let error = recover_until(
+                    lexer,
+                    &[TokenKind::LineFeed, TokenKind::SemiColon],
+                    ParseErrorKind::MissingDefineAfterAttribute,
+                );
+                errors.push(error);
 
-            Err(())
+                Err(())
+            }
         }
     };
 
@@ -331,6 +343,10 @@ fn parse_define<'input, 'allocator>(
 
     if let Some(variable) = parse_variable_define(lexer, errors, allocator) {
         return Some(Define::Variable(variable));
+    }
+
+    if let Some(type_alias) = parse_type_alias(lexer, errors, allocator) {
+        return Some(Define::TypeAlias(type_alias));
     }
 
     None
@@ -486,8 +502,8 @@ fn parse_this_mutability<'input, 'allocator>(
     let anchor = lexer.cast_anchor();
 
     let is_mutable = match lexer.current().get_kind() {
-        TokenKind::Let => false,
-        TokenKind::Var => true,
+        TokenKind::Let => Spanned::new(false, lexer.next().unwrap().span),
+        TokenKind::Var => Spanned::new(true, lexer.next().unwrap().span),
         _ => return None,
     };
 
@@ -588,7 +604,102 @@ fn parse_user_type_define<'input, 'allocator>(
     errors: &mut std::vec::Vec<ParseError>,
     allocator: &'allocator Bump,
 ) -> Option<UserTypeDefine<'input, 'allocator>> {
-    todo!()
+    let anchor = lexer.cast_anchor();
+
+    let kind = match lexer.current().get_kind() {
+        TokenKind::Class => Spanned::new(UserTypeKind::Class, lexer.next().unwrap().span),
+        TokenKind::Struct => Spanned::new(UserTypeKind::Struct, lexer.next().unwrap().span),
+        TokenKind::Interface => Spanned::new(UserTypeKind::Interface, lexer.next().unwrap().span),
+        _ => return None,
+    };
+
+    let name = match lexer.current().get_kind() {
+        TokenKind::Literal => Ok(lexer.parse_as_literal()),
+        _ => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed, TokenKind::SemiColon],
+                ParseErrorKind::MissingNameInUserTypeDefine,
+            );
+            errors.push(error);
+
+            return Some(UserTypeDefine {
+                kind,
+                name: Err(()),
+                generics: None,
+                super_type: None,
+                where_clause: None,
+                block: Err(()),
+                span: anchor.elapsed(lexer),
+            });
+        }
+    };
+
+    let generics = parse_generics_define(lexer, errors, allocator);
+
+    let super_type = parse_super_type_info(lexer, errors, allocator);
+
+    let where_clause = parse_where_clause(lexer, errors, allocator);
+
+    let block = match parse_block(lexer, errors, allocator) {
+        Some(block) => Ok(block),
+        None => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed, TokenKind::SemiColon],
+                ParseErrorKind::MissingBlockInUserTypeDefine,
+            );
+            errors.push(error);
+
+            Err(())
+        }
+    };
+
+    Some(UserTypeDefine {
+        kind,
+        name,
+        generics,
+        super_type,
+        where_clause,
+        block,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_super_type_info<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<SuperTypeInfo<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::Colon {
+        return None;
+    }
+    lexer.next();
+
+    lexer.skip_line_feed();
+
+    let mut types = Vec::new_in(allocator);
+
+    loop {
+        let Some(type_info) = parse_type_info(lexer, errors, allocator) else {
+            break;
+        };
+        types.push(type_info);
+
+        if lexer.current().get_kind() != TokenKind::Comma {
+            break;
+        }
+        lexer.next();
+    }
+
+    let types = allocator.alloc(types).as_slice();
+
+    Some(SuperTypeInfo {
+        types,
+        span: anchor.elapsed(lexer),
+    })
 }
 
 fn parse_variable_define<'input, 'allocator>(
@@ -596,5 +707,284 @@ fn parse_variable_define<'input, 'allocator>(
     errors: &mut std::vec::Vec<ParseError>,
     allocator: &'allocator Bump,
 ) -> Option<VariableDefine<'input, 'allocator>> {
-    todo!()
+    let anchor = lexer.cast_anchor();
+
+    let let_var = match lexer.current().get_kind() {
+        TokenKind::Let => Spanned::new(LetVar::Let, lexer.next().unwrap().span),
+        TokenKind::Var => Spanned::new(LetVar::Var, lexer.next().unwrap().span),
+        _ => return None,
+    };
+
+    let Some(binding) = parse_variable_binding(lexer, errors, allocator) else {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::LineFeed, TokenKind::SemiColon],
+            ParseErrorKind::MissingBindingInVariableDefine,
+        );
+        errors.push(error);
+
+        return Some(VariableDefine {
+            let_var,
+            binding: Err(()),
+            type_tag: None,
+            expression: None,
+            span: anchor.elapsed(lexer),
+        });
+    };
+
+    let type_tag = parse_type_tag(ParseTypeTagKind::Normal, lexer, errors, allocator);
+
+    let expression = match lexer.current().get_kind() {
+        TokenKind::Equal => {
+            lexer.next();
+
+            match parse_expression(lexer, errors, allocator) {
+                Some(expression) => Some(expression),
+                None => {
+                    let error = recover_until(
+                        lexer,
+                        &[TokenKind::LineFeed, TokenKind::SemiColon],
+                        ParseErrorKind::MissingExpressionInVariableDefine,
+                    );
+                    errors.push(error);
+
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+
+    Some(VariableDefine {
+        let_var,
+        binding: Ok(binding),
+        type_tag,
+        expression,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_implements<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<Implements<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::Implements {
+        return None;
+    }
+    let implements = lexer.next().unwrap().span;
+
+    let generics = parse_generics_define(lexer, errors, allocator);
+
+    let Some(interface) = parse_type_info(lexer, errors, allocator) else {
+        let error = recover_until(
+            lexer,
+            &[
+                TokenKind::LineFeed,
+                TokenKind::SemiColon,
+                TokenKind::BraceLeft,
+            ],
+            ParseErrorKind::MissingInterfaceInImplements,
+        );
+        errors.push(error);
+
+        return Some(Implements {
+            implements,
+            generics,
+            interface: Err(()),
+            target: Err(()),
+            where_clause: None,
+            block: Err(()),
+            span: anchor.elapsed(lexer),
+        });
+    };
+
+    if lexer.current().get_kind() != TokenKind::For {
+        let error = recover_until(
+            lexer,
+            &[
+                TokenKind::LineFeed,
+                TokenKind::SemiColon,
+                TokenKind::BraceLeft,
+            ],
+            ParseErrorKind::MissingForKeywordInImplements,
+        );
+        errors.push(error);
+
+        return Some(Implements {
+            implements,
+            generics,
+            interface: Err(()),
+            target: Err(()),
+            where_clause: None,
+            block: Err(()),
+            span: anchor.elapsed(lexer),
+        });
+    }
+    lexer.next();
+
+    let Some(target) = parse_type_info(lexer, errors, allocator) else {
+        let error = recover_until(
+            lexer,
+            &[
+                TokenKind::LineFeed,
+                TokenKind::SemiColon,
+                TokenKind::BraceLeft,
+            ],
+            ParseErrorKind::MissingTargetTypeInImplements,
+        );
+        errors.push(error);
+
+        return Some(Implements {
+            implements,
+            generics,
+            interface: Ok(interface),
+            target: Err(()),
+            where_clause: None,
+            block: Err(()),
+            span: anchor.elapsed(lexer),
+        });
+    };
+
+    let where_clause = parse_where_clause(lexer, errors, allocator);
+
+    let block = match parse_block(lexer, errors, allocator) {
+        Some(block) => Ok(block),
+        None => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed, TokenKind::SemiColon],
+                ParseErrorKind::MissingBlockInImplements,
+            );
+            errors.push(error);
+
+            Err(())
+        }
+    };
+
+    Some(Implements {
+        implements,
+        generics,
+        interface: Ok(interface),
+        target: Ok(target),
+        where_clause,
+        block,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_type_alias<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<TypeAlias<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::Type {
+        return None;
+    }
+    let type_keyword = lexer.next().unwrap().span;
+
+    let name = match lexer.current().get_kind() {
+        TokenKind::Literal => lexer.parse_as_literal(),
+        _ => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed, TokenKind::SemiColon],
+                ParseErrorKind::MissingNameInTypeAlias,
+            );
+            errors.push(error);
+
+            return Some(TypeAlias {
+                type_keyword,
+                name: Err(()),
+                generics: None,
+                alias_type: Err(()),
+                span: anchor.elapsed(lexer),
+            });
+        }
+    };
+
+    let generics = parse_generics_define(lexer, errors, allocator);
+
+    if lexer.current().get_kind() != TokenKind::Equal {
+        let error = recover_until(
+            lexer,
+            &[TokenKind::LineFeed, TokenKind::SemiColon],
+            ParseErrorKind::MissingEqualInTypeAlias,
+        );
+        errors.push(error);
+
+        return Some(TypeAlias {
+            type_keyword,
+            name: Ok(name),
+            generics,
+            alias_type: Err(()),
+            span: anchor.elapsed(lexer),
+        });
+    }
+    lexer.next();
+
+    let alias_type = match parse_type_info(lexer, errors, allocator) {
+        Some(alias_type) => Ok(alias_type),
+        None => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed, TokenKind::SemiColon],
+                ParseErrorKind::MissingTypeInTypeAlias,
+            );
+            errors.push(error);
+
+            Err(())
+        }
+    };
+
+    Some(TypeAlias {
+        type_keyword,
+        name: Ok(name),
+        generics,
+        alias_type,
+        span: anchor.elapsed(lexer),
+    })
+}
+
+fn parse_drop_statement<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> Option<DropStatement<'input, 'allocator>> {
+    let anchor = lexer.cast_anchor();
+
+    if lexer.current().get_kind() != TokenKind::Drop {
+        return None;
+    }
+    let drop = lexer.next().unwrap().span;
+
+    let acyclic = match lexer.current().get_kind() {
+        TokenKind::Acyclic => Some(lexer.next().unwrap().span),
+        _ => None,
+    };
+
+    let expression = match parse_expression(lexer, errors, allocator) {
+        Some(expression) => Ok(expression),
+        None => {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed, TokenKind::SemiColon],
+                ParseErrorKind::MissingExpressionInDropStatement,
+            );
+            errors.push(error);
+
+            Err(())
+        }
+    };
+
+    Some(DropStatement {
+        drop,
+        acyclic,
+        expression,
+        span: anchor.elapsed(lexer),
+    })
 }

@@ -1,4 +1,101 @@
-use std::ops::Range;
+use std::{any::TypeId, mem::transmute, ops::Range};
+
+pub trait AST {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EntityID((TypeId, usize));
+
+impl<T: AST + Sized> From<&T> for EntityID {
+    fn from(value: &T) -> Self {
+        Self((typeid::of::<T>(), unsafe { transmute(value) }))
+    }
+}
+
+macro_rules! impl_ast {
+    (for <$($gen:tt),+> $ty:ty where $($w:tt)*) => {
+        impl<$($gen),+> AST for $ty where $($w)* {}
+    };
+    (for <$($gen:tt),+> $ty:ty) => {
+        impl<$($gen),+> AST for $ty {}
+    };
+    ($ty:ty) => {
+        impl AST for $ty {}
+    };
+}
+
+impl_ast!(for<T> Spanned<T>);
+impl_ast!(for<'input, 'allocator> Program<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> StatementWithTagAndDocs<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> Documents<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> Statement<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> DefineWithAttribute<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> Define<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> FunctionDefine<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> FunctionArguments<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> FunctionArgument<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> VariableBinding<'input, 'allocator>);
+impl_ast!(ThisMutability);
+impl_ast!(StatementAttribute);
+impl_ast!(for<'input, 'allocator> WhereClause<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> WhereElement<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> Block<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> UserTypeDefine<'input, 'allocator>);
+impl_ast!(UserTypeKind);
+impl_ast!(for<'input, 'allocator> SuperTypeInfo<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> Implements<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> TypeAlias<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> ImportStatement<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> DropStatement<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> VariableDefine<'input, 'allocator>);
+impl_ast!(LetVar);
+impl_ast!(for<'input, 'allocator> Assignment<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> SwapStatement<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> Expression<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> OrExpression<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> AndExpression<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> EqualsExpression<'input, 'allocator>);
+impl_ast!(EqualOrNotEqual);
+impl_ast!(for<'input, 'allocator> LessOrGreaterExpression<'input, 'allocator>);
+impl_ast!(LessOrGreater);
+impl_ast!(for<'input, 'allocator> AddOrSubExpression<'input, 'allocator>);
+impl_ast!(AddOrSub);
+impl_ast!(for<'input, 'allocator> MulOrDivExpression<'input, 'allocator>);
+impl_ast!(MulOrDiv);
+impl_ast!(for<'input, 'allocator> Factor<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> Primary<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> PrimaryLeft<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> PrimaryLeftExpr<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> SimplePrimary<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> FunctionCall<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> PrimaryRight<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> PrimaryRightExpr<'input, 'allocator>);
+impl_ast!(PrimarySeparator);
+impl_ast!(for<'input, 'allocator> MappingOperator<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> IfExpression<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> IfStatement<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> ElseChain<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> LoopExpression<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> Closure<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> ExpressionOrBlock<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> ClosureArgumentsOrLiteral<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> ClosureArguments<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> FunctionArgumentOrLiteral<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> NewObjectExpression<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> FieldAssign<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> FieldAssignElement<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> NewArrayExpression<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> NewArrayInitExpression<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> ReturnExpression<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> GenericsDefine<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> GenericsElement<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> TypeInfo<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> TypeInfoBase<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> ArrayTypeInfo<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> BaseTypeInfo<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> GenericsInfo<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> TypeAttribute<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> TupleTypeInfo<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> TypeTag<'input, 'allocator>);
 
 #[derive(Debug)]
 pub struct Spanned<T> {

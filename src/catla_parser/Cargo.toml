@@ -9,3 +9,4 @@ bumpalo = { version = "3.17.0", features = [ "allocator-api2" ] }
 allocator-api2 = "0.2.21"
 regex = "1.11.1"
 extension-fn = "1.2.0"
+typeid = "1.0.3"

@@ -97,7 +97,7 @@ impl_ast!(for<'input, 'allocator> TypeAttribute<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> TupleTypeInfo<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> TypeTag<'input, 'allocator>);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Spanned<T> {
     pub value: T,
     pub span: Range<usize>,

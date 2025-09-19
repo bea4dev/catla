@@ -79,7 +79,7 @@ impl_ast!(for<'input, 'allocator> Closure<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> ExpressionOrBlock<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> ClosureArgumentsOrLiteral<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> ClosureArguments<'input, 'allocator>);
-impl_ast!(for<'input, 'allocator> FunctionArgumentOrLiteral<'input, 'allocator>);
+impl_ast!(for<'input, 'allocator> FunctionArgumentOrVariableBinding<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> NewObjectExpression<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> FieldAssign<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> FieldAssignElement<'input, 'allocator>);
@@ -279,8 +279,14 @@ pub struct TypeAlias<'input, 'allocator> {
 pub struct ImportStatement<'input, 'allocator> {
     pub import: Range<usize>,
     pub path: &'allocator [Literal<'input>],
-    pub elements: Option<&'allocator [Literal<'input>]>,
+    pub elements_or_wild_card: Option<ElementsOrWildCard<'input, 'allocator>>,
     pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub enum ElementsOrWildCard<'input, 'allocator> {
+    Elements(&'allocator [Literal<'input>]),
+    WildCard(Literal<'input>),
 }
 
 #[derive(Debug)]
@@ -566,14 +572,14 @@ pub enum ClosureArgumentsOrLiteral<'input, 'allocator> {
 
 #[derive(Debug)]
 pub struct ClosureArguments<'input, 'allocator> {
-    pub arguments: &'allocator [FunctionArgumentOrLiteral<'input, 'allocator>],
+    pub arguments: &'allocator [FunctionArgumentOrVariableBinding<'input, 'allocator>],
     pub span: Range<usize>,
 }
 
 #[derive(Debug)]
-pub enum FunctionArgumentOrLiteral<'input, 'allocator> {
+pub enum FunctionArgumentOrVariableBinding<'input, 'allocator> {
     FunctionArgument(FunctionArgument<'input, 'allocator>),
-    Literal(Literal<'input>),
+    VariableBinding(VariableBinding<'input, 'allocator>),
 }
 
 #[derive(Debug)]

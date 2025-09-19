@@ -3,10 +3,11 @@ use bumpalo::Bump;
 
 use crate::{
     ast::{
-        Assignment, Define, DefineWithAttribute, Documents, DropStatement, FunctionArgument,
-        FunctionArguments, FunctionDefine, Implements, ImportStatement, LetVar, Spanned, Statement,
-        StatementAttribute, StatementWithTagAndDocs, SuperTypeInfo, SwapStatement, ThisMutability,
-        TypeAlias, UserTypeDefine, UserTypeKind, VariableBinding, VariableDefine,
+        Assignment, Define, DefineWithAttribute, Documents, DropStatement, ElementsOrWildCard,
+        FunctionArgument, FunctionArguments, FunctionDefine, Implements, ImportStatement, LetVar,
+        Spanned, Statement, StatementAttribute, StatementWithTagAndDocs, SuperTypeInfo,
+        SwapStatement, ThisMutability, TypeAlias, UserTypeDefine, UserTypeKind, VariableBinding,
+        VariableDefine,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
@@ -202,7 +203,7 @@ fn parse_import_statement<'input, 'allocator>(
         }
     }
 
-    let mut elements = None;
+    let mut elements_or_wild_card = None;
 
     loop {
         if lexer.current().get_kind() != TokenKind::DoubleColon {
@@ -249,7 +250,16 @@ fn parse_import_statement<'input, 'allocator>(
                 }
                 lexer.next();
 
-                elements = Some(allocator.alloc(import_elements).as_slice());
+                elements_or_wild_card = Some(ElementsOrWildCard::Elements(
+                    allocator.alloc(import_elements).as_slice(),
+                ));
+
+                break;
+            }
+            TokenKind::Asterisk => {
+                elements_or_wild_card =
+                    Some(ElementsOrWildCard::WildCard(lexer.parse_as_literal()));
+                break;
             }
             _ => break,
         }
@@ -260,7 +270,7 @@ fn parse_import_statement<'input, 'allocator>(
     Some(ImportStatement {
         import,
         path,
-        elements,
+        elements_or_wild_card,
         span: anchor.elapsed(lexer),
     })
 }
@@ -546,7 +556,7 @@ pub(crate) fn parse_function_argument<'input, 'allocator>(
     })
 }
 
-fn parse_variable_binding<'input, 'allocator>(
+pub(crate) fn parse_variable_binding<'input, 'allocator>(
     lexer: &mut Lexer<'input>,
     errors: &mut std::vec::Vec<ParseError>,
     allocator: &'allocator Bump,

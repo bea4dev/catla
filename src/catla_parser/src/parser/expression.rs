@@ -5,17 +5,19 @@ use crate::{
     ast::{
         AddOrSub, AddOrSubExpression, AndExpression, Block, Closure, ClosureArguments,
         ClosureArgumentsOrLiteral, ElseChain, EqualOrNotEqual, EqualsExpression, Expression,
-        ExpressionOrBlock, Factor, FieldAssign, FieldAssignElement, FunctionArgumentOrLiteral,
-        FunctionCall, IfExpression, IfStatement, LessOrGreater, LessOrGreaterExpression,
-        LoopExpression, MappingOperator, MulOrDiv, MulOrDivExpression, NewArrayExpression,
-        NewArrayInitExpression, NewObjectExpression, OrExpression, Primary, PrimaryLeft,
-        PrimaryLeftExpr, PrimaryRight, PrimaryRightExpr, PrimarySeparator, ReturnExpression,
-        SimplePrimary, Spanned,
+        ExpressionOrBlock, Factor, FieldAssign, FieldAssignElement,
+        FunctionArgumentOrVariableBinding, FunctionCall, IfExpression, IfStatement, LessOrGreater,
+        LessOrGreaterExpression, LoopExpression, MappingOperator, MulOrDiv, MulOrDivExpression,
+        NewArrayExpression, NewArrayInitExpression, NewObjectExpression, OrExpression, Primary,
+        PrimaryLeft, PrimaryLeftExpr, PrimaryRight, PrimaryRightExpr, PrimarySeparator,
+        ReturnExpression, SimplePrimary, Spanned,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
     parser::{
-        literal::ParseAsLiteral, parse_program, statement::parse_function_argument,
+        literal::ParseAsLiteral,
+        parse_program,
+        statement::{parse_function_argument, parse_variable_binding},
         types::parse_generics_info,
     },
 };
@@ -1281,10 +1283,12 @@ fn parse_closure_arguments<'input, 'allocator>(
 
     loop {
         let argument = match parse_function_argument(lexer, errors, allocator) {
-            Some(argument) => FunctionArgumentOrLiteral::FunctionArgument(argument),
-            None => match lexer.current().get_kind() {
-                TokenKind::Literal => FunctionArgumentOrLiteral::Literal(lexer.parse_as_literal()),
-                _ => break,
+            Some(argument) => FunctionArgumentOrVariableBinding::FunctionArgument(argument),
+            None => match parse_variable_binding(lexer, errors, allocator) {
+                Some(variable_binding) => {
+                    FunctionArgumentOrVariableBinding::VariableBinding(variable_binding)
+                }
+                None => break,
             },
         };
         arguments.push(argument);

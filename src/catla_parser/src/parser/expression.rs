@@ -480,6 +480,7 @@ fn parse_simple_primary<'input, 'allocator>(
         }
         TokenKind::Literal => SimplePrimary::Literal(lexer.parse_as_literal()),
         TokenKind::StringLiteral => SimplePrimary::StringLiteral(lexer.parse_as_literal()),
+        TokenKind::NumericLiteral => SimplePrimary::NumericLiteral(lexer.parse_as_literal()),
         TokenKind::Null => SimplePrimary::Null(lexer.next().unwrap().span),
         TokenKind::True => SimplePrimary::True(lexer.next().unwrap().span),
         TokenKind::False => SimplePrimary::False(lexer.next().unwrap().span),

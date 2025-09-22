@@ -135,6 +135,8 @@ pub enum TokenKind {
     Literal,
     /// e.g. "string literal"
     StringLiteral,
+    /// e.g. 100
+    NumericLiteral,
     /// e.g. /// docs
     Document,
     /// e.g. \n
@@ -211,6 +213,7 @@ static TOKENIZERS: &[Tokenizer] = &[
     Tokenizer::Keyword(TokenKind::BracketRight, "]"),
     Tokenizer::Keyword(TokenKind::BraceLeft, "{"),
     Tokenizer::Keyword(TokenKind::BraceRight, "}"),
+    Tokenizer::Regex(TokenKind::NumericLiteral, r"\d+(\.\d+)?"),
     Tokenizer::Regex(TokenKind::Literal, r"\w+"),
     Tokenizer::Regex(TokenKind::StringLiteral, r#""([^"\\]|\\.)*""#),
     Tokenizer::Regex(TokenKind::Document, r"///[^\n\r]*(\n|\r|\r\n)"),

@@ -461,6 +461,7 @@ pub enum SimplePrimary<'input, 'allocator> {
     },
     Literal(Literal<'input>),
     StringLiteral(Literal<'input>),
+    NumericLiteral(Literal<'input>),
     Null(Range<usize>),
     True(Range<usize>),
     False(Range<usize>),

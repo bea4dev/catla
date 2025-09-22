@@ -1110,6 +1110,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                     );
                 }
                 SimplePrimary::StringLiteral(_) => {}
+                SimplePrimary::NumericLiteral(_) => {}
                 SimplePrimary::Null(_) => {}
                 SimplePrimary::True(_) => {}
                 SimplePrimary::False(_) => {}

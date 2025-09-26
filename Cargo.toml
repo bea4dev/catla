@@ -6,5 +6,6 @@ members = [
     "src/catla_name_resolver",
     "src/catla_parser",
     "src/catla_semantics",
-    "src/catla_type"
+    "src/catla_type",
+    "src/catla_util"
 ]

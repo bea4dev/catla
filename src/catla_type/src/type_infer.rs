@@ -1,6 +1,4 @@
-pub mod user_type_collector;
-
-/// (Hindley-Milner based) Union-Find type inference
+/// (Hindley-Milner based) Union-Find like type inference
 ///
 /// ```catla
 /// let a = 100
@@ -22,7 +20,7 @@ use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
 use crate::types::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct TypeVariableID(usize);
+pub struct TypeVariableID(usize);
 
 /// !!! DO NOT INSERT GLOBAL ALLOCATOR (cause memory leak) !!!
 #[derive(Debug)]

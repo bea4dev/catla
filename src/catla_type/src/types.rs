@@ -3,8 +3,9 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use catla_parser::ast::Spanned;
+use catla_parser::ast::{EntityID, Spanned};
 use catla_util::module_path::ModulePath;
+use derivative::Derivative;
 use hashbrown::HashMap;
 
 use crate::type_infer::TypeVariableID;
@@ -36,11 +37,6 @@ pub enum Type {
     TypeVariable(TypeVariableID),
     Array(Arc<Type>),
     Tuple(Arc<Vec<Type>>),
-    Option(Arc<Type>),
-    Result {
-        value: Arc<Type>,
-        error: Arc<Type>,
-    },
     This,
     Unreachable,
     Unknown,
@@ -81,13 +77,36 @@ impl GlobalUserTypeSet {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct UserTypeInfo {
-    pub module: ModulePath,
+    pub module_path: ModulePath,
     pub name: Spanned<String>,
     pub is_alias: bool,
+    pub element_type: HashMap<String, Spanned<Type>>,
+    pub generics: Vec<Arc<GenericType>>,
+    pub where_clause: Vec<WhereClauseInfo>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct FunctionTypeInfo {}
+pub struct WhereClauseInfo {
+    pub target: Type,
+    pub bounds: Vec<Type>,
+}
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct GenericType {}
+pub struct FunctionTypeInfo {
+    pub module_path: ModulePath,
+    pub name: Spanned<String>,
+    pub generics: Vec<Arc<GenericType>>,
+    pub arguments: Vec<Type>,
+    pub return_type: Type,
+}
+
+#[derive(Derivative)]
+#[derivative(PartialEq, Eq)]
+#[derive(Debug)]
+pub struct GenericType {
+    pub module_path: ModulePath,
+    pub entity_id: EntityID,
+    pub name: Spanned<String>,
+    #[derivative(PartialEq="ignore")]
+    pub bounds: RwLock<Vec<Type>>,
+}

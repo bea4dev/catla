@@ -8,6 +8,8 @@ edition = "2024"
 catla_parser = { path = "../catla_parser/", version = "0.1.0" }
 catla_name_resolver = { path = "../catla_name_resolver/", version = "0.1.0" }
 catla_util = { path = "../catla_util/", version = "0.1.0" }
+catla_import = { path = "../catla_import/", version = "0.1.0" }
 bumpalo = { version = "3.17.0", features = [ "allocator-api2" ] }
 allocator-api2 = "0.2.21"
 hashbrown = "0.16.0"
+derivative = "2"

@@ -72,9 +72,12 @@ pub fn collect_user_type_for_program(
                         Define::UserType(user_type_define) => {
                             if let Ok(name) = &user_type_define.name {
                                 let info = UserTypeInfo {
-                                    module: module_path.clone(),
+                                    module_path: module_path.clone(),
                                     name: name.clone().map(|str| str.to_string()),
                                     is_alias: true,
+                                    element_type: HashMap::new(),
+                                    generics: Vec::new(),
+                                    where_clause: Vec::new(),
                                 };
                                 let id = user_type_set.new_user_type(info);
 
@@ -96,9 +99,12 @@ pub fn collect_user_type_for_program(
                         Define::TypeAlias(type_alias) => {
                             if let Ok(name) = &type_alias.name {
                                 let info = UserTypeInfo {
-                                    module: module_path.clone(),
+                                    module_path: module_path.clone(),
                                     name: name.clone().map(|str| str.to_string()),
                                     is_alias: true,
+                                    element_type: HashMap::new(),
+                                    generics: Vec::new(),
+                                    where_clause: Vec::new(),
                                 };
                                 let id = user_type_set.new_user_type(info);
 

@@ -374,6 +374,20 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                 }
                             }
 
+                            if let Some(type_tag) = &variable_define.type_tag {
+                                if let Ok(type_info) = &type_tag.type_info {
+                                    resolve_name_for_type_info(
+                                        type_info,
+                                        environment,
+                                        components,
+                                        resolved_map,
+                                        all_crates,
+                                        wild_card_imports,
+                                        errors,
+                                    );
+                                }
+                            }
+
                             if let Some(expression) = &variable_define.expression {
                                 resolve_name_for_expression(
                                     expression,
@@ -700,15 +714,20 @@ fn resolve_name_for_base_type_info<'input, 'name_env_alloc>(
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     if let Some(first) = ast.path.first() {
-        components.resolve(
-            environment,
-            first.value,
-            first.into(),
-            first.span.clone(),
-            all_crates,
-            resolved_map,
-            errors,
-        );
+        if let "int" | "int8" | "int16" | "int32" | "int64" | "uint" | "uint8" | "uint16"
+        | "uint32" | "uint64" | "float" | "float32" | "float64" | "bool" | "unit" = first.value
+        {
+        } else {
+            components.resolve(
+                environment,
+                first.value,
+                first.into(),
+                first.span.clone(),
+                all_crates,
+                resolved_map,
+                errors,
+            );
+        }
     }
 
     if let Some(generics) = &ast.generics {

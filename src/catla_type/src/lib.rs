@@ -15,7 +15,8 @@ mod test {
 
     use crate::{
         module_element_collector::collect_module_element_type_for_program,
-        types::GlobalUserTypeSet, user_type_collector::collect_user_type_for_program,
+        types::{GlobalUserTypeSet, ImplementsInfoSet},
+        user_type_collector::collect_user_type_for_program,
     };
 
     #[test]
@@ -45,13 +46,16 @@ static let STATIC: TestClass<int> = new TestClass {}
 
         let mut module_element_entity_type_map = HashMap::new();
         let mut module_element_name_type_map = HashMap::new();
+        let mut implements_infos = ImplementsInfoSet::new();
         let mut errors = Vec::new();
         collect_module_element_type_for_program(
             ast.ast(),
             &None,
+            &mut None,
             &mut HashMap::new(),
             &mut module_element_entity_type_map,
             &mut module_element_name_type_map,
+            &mut implements_infos,
             &HashMap::new(),
             &module_entity_type_map,
             &HashMap::new(),

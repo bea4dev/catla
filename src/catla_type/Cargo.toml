@@ -13,3 +13,4 @@ bumpalo = { version = "3.17.0", features = [ "allocator-api2" ] }
 allocator-api2 = "0.2.21"
 hashbrown = "0.16.0"
 derivative = "2"
+indexmap = "2.11.4"

@@ -12,16 +12,19 @@ use hashbrown::HashMap;
 use crate::{
     error::{TypeError, TypeErrorKind},
     types::{
-        FunctionTypeInfo, GenericType, GlobalUserTypeID, GlobalUserTypeSet, Type, WhereClauseInfo,
+        FunctionTypeInfo, GenericType, GlobalUserTypeID, GlobalUserTypeSet, ImplementsInfo,
+        ImplementsInfoSet, Type, WhereClauseInfo,
     },
 };
 
 pub fn collect_module_element_type_for_program(
     ast: &Program,
     this_type: &Option<Type>,
+    element_type_holder: &mut Option<&mut HashMap<String, Spanned<Type>>>,
     generics: &mut HashMap<EntityID, Arc<GenericType>>,
     module_element_entity_type_map: &mut HashMap<EntityID, Type>,
     module_element_name_type_map: &mut HashMap<String, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
@@ -38,6 +41,7 @@ pub fn collect_module_element_type_for_program(
                     generics,
                     module_element_entity_type_map,
                     module_element_name_type_map,
+                    implements_infos,
                     import_map,
                     entity_user_type_map,
                     moduled_name_user_type_map,
@@ -51,6 +55,7 @@ pub fn collect_module_element_type_for_program(
                         generics,
                         module_element_entity_type_map,
                         module_element_name_type_map,
+                        implements_infos,
                         import_map,
                         entity_user_type_map,
                         moduled_name_user_type_map,
@@ -66,6 +71,7 @@ pub fn collect_module_element_type_for_program(
                     generics,
                     module_element_entity_type_map,
                     module_element_name_type_map,
+                    implements_infos,
                     import_map,
                     entity_user_type_map,
                     moduled_name_user_type_map,
@@ -79,6 +85,7 @@ pub fn collect_module_element_type_for_program(
                         generics,
                         module_element_entity_type_map,
                         module_element_name_type_map,
+                        implements_infos,
                         import_map,
                         entity_user_type_map,
                         moduled_name_user_type_map,
@@ -93,6 +100,21 @@ pub fn collect_module_element_type_for_program(
                 if let Ok(define) = &define_with_attribute.define {
                     match define {
                         Define::Function(function_define) => {
+                            if let Some(generics_define) = &function_define.generics {
+                                collect_generics_define(
+                                    generics_define,
+                                    this_type,
+                                    generics,
+                                    import_map,
+                                    entity_user_type_map,
+                                    moduled_name_user_type_map,
+                                    name_resolved_map,
+                                    user_type_set,
+                                    module_path,
+                                    errors,
+                                );
+                            }
+
                             let function_type = get_function_type(
                                 function_define,
                                 this_type,
@@ -107,27 +129,19 @@ pub fn collect_module_element_type_for_program(
                             );
                             let function_type = Arc::new(function_type);
 
-                            match this_type {
-                                Some(this_type) => {
-                                    if let Type::UserType {
-                                        user_type_info,
-                                        generics: _,
-                                    } = this_type
-                                    {
-                                        let user_type_info = user_type_set.get(*user_type_info);
-                                        let mut user_type_info = user_type_info.write().unwrap();
-                                        if let Ok(name) = &function_define.name {
-                                            user_type_info.element_type.insert(
-                                                name.value.to_string(),
-                                                Spanned::new(
-                                                    Type::Function {
-                                                        function_info: function_type.clone(),
-                                                        generics: Arc::new(Vec::new()),
-                                                    },
-                                                    name.span.clone(),
-                                                ),
-                                            );
-                                        }
+                            match element_type_holder {
+                                Some(element_type_holder) => {
+                                    if let Ok(name) = &function_define.name {
+                                        element_type_holder.insert(
+                                            name.value.to_string(),
+                                            Spanned::new(
+                                                Type::Function {
+                                                    function_info: function_type,
+                                                    generics: Arc::new(Vec::new()),
+                                                },
+                                                name.span.clone(),
+                                            ),
+                                        );
                                     }
                                 }
                                 None => {
@@ -148,6 +162,25 @@ pub fn collect_module_element_type_for_program(
                                         );
                                     }
                                 }
+                            }
+
+                            if let Some(block) = &function_define.block {
+                                collect_module_element_type_for_program(
+                                    block.program,
+                                    this_type,
+                                    element_type_holder,
+                                    generics,
+                                    module_element_entity_type_map,
+                                    module_element_name_type_map,
+                                    implements_infos,
+                                    import_map,
+                                    entity_user_type_map,
+                                    moduled_name_user_type_map,
+                                    name_resolved_map,
+                                    user_type_set,
+                                    module_path,
+                                    errors,
+                                );
                             }
                         }
                         Define::UserType(user_type_define) => {
@@ -216,12 +249,16 @@ pub fn collect_module_element_type_for_program(
                             }
 
                             if let Ok(block) = &user_type_define.block {
+                                let mut element_type_holder = HashMap::new();
+
                                 collect_module_element_type_for_program(
                                     block.program,
                                     &this_type,
+                                    &mut Some(&mut element_type_holder),
                                     generics,
                                     module_element_entity_type_map,
                                     module_element_name_type_map,
+                                    implements_infos,
                                     import_map,
                                     entity_user_type_map,
                                     moduled_name_user_type_map,
@@ -230,48 +267,61 @@ pub fn collect_module_element_type_for_program(
                                     module_path,
                                     errors,
                                 );
+
+                                let user_type_info = user_type_set.get(user_type_id);
+                                let mut user_type_info = user_type_info.write().unwrap();
+                                user_type_info.element_type.extend(element_type_holder);
                             }
                         }
                         Define::Variable(variable_define) => {
+                            let type_info = match &variable_define.type_tag {
+                                Some(type_tag) => match &type_tag.type_info {
+                                    Ok(type_info) => get_type(
+                                        type_info,
+                                        this_type,
+                                        generics,
+                                        import_map,
+                                        entity_user_type_map,
+                                        moduled_name_user_type_map,
+                                        name_resolved_map,
+                                        user_type_set,
+                                        module_path,
+                                        errors,
+                                    ),
+                                    Err(_) => Type::Unknown,
+                                },
+                                None => {
+                                    let error = TypeError {
+                                        kind: TypeErrorKind::MissingStaticVariableType,
+                                        span: variable_define.span.clone(),
+                                        module_path: module_path.clone(),
+                                    };
+                                    errors.push(error);
+
+                                    Type::Unknown
+                                }
+                            };
+
                             if define_with_attribute
                                 .attribute
                                 .iter()
                                 .any(|attribute| attribute.value == StatementAttribute::Static)
                             {
-                                let type_info = match &variable_define.type_tag {
-                                    Some(type_tag) => match &type_tag.type_info {
-                                        Ok(type_info) => get_type(
-                                            type_info,
-                                            this_type,
-                                            generics,
-                                            import_map,
-                                            entity_user_type_map,
-                                            moduled_name_user_type_map,
-                                            name_resolved_map,
-                                            user_type_set,
-                                            module_path,
-                                            errors,
-                                        ),
-                                        Err(_) => Type::Unknown,
-                                    },
-                                    None => {
-                                        let error = TypeError {
-                                            kind: TypeErrorKind::MissingStaticVariableType,
-                                            span: variable_define.span.clone(),
-                                            module_path: module_path.clone(),
-                                        };
-                                        errors.push(error);
-
-                                        Type::Unknown
-                                    }
-                                };
-
                                 if let Ok(binding) = &variable_define.binding {
                                     if let VariableBinding::Literal(literal) = binding {
                                         module_element_name_type_map
                                             .insert(literal.value.to_string(), type_info.clone());
                                         module_element_entity_type_map
                                             .insert(literal.into(), type_info);
+                                    }
+                                }
+                            } else if let Some(element_type_holder) = element_type_holder {
+                                if let Ok(binding) = &variable_define.binding {
+                                    if let VariableBinding::Literal(literal) = binding {
+                                        element_type_holder.insert(
+                                            literal.value.to_string(),
+                                            Spanned::new(type_info, literal.span.clone()),
+                                        );
                                     }
                                 }
                             }
@@ -325,9 +375,154 @@ pub fn collect_module_element_type_for_program(
                     }
                 }
             }
-            Statement::Drop(drop_statement) => todo!(),
-            Statement::Expression(expression) => todo!(),
-            Statement::Implements(implements) => todo!(),
+            Statement::Drop(drop_statement) => {
+                if let Ok(expression) = &drop_statement.expression {
+                    collect_module_element_type_for_expression(
+                        expression,
+                        generics,
+                        module_element_entity_type_map,
+                        module_element_name_type_map,
+                        implements_infos,
+                        import_map,
+                        entity_user_type_map,
+                        moduled_name_user_type_map,
+                        user_type_set,
+                        module_path,
+                        errors,
+                    );
+                }
+            }
+            Statement::Expression(expression) => {
+                collect_module_element_type_for_expression(
+                    expression,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+            Statement::Implements(implements) => {
+                let generics_define = implements
+                    .generics
+                    .as_ref()
+                    .map(|generics_define| {
+                        collect_generics_define(
+                            generics_define,
+                            this_type,
+                            generics,
+                            import_map,
+                            entity_user_type_map,
+                            moduled_name_user_type_map,
+                            name_resolved_map,
+                            user_type_set,
+                            module_path,
+                            errors,
+                        )
+                    })
+                    .unwrap_or(Vec::new());
+
+                let interface = implements
+                    .interface
+                    .as_ref()
+                    .map(|interface| {
+                        Spanned::new(
+                            get_type(
+                                interface,
+                                this_type,
+                                generics,
+                                import_map,
+                                entity_user_type_map,
+                                moduled_name_user_type_map,
+                                name_resolved_map,
+                                user_type_set,
+                                module_path,
+                                errors,
+                            ),
+                            interface.span.clone(),
+                        )
+                    })
+                    .unwrap_or(Spanned::new(Type::Unknown, implements.span.clone()));
+
+                let concrete = implements
+                    .target
+                    .as_ref()
+                    .map(|concrete_type| {
+                        Spanned::new(
+                            get_type(
+                                concrete_type,
+                                this_type,
+                                generics,
+                                import_map,
+                                entity_user_type_map,
+                                moduled_name_user_type_map,
+                                name_resolved_map,
+                                user_type_set,
+                                module_path,
+                                errors,
+                            ),
+                            concrete_type.span.clone(),
+                        )
+                    })
+                    .unwrap_or(Spanned::new(Type::Unknown, implements.span.clone()));
+
+                let where_clause = implements
+                    .where_clause
+                    .as_ref()
+                    .map(|where_clause| {
+                        collect_where_clause(
+                            where_clause,
+                            this_type,
+                            generics,
+                            import_map,
+                            entity_user_type_map,
+                            moduled_name_user_type_map,
+                            name_resolved_map,
+                            user_type_set,
+                            module_path,
+                            errors,
+                        )
+                    })
+                    .unwrap_or(Vec::new());
+
+                let mut element_type = HashMap::new();
+
+                if let Ok(block) = &implements.block {
+                    collect_module_element_type_for_program(
+                        block.program,
+                        this_type,
+                        &mut Some(&mut element_type),
+                        generics,
+                        module_element_entity_type_map,
+                        module_element_name_type_map,
+                        implements_infos,
+                        import_map,
+                        entity_user_type_map,
+                        moduled_name_user_type_map,
+                        name_resolved_map,
+                        user_type_set,
+                        module_path,
+                        errors,
+                    );
+                }
+
+                implements_infos.register(
+                    implements.into(),
+                    ImplementsInfo {
+                        generics_define,
+                        interface,
+                        concrete,
+                        where_clause,
+                        element_type,
+                        module_path: module_path.clone(),
+                    },
+                );
+            }
         }
     }
 }
@@ -562,8 +757,6 @@ pub(crate) fn get_type(
             }
         },
     };
-
-    dbg!(&base_type);
 
     base_type
 }
@@ -871,6 +1064,7 @@ fn collect_module_element_type_for_expression(
     generics: &mut HashMap<EntityID, Arc<GenericType>>,
     module_element_entity_type_map: &mut HashMap<EntityID, Type>,
     module_element_name_type_map: &mut HashMap<String, Type>,
+    implements_infos: &mut ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,

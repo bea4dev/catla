@@ -7,6 +7,7 @@ use catla_parser::ast::{EntityID, Spanned};
 use catla_util::module_path::ModulePath;
 use derivative::Derivative;
 use hashbrown::HashMap;
+use indexmap::IndexMap;
 
 use crate::type_infer::TypeVariableID;
 
@@ -107,6 +108,33 @@ pub struct GenericType {
     pub module_path: ModulePath,
     pub entity_id: EntityID,
     pub name: Spanned<String>,
-    #[derivative(PartialEq="ignore")]
+    #[derivative(PartialEq = "ignore")]
     pub bounds: RwLock<Vec<Type>>,
+}
+
+#[derive(Debug)]
+pub struct ImplementsInfoSet {
+    map: IndexMap<EntityID, ImplementsInfo>,
+}
+
+impl ImplementsInfoSet {
+    pub fn new() -> Self {
+        Self {
+            map: IndexMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, entity_id: EntityID, info: ImplementsInfo) {
+        self.map.insert(entity_id, info);
+    }
+}
+
+#[derive(Debug)]
+pub struct ImplementsInfo {
+    pub generics_define: Vec<Arc<GenericType>>,
+    pub interface: Spanned<Type>,
+    pub concrete: Spanned<Type>,
+    pub where_clause: Vec<WhereClauseInfo>,
+    pub element_type: HashMap<String, Spanned<Type>>,
+    pub module_path: ModulePath,
 }

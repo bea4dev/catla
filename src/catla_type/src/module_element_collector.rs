@@ -3,8 +3,11 @@ use std::sync::{Arc, RwLock};
 use catla_import::ImportElement;
 use catla_name_resolver::{DefineKind, ResolvedInfo};
 use catla_parser::ast::{
-    BaseTypeInfo, Define, EntityID, Expression, FunctionDefine, GenericsDefine, Program, Spanned,
-    Statement, StatementAttribute, TypeInfo, TypeInfoBase, VariableBinding, WhereClause,
+    AddOrSubExpression, AndExpression, BaseTypeInfo, Define, ElseChain, EntityID, EqualsExpression,
+    Expression, ExpressionOrBlock, Factor, FunctionDefine, GenericsDefine, LessOrGreaterExpression,
+    MappingOperator, MulOrDivExpression, OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr,
+    PrimaryRight, Program, SimplePrimary, Spanned, Statement, StatementAttribute, TypeInfo,
+    TypeInfoBase, VariableBinding, WhereClause,
 };
 use catla_util::module_path::ModulePath;
 use hashbrown::HashMap;
@@ -45,6 +48,7 @@ pub fn collect_module_element_type_for_program(
                     import_map,
                     entity_user_type_map,
                     moduled_name_user_type_map,
+                    name_resolved_map,
                     user_type_set,
                     module_path,
                     errors,
@@ -59,6 +63,7 @@ pub fn collect_module_element_type_for_program(
                         import_map,
                         entity_user_type_map,
                         moduled_name_user_type_map,
+                        name_resolved_map,
                         user_type_set,
                         module_path,
                         errors,
@@ -75,6 +80,7 @@ pub fn collect_module_element_type_for_program(
                     import_map,
                     entity_user_type_map,
                     moduled_name_user_type_map,
+                    name_resolved_map,
                     user_type_set,
                     module_path,
                     errors,
@@ -89,6 +95,7 @@ pub fn collect_module_element_type_for_program(
                         import_map,
                         entity_user_type_map,
                         moduled_name_user_type_map,
+                        name_resolved_map,
                         user_type_set,
                         module_path,
                         errors,
@@ -386,6 +393,7 @@ pub fn collect_module_element_type_for_program(
                         import_map,
                         entity_user_type_map,
                         moduled_name_user_type_map,
+                        name_resolved_map,
                         user_type_set,
                         module_path,
                         errors,
@@ -402,6 +410,7 @@ pub fn collect_module_element_type_for_program(
                     import_map,
                     entity_user_type_map,
                     moduled_name_user_type_map,
+                    name_resolved_map,
                     user_type_set,
                     module_path,
                     errors,
@@ -1068,8 +1077,670 @@ fn collect_module_element_type_for_expression(
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
     errors: &mut Vec<TypeError>,
 ) {
+    match ast {
+        Expression::Return(return_expression) => {
+            if let Some(expression) = &return_expression.expression {
+                collect_module_element_type_for_expression(
+                    expression,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+        }
+        Expression::Closure(closure) => {
+            if let Ok(expression_or_block) = &closure.expression_or_block {
+                match expression_or_block {
+                    ExpressionOrBlock::Expression(expression) => {
+                        collect_module_element_type_for_expression(
+                            expression,
+                            generics,
+                            module_element_entity_type_map,
+                            module_element_name_type_map,
+                            implements_infos,
+                            import_map,
+                            entity_user_type_map,
+                            moduled_name_user_type_map,
+                            name_resolved_map,
+                            user_type_set,
+                            module_path,
+                            errors,
+                        );
+                    }
+                    ExpressionOrBlock::Block(block) => {
+                        collect_module_element_type_for_program(
+                            block.program,
+                            &mut None,
+                            &mut None,
+                            generics,
+                            module_element_entity_type_map,
+                            module_element_name_type_map,
+                            implements_infos,
+                            import_map,
+                            entity_user_type_map,
+                            moduled_name_user_type_map,
+                            name_resolved_map,
+                            user_type_set,
+                            module_path,
+                            errors,
+                        );
+                    }
+                }
+            }
+        }
+        Expression::Or(or_expression) => {
+            collect_module_element_type_for_or_expression(
+                *or_expression,
+                generics,
+                module_element_entity_type_map,
+                module_element_name_type_map,
+                implements_infos,
+                import_map,
+                entity_user_type_map,
+                moduled_name_user_type_map,
+                name_resolved_map,
+                user_type_set,
+                module_path,
+                errors,
+            );
+        }
+    }
+}
+
+macro_rules! collect_module_element_type_for_2op {
+    ($name:ident, $ty:ty, $next:ident) => {
+        fn $name(
+            ast: &$ty,
+            generics: &mut HashMap<EntityID, Arc<GenericType>>,
+            module_element_entity_type_map: &mut HashMap<EntityID, Type>,
+            module_element_name_type_map: &mut HashMap<String, Type>,
+            implements_infos: &mut ImplementsInfoSet,
+            import_map: &HashMap<EntityID, ImportElement>,
+            entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+            moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+            name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+            user_type_set: &GlobalUserTypeSet,
+            module_path: &ModulePath,
+            errors: &mut Vec<TypeError>,
+        ) {
+            $next(
+                &ast.left,
+                generics,
+                module_element_entity_type_map,
+                module_element_name_type_map,
+                implements_infos,
+                import_map,
+                entity_user_type_map,
+                moduled_name_user_type_map,
+                name_resolved_map,
+                user_type_set,
+                module_path,
+                errors,
+            );
+            for chain in ast.chain.iter() {
+                $next(
+                    chain,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+        }
+    };
+    (op, $name:ident, $ty:ty, $next:ident) => {
+        fn $name(
+            ast: &$ty,
+            generics: &mut HashMap<EntityID, Arc<GenericType>>,
+            module_element_entity_type_map: &mut HashMap<EntityID, Type>,
+            module_element_name_type_map: &mut HashMap<String, Type>,
+            implements_infos: &mut ImplementsInfoSet,
+            import_map: &HashMap<EntityID, ImportElement>,
+            entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+            moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+            name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+            user_type_set: &GlobalUserTypeSet,
+            module_path: &ModulePath,
+            errors: &mut Vec<TypeError>,
+        ) {
+            $next(
+                &ast.left,
+                generics,
+                module_element_entity_type_map,
+                module_element_name_type_map,
+                implements_infos,
+                import_map,
+                entity_user_type_map,
+                moduled_name_user_type_map,
+                name_resolved_map,
+                user_type_set,
+                module_path,
+                errors,
+            );
+            for chain in ast.chain.iter() {
+                $next(
+                    &chain.1,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+        }
+    };
+}
+
+collect_module_element_type_for_2op!(
+    collect_module_element_type_for_or_expression,
+    OrExpression,
+    collect_module_element_type_for_and_expression
+);
+
+collect_module_element_type_for_2op!(
+    collect_module_element_type_for_and_expression,
+    AndExpression,
+    collect_module_element_type_for_equals_expression
+);
+
+collect_module_element_type_for_2op!(
+    op,
+    collect_module_element_type_for_equals_expression,
+    EqualsExpression,
+    collect_module_element_type_for_less_or_greater_expression
+);
+
+collect_module_element_type_for_2op!(
+    op,
+    collect_module_element_type_for_less_or_greater_expression,
+    LessOrGreaterExpression,
+    collect_module_element_type_for_add_or_sub_expression
+);
+
+collect_module_element_type_for_2op!(
+    op,
+    collect_module_element_type_for_add_or_sub_expression,
+    AddOrSubExpression,
+    collect_module_element_type_for_mul_or_div_expression
+);
+
+collect_module_element_type_for_2op!(
+    op,
+    collect_module_element_type_for_mul_or_div_expression,
+    MulOrDivExpression,
+    collect_module_element_type_for_factor
+);
+
+fn collect_module_element_type_for_factor(
+    ast: &Factor,
+    generics: &mut HashMap<EntityID, Arc<GenericType>>,
+    module_element_entity_type_map: &mut HashMap<EntityID, Type>,
+    module_element_name_type_map: &mut HashMap<String, Type>,
+    implements_infos: &mut ImplementsInfoSet,
+    import_map: &HashMap<EntityID, ImportElement>,
+    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    user_type_set: &GlobalUserTypeSet,
+    module_path: &ModulePath,
+    errors: &mut Vec<TypeError>,
+) {
+    if let Ok(primary) = &ast.primary {
+        collect_module_element_type_for_primary(
+            primary,
+            generics,
+            module_element_entity_type_map,
+            module_element_name_type_map,
+            implements_infos,
+            import_map,
+            entity_user_type_map,
+            moduled_name_user_type_map,
+            name_resolved_map,
+            user_type_set,
+            module_path,
+            errors,
+        );
+    }
+}
+
+fn collect_module_element_type_for_primary(
+    ast: &Primary,
+    generics: &mut HashMap<EntityID, Arc<GenericType>>,
+    module_element_entity_type_map: &mut HashMap<EntityID, Type>,
+    module_element_name_type_map: &mut HashMap<String, Type>,
+    implements_infos: &mut ImplementsInfoSet,
+    import_map: &HashMap<EntityID, ImportElement>,
+    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    user_type_set: &GlobalUserTypeSet,
+    module_path: &ModulePath,
+    errors: &mut Vec<TypeError>,
+) {
+    collect_module_element_type_for_primary_left(
+        &ast.left,
+        generics,
+        module_element_entity_type_map,
+        module_element_name_type_map,
+        implements_infos,
+        import_map,
+        entity_user_type_map,
+        moduled_name_user_type_map,
+        name_resolved_map,
+        user_type_set,
+        module_path,
+        errors,
+    );
+    for chain in ast.chain.iter() {
+        collect_module_element_type_for_primary_right(
+            chain,
+            generics,
+            module_element_entity_type_map,
+            module_element_name_type_map,
+            implements_infos,
+            import_map,
+            entity_user_type_map,
+            moduled_name_user_type_map,
+            name_resolved_map,
+            user_type_set,
+            module_path,
+            errors,
+        );
+    }
+}
+
+fn collect_module_element_type_for_primary_left(
+    ast: &PrimaryLeft,
+    generics: &mut HashMap<EntityID, Arc<GenericType>>,
+    module_element_entity_type_map: &mut HashMap<EntityID, Type>,
+    module_element_name_type_map: &mut HashMap<String, Type>,
+    implements_infos: &mut ImplementsInfoSet,
+    import_map: &HashMap<EntityID, ImportElement>,
+    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    user_type_set: &GlobalUserTypeSet,
+    module_path: &ModulePath,
+    errors: &mut Vec<TypeError>,
+) {
+    match &ast.first {
+        PrimaryLeftExpr::Simple {
+            left,
+            generics: _,
+            function_call,
+            span: _,
+        } => {
+            match left {
+                SimplePrimary::Tuple {
+                    expressions,
+                    span: _,
+                } => {
+                    for expression in expressions.iter() {
+                        collect_module_element_type_for_expression(
+                            expression,
+                            generics,
+                            module_element_entity_type_map,
+                            module_element_name_type_map,
+                            implements_infos,
+                            import_map,
+                            entity_user_type_map,
+                            moduled_name_user_type_map,
+                            name_resolved_map,
+                            user_type_set,
+                            module_path,
+                            errors,
+                        );
+                    }
+                }
+                SimplePrimary::Literal(_) => {}
+                SimplePrimary::StringLiteral(_) => {}
+                SimplePrimary::NumericLiteral(_) => {}
+                SimplePrimary::Null(_) => {}
+                SimplePrimary::True(_) => {}
+                SimplePrimary::False(_) => {}
+                SimplePrimary::This(_) => {}
+                SimplePrimary::LargeThis(_) => {}
+            }
+
+            if let Some(function_call) = function_call {
+                for argument in function_call.arguments.iter() {
+                    collect_module_element_type_for_expression(
+                        argument,
+                        generics,
+                        module_element_entity_type_map,
+                        module_element_name_type_map,
+                        implements_infos,
+                        import_map,
+                        entity_user_type_map,
+                        moduled_name_user_type_map,
+                        name_resolved_map,
+                        user_type_set,
+                        module_path,
+                        errors,
+                    );
+                }
+            }
+        }
+        PrimaryLeftExpr::NewObject { new_object } => {
+            for field_assign in new_object.field_assign.elements.iter() {
+                collect_module_element_type_for_expression(
+                    &field_assign.expression,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+        }
+        PrimaryLeftExpr::NewArray { new_array } => {
+            for expression in new_array.elements.iter() {
+                collect_module_element_type_for_expression(
+                    expression,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+        }
+        PrimaryLeftExpr::NewArrayInit { new_array_init } => {
+            if let Ok(expression) = &new_array_init.init_expression {
+                collect_module_element_type_for_expression(
+                    expression,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+            if let Ok(expression) = &new_array_init.length_expression {
+                collect_module_element_type_for_expression(
+                    expression,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+        }
+        PrimaryLeftExpr::If { if_expression } => {
+            if let Ok(condition) = &if_expression.first.condition {
+                collect_module_element_type_for_expression(
+                    condition,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+            if let Ok(block) = &if_expression.first.block {
+                collect_module_element_type_for_program(
+                    block.program,
+                    &mut None,
+                    &mut None,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+
+            for chain in if_expression.chain.iter() {
+                match chain {
+                    ElseChain::ElseIf { if_statement } => {
+                        if let Ok(condition) = &if_statement.condition {
+                            collect_module_element_type_for_expression(
+                                condition,
+                                generics,
+                                module_element_entity_type_map,
+                                module_element_name_type_map,
+                                implements_infos,
+                                import_map,
+                                entity_user_type_map,
+                                moduled_name_user_type_map,
+                                name_resolved_map,
+                                user_type_set,
+                                module_path,
+                                errors,
+                            );
+                            if let Ok(block) = &if_statement.block {
+                                collect_module_element_type_for_program(
+                                    block.program,
+                                    &mut None,
+                                    &mut None,
+                                    generics,
+                                    module_element_entity_type_map,
+                                    module_element_name_type_map,
+                                    implements_infos,
+                                    import_map,
+                                    entity_user_type_map,
+                                    moduled_name_user_type_map,
+                                    name_resolved_map,
+                                    user_type_set,
+                                    module_path,
+                                    errors,
+                                );
+                            }
+                        }
+                    }
+                    ElseChain::Else { block } => {
+                        collect_module_element_type_for_program(
+                            block.program,
+                            &mut None,
+                            &mut None,
+                            generics,
+                            module_element_entity_type_map,
+                            module_element_name_type_map,
+                            implements_infos,
+                            import_map,
+                            entity_user_type_map,
+                            moduled_name_user_type_map,
+                            name_resolved_map,
+                            user_type_set,
+                            module_path,
+                            errors,
+                        );
+                    }
+                }
+            }
+        }
+        PrimaryLeftExpr::Loop { loop_expression } => {
+            if let Ok(block) = &loop_expression.block {
+                collect_module_element_type_for_program(
+                    block.program,
+                    &mut None,
+                    &mut None,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+        }
+    }
+
+    if let Some(mapping_operator) = &ast.mapping_operator {
+        collect_module_element_type_for_mapping_operator(
+            mapping_operator,
+            generics,
+            module_element_entity_type_map,
+            module_element_name_type_map,
+            implements_infos,
+            import_map,
+            entity_user_type_map,
+            moduled_name_user_type_map,
+            name_resolved_map,
+            user_type_set,
+            module_path,
+            errors,
+        );
+    }
+}
+
+fn collect_module_element_type_for_primary_right(
+    ast: &PrimaryRight,
+    generics: &mut HashMap<EntityID, Arc<GenericType>>,
+    module_element_entity_type_map: &mut HashMap<EntityID, Type>,
+    module_element_name_type_map: &mut HashMap<String, Type>,
+    implements_infos: &mut ImplementsInfoSet,
+    import_map: &HashMap<EntityID, ImportElement>,
+    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    user_type_set: &GlobalUserTypeSet,
+    module_path: &ModulePath,
+    errors: &mut Vec<TypeError>,
+) {
+    if let Some(second) = &ast.second {
+        if let Some(function_call) = &second.function_call {
+            for argument in function_call.arguments.iter() {
+                collect_module_element_type_for_expression(
+                    argument,
+                    generics,
+                    module_element_entity_type_map,
+                    module_element_name_type_map,
+                    implements_infos,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                );
+            }
+        }
+    }
+
+    if let Some(mapping_operator) = &ast.mapping_operator {
+        collect_module_element_type_for_mapping_operator(
+            mapping_operator,
+            generics,
+            module_element_entity_type_map,
+            module_element_name_type_map,
+            implements_infos,
+            import_map,
+            entity_user_type_map,
+            moduled_name_user_type_map,
+            name_resolved_map,
+            user_type_set,
+            module_path,
+            errors,
+        );
+    }
+}
+
+fn collect_module_element_type_for_mapping_operator(
+    ast: &MappingOperator,
+    generics: &mut HashMap<EntityID, Arc<GenericType>>,
+    module_element_entity_type_map: &mut HashMap<EntityID, Type>,
+    module_element_name_type_map: &mut HashMap<String, Type>,
+    implements_infos: &mut ImplementsInfoSet,
+    import_map: &HashMap<EntityID, ImportElement>,
+    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    user_type_set: &GlobalUserTypeSet,
+    module_path: &ModulePath,
+    errors: &mut Vec<TypeError>,
+) {
+    let block = match ast {
+        MappingOperator::NullElvis { block, span: _ } => block,
+        MappingOperator::ResultElvis { block, span: _ } => block,
+        _ => return,
+    };
+
+    if let Ok(block) = block {
+        collect_module_element_type_for_program(
+            block.program,
+            &mut None,
+            &mut None,
+            generics,
+            module_element_entity_type_map,
+            module_element_name_type_map,
+            implements_infos,
+            import_map,
+            entity_user_type_map,
+            moduled_name_user_type_map,
+            name_resolved_map,
+            user_type_set,
+            module_path,
+            errors,
+        );
+    }
 }

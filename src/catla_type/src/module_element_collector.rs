@@ -688,7 +688,7 @@ fn collect_generics_define(
 pub(crate) fn get_type(
     ast: &TypeInfo,
     this_type: &Option<Type>,
-    generics: &mut HashMap<EntityID, Arc<GenericType>>,
+    generics: &HashMap<EntityID, Arc<GenericType>>,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
@@ -773,7 +773,7 @@ pub(crate) fn get_type(
 fn get_base_type(
     ast: &BaseTypeInfo,
     this_type: &Option<Type>,
-    generics: &mut HashMap<EntityID, Arc<GenericType>>,
+    generics: &HashMap<EntityID, Arc<GenericType>>,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,

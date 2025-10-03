@@ -9,7 +9,7 @@ use derivative::Derivative;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
 
-use crate::type_infer::TypeVariableID;
+use crate::type_infer::{TypeEnvironment, TypeVariableID};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -25,7 +25,8 @@ pub enum Type {
     Float64,
     Bool,
     Unit,
-    NumericLiteral(Arc<Vec<Type>>),
+    IntegerLiteral,
+    FloatLiteral,
     UserType {
         user_type_info: GlobalUserTypeID,
         generics: Arc<Vec<Type>>,
@@ -41,6 +42,131 @@ pub enum Type {
     This,
     Unreachable,
     Unknown,
+}
+
+impl Type {
+    pub fn is_integer(&self) -> bool {
+        match self {
+            Type::Int8 => true,
+            Type::Int16 => true,
+            Type::Int32 => true,
+            Type::Int64 => true,
+            Type::Uint8 => true,
+            Type::Uint16 => true,
+            Type::Uint32 => true,
+            Type::Uint64 => true,
+            Type::IntegerLiteral => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_float(&self) -> bool {
+        match self {
+            Type::Float32 => true,
+            Type::Float64 => true,
+            Type::FloatLiteral => true,
+            _ => false,
+        }
+    }
+
+    pub fn to_display_string(
+        &self,
+        user_type_set: &GlobalUserTypeSet,
+        type_environment: Option<&TypeEnvironment>,
+    ) -> String {
+        match self {
+            Type::Int8 => "int8".into(),
+            Type::Int16 => "int16".into(),
+            Type::Int32 => "int32".into(),
+            Type::Int64 => "int64".into(),
+            Type::Uint8 => "uint8".into(),
+            Type::Uint16 => "uint16".into(),
+            Type::Uint32 => "uint32".into(),
+            Type::Uint64 => "uint64".into(),
+            Type::Float32 => "float32".into(),
+            Type::Float64 => "float64".into(),
+            Type::Bool => "bool".into(),
+            Type::Unit => "unit".into(),
+            Type::IntegerLiteral => "int".into(),
+            Type::FloatLiteral => "float".into(),
+            Type::UserType {
+                user_type_info,
+                generics,
+            } => {
+                let user_type_info = user_type_set.get(*user_type_info);
+                let user_type_name = user_type_info.read().unwrap().name.value.clone();
+
+                if generics.is_empty() {
+                    user_type_name
+                } else {
+                    format!(
+                        "{}<{}>",
+                        user_type_name,
+                        generics
+                            .iter()
+                            .map(|generic| generic
+                                .to_display_string(user_type_set, type_environment))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            }
+            Type::Function {
+                function_info,
+                generics,
+            } => {
+                let function_name = function_info.name.value.clone();
+
+                if generics.is_empty() {
+                    function_name
+                } else {
+                    format!(
+                        "{}<{}>",
+                        function_name,
+                        generics
+                            .iter()
+                            .map(|generic| generic
+                                .to_display_string(user_type_set, type_environment))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            }
+            Type::Generic(generic_type) => generic_type.name.value.clone(),
+            Type::TypeVariable(type_variable_id) => match type_environment {
+                Some(type_environment) => {
+                    let ty = type_environment.get_type_variable_type(*type_variable_id);
+
+                    match ty {
+                        Some(ty) => ty
+                            .value
+                            .to_display_string(user_type_set, Some(type_environment)),
+                        None => "Unknown".into(),
+                    }
+                }
+                None => "_".into(),
+            },
+            Type::Array(base_type) => {
+                format!(
+                    "[{}]",
+                    base_type.to_display_string(user_type_set, type_environment)
+                )
+            }
+            Type::Tuple(items) => {
+                format!(
+                    "({})",
+                    items
+                        .iter()
+                        .map(|item| item.to_display_string(user_type_set, type_environment))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            Type::This => "This".into(),
+            Type::Unreachable => "Unreachable".into(),
+            Type::Unknown => "Unknown".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

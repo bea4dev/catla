@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use catla_parser::ast::Spanned;
 use catla_util::module_path::ModulePath;
 
 #[derive(Debug)]
@@ -17,4 +18,8 @@ pub enum TypeErrorKind {
     UnknownThis,
     InvalidGenericsCount,
     MissingStaticVariableType,
+    TypeMismatch {
+        left: Spanned<String>,
+        right: Spanned<String>,
+    },
 }

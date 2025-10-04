@@ -15,6 +15,7 @@ mod test {
 
     use crate::{
         module_element_collector::collect_module_element_type_for_program,
+        type_infer::infer_type,
         types::{GlobalUserTypeSet, ImplementsInfoSet},
         user_type_collector::collect_user_type_for_program,
     };
@@ -22,9 +23,9 @@ mod test {
     #[test]
     fn collect_module_element_type() {
         let source = r"
-class TestClass<T> {}
-
-static let STATIC: TestClass<int> = new TestClass {}
+let a = 100
+let b = a
+let c = b
         ";
 
         let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
@@ -48,22 +49,39 @@ static let STATIC: TestClass<int> = new TestClass {}
         let mut module_element_name_type_map = HashMap::new();
         let mut implements_infos = ImplementsInfoSet::new();
         let mut errors = Vec::new();
+        let mut generics = HashMap::new();
+        let import_map = HashMap::new();
+        let moduled_name_user_type_map = HashMap::new();
         collect_module_element_type_for_program(
             ast.ast(),
             &None,
             &mut None,
-            &mut HashMap::new(),
+            &mut generics,
             &mut module_element_entity_type_map,
             &mut module_element_name_type_map,
             &mut implements_infos,
-            &HashMap::new(),
+            &import_map,
             &module_entity_type_map,
-            &HashMap::new(),
+            &moduled_name_user_type_map,
+            &name_resolved_map,
+            &user_type_set,
+            &module_path,
+            &mut errors,
+        );
+
+        let result = infer_type(
+            ast.ast(),
+            &mut generics,
+            &implements_infos,
+            &import_map,
+            &module_entity_type_map,
+            &moduled_name_user_type_map,
             &name_resolved_map,
             &user_type_set,
             &module_path,
             &mut errors,
         );
         dbg!(errors);
+        dbg!(result);
     }
 }

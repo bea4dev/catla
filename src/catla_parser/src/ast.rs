@@ -333,6 +333,16 @@ pub enum Expression<'input, 'allocator> {
     Or(&'allocator OrExpression<'input, 'allocator>),
 }
 
+impl Expression<'_, '_> {
+    pub fn span(&self) -> Range<usize> {
+        match self {
+            Expression::Return(return_expression) => return_expression.span.clone(),
+            Expression::Closure(closure) => closure.span.clone(),
+            Expression::Or(or_expression) => or_expression.span.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct OrExpression<'input, 'allocator> {
     pub left: AndExpression<'input, 'allocator>,

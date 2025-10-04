@@ -167,6 +167,56 @@ impl Type {
             Type::Unknown => "Unknown".into(),
         }
     }
+
+    pub fn resolve_type_alias(&self, user_type_set: &GlobalUserTypeSet) -> Type {
+        match self {
+            Type::UserType {
+                user_type_info,
+                generics,
+            } => {
+                let user_type_info = user_type_set.get(*user_type_info);
+                let user_type_info = user_type_info.read().unwrap();
+
+                let replace_map = user_type_info
+                    .generics
+                    .iter()
+                    .map(|generic| Type::Generic(generic.clone()))
+                    .zip(generics.iter());
+
+                let alias_type = user_type_info.element_type.get("").unwrap();
+
+                match &alias_type.value {
+                    Type::UserType {
+                        user_type_info,
+                        generics,
+                    } => {
+                        let mut new_generics = Vec::new();
+                        for generic in generics.iter() {
+                            let mut replaced = false;
+                            for (before, after) in replace_map.clone() {
+                                if generic == &before {
+                                    new_generics.push(after.clone());
+                                    replaced = true;
+                                    break;
+                                }
+                            }
+
+                            if !replaced {
+                                new_generics.push(Type::Unknown);
+                            }
+                        }
+
+                        Type::UserType {
+                            user_type_info: *user_type_info,
+                            generics: Arc::new(new_generics),
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => self.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

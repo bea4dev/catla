@@ -298,12 +298,16 @@ pub fn collect_module_element_type_for_program(
                                     Err(_) => Type::Unknown,
                                 },
                                 None => {
-                                    let error = TypeError {
-                                        kind: TypeErrorKind::MissingStaticVariableType,
-                                        span: variable_define.span.clone(),
-                                        module_path: module_path.clone(),
-                                    };
-                                    errors.push(error);
+                                    if define_with_attribute.attribute.iter().any(|attribute| {
+                                        attribute.value == StatementAttribute::Static
+                                    }) {
+                                        let error = TypeError {
+                                            kind: TypeErrorKind::MissingStaticVariableType,
+                                            span: variable_define.span.clone(),
+                                            module_path: module_path.clone(),
+                                        };
+                                        errors.push(error);
+                                    }
 
                                     Type::Unknown
                                 }

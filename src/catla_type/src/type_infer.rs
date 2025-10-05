@@ -482,7 +482,83 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         }
     }
 
-    fn export_entity_type(&self) -> HashMap<EntityID, Spanned<Type>> {
+    fn resolve_type_variable_id(
+        &self,
+        type_variable_id: TypeVariableID,
+        user_type_set: &GlobalUserTypeSet,
+    ) -> Type {
+        let type_variable_set_id = self.var_set_map.get(&type_variable_id).unwrap();
+        let type_variable_set = &self.type_variable_set_components[type_variable_set_id.0];
+
+        let ty = type_variable_set.ty.as_ref().cloned();
+
+        ty.map(|ty| self.resolve_type(&ty.value, user_type_set))
+            .unwrap_or(Type::Unknown)
+    }
+
+    fn resolve_type(&self, ty: &Type, user_type_set: &GlobalUserTypeSet) -> Type {
+        match ty {
+            Type::IntegerLiteral => Type::Int32,
+            Type::FloatLiteral => Type::Float32,
+            Type::UserType {
+                user_type_info: _,
+                generics: _,
+            } => {
+                let resolved_type = ty.resolve_type_alias(user_type_set);
+
+                if let Type::UserType {
+                    user_type_info,
+                    generics,
+                } = resolved_type
+                {
+                    let generics = generics
+                        .iter()
+                        .map(|generic| self.resolve_type(generic, user_type_set))
+                        .collect();
+
+                    Type::UserType {
+                        user_type_info,
+                        generics: Arc::new(generics),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Type::Function {
+                function_info,
+                generics,
+            } => {
+                let generics = generics
+                    .iter()
+                    .map(|generic| self.resolve_type(generic, user_type_set))
+                    .collect();
+
+                Type::Function {
+                    function_info: function_info.clone(),
+                    generics: Arc::new(generics),
+                }
+            }
+            Type::TypeVariable(type_variable_id) => {
+                self.resolve_type_variable_id(*type_variable_id, user_type_set)
+            }
+            Type::Array(base_type) => {
+                Type::Array(Arc::new(self.resolve_type(&base_type, user_type_set)))
+            }
+            Type::Tuple(items) => {
+                let items = items
+                    .iter()
+                    .map(|item| self.resolve_type(item, user_type_set))
+                    .collect();
+                Type::Tuple(Arc::new(items))
+            }
+            _ => ty.clone(),
+        }
+    }
+
+    fn export_entity_type(
+        &self,
+        user_type_set: &GlobalUserTypeSet,
+    ) -> HashMap<EntityID, Spanned<Type>> {
         let mut entity_type_map = HashMap::new();
 
         for (entity_id, type_variable_id) in self.entity_var_map.iter() {
@@ -490,7 +566,10 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
             let type_variable_set = &self.type_variable_set_components[type_variable_set_id.0];
 
             if let Some(ty) = &type_variable_set.ty {
-                entity_type_map.insert(*entity_id, ty.clone());
+                entity_type_map.insert(
+                    *entity_id,
+                    Spanned::new(self.resolve_type(&ty.value, user_type_set), ty.span.clone()),
+                );
             }
         }
 
@@ -561,7 +640,7 @@ pub fn infer_type(
         errors,
     );
 
-    type_environment.export_entity_type()
+    type_environment.export_entity_type(user_type_set)
 }
 
 fn infer_type_for_program(

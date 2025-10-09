@@ -824,6 +824,7 @@ fn get_base_type(
                                 }
                             }
                         }
+                        ImportElement::Unknown => Type::Unknown,
                     },
                     _ => {
                         let module_path_chain = ast.path[1..ast.path.len() - 1]
@@ -876,6 +877,7 @@ fn get_base_type(
 
                                 Type::Unknown
                             }
+                            ImportElement::Unknown => Type::Unknown,
                         }
                     }
                 },

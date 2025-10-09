@@ -16,12 +16,12 @@ use std::{mem::swap, sync::Arc};
 /// a: int | b: int | c: int
 use allocator_api2::vec::Vec;
 use bumpalo::Bump;
-use catla_import::ImportElement;
-use catla_name_resolver::ResolvedInfo;
+use catla_import::{ImportElement, resource::PackageResourceSet};
+use catla_name_resolver::{DefineKind, ResolvedInfo};
 use catla_parser::ast::{
     AddOrSubExpression, AndExpression, Define, EntityID, EqualsExpression, Expression, Factor,
-    LessOrGreaterExpression, MulOrDivExpression, OrExpression, Primary, PrimaryLeftExpr, Program,
-    SimplePrimary, Spanned, Statement, VariableBinding,
+    LessOrGreaterExpression, Literal, MulOrDivExpression, OrExpression, Primary, PrimaryLeftExpr,
+    PrimaryRight, PrimarySeparator, Program, SimplePrimary, Spanned, Statement, VariableBinding,
 };
 use catla_util::module_path::ModulePath;
 use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
@@ -46,7 +46,11 @@ pub struct TypeEnvironment<'type_env_alloc> {
 }
 
 impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
-    fn new(module_path: &ModulePath, allocator: &'type_env_alloc Bump) -> Self {
+    fn new(
+        module_path: &ModulePath,
+        package_resource_set: &PackageResourceSet,
+        allocator: &'type_env_alloc Bump,
+    ) -> Self {
         Self {
             module_path: module_path.clone(),
             entity_var_map: HashMap::new_in(allocator),
@@ -111,6 +115,15 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
     fn create_type_variable_id_with_set(&mut self) -> TypeVariableID {
         let type_variable_id = self.create_type_variable_id_without_set();
         self.create_variable_set(type_variable_id);
+        type_variable_id
+    }
+
+    fn create_type_variable_id_with_type(&mut self, ty: Spanned<Type>) -> TypeVariableID {
+        let type_variable_id = self.create_type_variable_id_without_set();
+        let type_variable_set_id = self.create_variable_set(type_variable_id);
+        let type_variable_set = &mut self.type_variable_set_components[type_variable_set_id.0];
+        type_variable_set.ty = Some(ty);
+
         type_variable_id
     }
 
@@ -482,6 +495,40 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         }
     }
 
+    fn create_instance(&mut self, ty: &Type) -> Type {
+        match ty {
+            Type::UserType {
+                user_type_info,
+                generics,
+            } => {
+                let mut new_generics = std::vec::Vec::new();
+                for _ in generics.iter() {
+                    new_generics.push(Type::TypeVariable(self.create_type_variable_id_with_set()));
+                }
+
+                Type::UserType {
+                    user_type_info: *user_type_info,
+                    generics: Arc::new(new_generics),
+                }
+            }
+            Type::Function {
+                function_info,
+                generics,
+            } => {
+                let mut new_generics = std::vec::Vec::new();
+                for _ in generics.iter() {
+                    new_generics.push(Type::TypeVariable(self.create_type_variable_id_with_set()));
+                }
+
+                Type::Function {
+                    function_info: function_info.clone(),
+                    generics: Arc::new(new_generics),
+                }
+            }
+            _ => ty.clone(),
+        }
+    }
+
     fn resolve_type_variable_id(
         &self,
         type_variable_id: TypeVariableID,
@@ -614,14 +661,15 @@ pub fn infer_type(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) -> HashMap<EntityID, Spanned<Type>> {
     let allocator = Bump::new();
-    let mut type_environment = TypeEnvironment::new(module_path, &allocator);
+    let mut type_environment = TypeEnvironment::new(module_path, package_resource_set, &allocator);
 
     infer_type_for_program(
         ast,
@@ -633,10 +681,11 @@ pub fn infer_type(
         implements_infos,
         import_map,
         entity_user_type_map,
-        moduled_name_user_type_map,
+        moduled_name_type_map,
         name_resolved_map,
         user_type_set,
         module_path,
+        package_resource_set,
         errors,
     );
 
@@ -653,10 +702,11 @@ fn infer_type_for_program(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) {
     for statement in ast.statements.iter() {
@@ -672,10 +722,11 @@ fn infer_type_for_program(
                     implements_infos,
                     import_map,
                     entity_user_type_map,
-                    moduled_name_user_type_map,
+                    moduled_name_type_map,
                     name_resolved_map,
                     user_type_set,
                     module_path,
+                    package_resource_set,
                     errors,
                 );
                 if let Ok(right) = &assignment.right {
@@ -689,10 +740,11 @@ fn infer_type_for_program(
                         implements_infos,
                         import_map,
                         entity_user_type_map,
-                        moduled_name_user_type_map,
+                        moduled_name_type_map,
                         name_resolved_map,
                         user_type_set,
                         module_path,
+                        package_resource_set,
                         errors,
                     );
 
@@ -730,10 +782,11 @@ fn infer_type_for_program(
                                     implements_infos,
                                     import_map,
                                     entity_user_type_map,
-                                    moduled_name_user_type_map,
+                                    moduled_name_type_map,
                                     name_resolved_map,
                                     user_type_set,
                                     module_path,
+                                    package_resource_set,
                                     errors,
                                 ),
                                 None => type_environment.create_type_variable_id_with_set(),
@@ -791,10 +844,11 @@ fn infer_type_for_expression(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) -> TypeVariableID {
     match ast {
@@ -810,10 +864,11 @@ fn infer_type_for_expression(
                     implements_infos,
                     import_map,
                     entity_user_type_map,
-                    moduled_name_user_type_map,
+                    moduled_name_type_map,
                     name_resolved_map,
                     user_type_set,
                     module_path,
+                    package_resource_set,
                     errors,
                 ),
                 None => type_environment.create_and_set_entity_type(
@@ -844,10 +899,11 @@ fn infer_type_for_expression(
             implements_infos,
             import_map,
             entity_user_type_map,
-            moduled_name_user_type_map,
+            moduled_name_type_map,
             name_resolved_map,
             user_type_set,
             module_path,
+            package_resource_set,
             errors,
         ),
     }
@@ -863,10 +919,11 @@ fn infer_type_for_or_expression(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) -> TypeVariableID {
     if ast.chain.is_empty() {
@@ -880,10 +937,11 @@ fn infer_type_for_or_expression(
             implements_infos,
             import_map,
             entity_user_type_map,
-            moduled_name_user_type_map,
+            moduled_name_type_map,
             name_resolved_map,
             user_type_set,
             module_path,
+            package_resource_set,
             errors,
         )
     } else {
@@ -901,10 +959,11 @@ fn infer_type_for_and_expression(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) -> TypeVariableID {
     if ast.chain.is_empty() {
@@ -918,10 +977,11 @@ fn infer_type_for_and_expression(
             implements_infos,
             import_map,
             entity_user_type_map,
-            moduled_name_user_type_map,
+            moduled_name_type_map,
             name_resolved_map,
             user_type_set,
             module_path,
+            package_resource_set,
             errors,
         )
     } else {
@@ -939,10 +999,11 @@ fn infer_type_for_equals_expression(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) -> TypeVariableID {
     if ast.chain.is_empty() {
@@ -956,10 +1017,11 @@ fn infer_type_for_equals_expression(
             implements_infos,
             import_map,
             entity_user_type_map,
-            moduled_name_user_type_map,
+            moduled_name_type_map,
             name_resolved_map,
             user_type_set,
             module_path,
+            package_resource_set,
             errors,
         )
     } else {
@@ -977,10 +1039,11 @@ fn infer_type_for_less_or_greater_expression(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) -> TypeVariableID {
     if ast.chain.is_empty() {
@@ -994,10 +1057,11 @@ fn infer_type_for_less_or_greater_expression(
             implements_infos,
             import_map,
             entity_user_type_map,
-            moduled_name_user_type_map,
+            moduled_name_type_map,
             name_resolved_map,
             user_type_set,
             module_path,
+            package_resource_set,
             errors,
         )
     } else {
@@ -1015,10 +1079,11 @@ fn infer_type_for_add_or_sub_expression(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) -> TypeVariableID {
     if ast.chain.is_empty() {
@@ -1032,10 +1097,11 @@ fn infer_type_for_add_or_sub_expression(
             implements_infos,
             import_map,
             entity_user_type_map,
-            moduled_name_user_type_map,
+            moduled_name_type_map,
             name_resolved_map,
             user_type_set,
             module_path,
+            package_resource_set,
             errors,
         )
     } else {
@@ -1053,10 +1119,11 @@ fn infer_type_for_mul_or_div_expression(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) -> TypeVariableID {
     if ast.chain.is_empty() {
@@ -1070,10 +1137,11 @@ fn infer_type_for_mul_or_div_expression(
             implements_infos,
             import_map,
             entity_user_type_map,
-            moduled_name_user_type_map,
+            moduled_name_type_map,
             name_resolved_map,
             user_type_set,
             module_path,
+            package_resource_set,
             errors,
         )
     } else {
@@ -1091,10 +1159,11 @@ fn infer_type_for_factor(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) -> TypeVariableID {
     match &ast.minus {
@@ -1110,10 +1179,11 @@ fn infer_type_for_factor(
                 implements_infos,
                 import_map,
                 entity_user_type_map,
-                moduled_name_user_type_map,
+                moduled_name_type_map,
                 name_resolved_map,
                 user_type_set,
                 module_path,
+                package_resource_set,
                 errors,
             ),
             Err(_) => type_environment.create_type_variable_id_with_set(),
@@ -1131,12 +1201,15 @@ fn infer_type_for_primary(
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
     entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
     errors: &mut std::vec::Vec<TypeError>,
 ) -> TypeVariableID {
+    let mut chain_start_position = 0;
+
     let first_type_variable_id = match &ast.left.first {
         PrimaryLeftExpr::Simple {
             left,
@@ -1147,9 +1220,69 @@ fn infer_type_for_primary(
             SimplePrimary::Tuple { expressions, span } => todo!(),
             SimplePrimary::Literal(literal) => {
                 match name_resolved_map.get(&EntityID::from(literal)) {
-                    Some(resolved) => type_environment
-                        .get_or_allocate_variable_for_entity(resolved.define.entity_id),
-                    None => todo!(),
+                    Some(resolved) => match resolved.define.kind {
+                        DefineKind::Import => {
+                            match import_map.get(&resolved.define.entity_id).unwrap() {
+                                ImportElement::ModuleAlias { path } => {
+                                    let mut path_name =
+                                        path.iter().cloned().collect::<Vec<_>>().join("::");
+
+                                    get_module_import_type(
+                                        ast,
+                                        literal,
+                                        path_name,
+                                        &mut chain_start_position,
+                                        type_environment,
+                                        moduled_name_type_map,
+                                        package_resource_set,
+                                        module_path,
+                                        errors,
+                                    )
+                                }
+                                ImportElement::ModuleElement { path, element } => {
+                                    let module_name =
+                                        path.iter().cloned().collect::<Vec<_>>().join("::");
+                                    let module_type = moduled_name_type_map
+                                        .get(&module_name)
+                                        .unwrap()
+                                        .get(element)
+                                        .unwrap();
+
+                                    let instance = type_environment.create_instance(module_type);
+
+                                    type_environment.create_and_set_entity_type(
+                                        literal.into(),
+                                        Spanned::new(instance, literal.span.clone()),
+                                    )
+                                }
+                                ImportElement::Unknown => type_environment
+                                    .create_and_set_entity_type(
+                                        literal.into(),
+                                        Spanned::new(Type::Unknown, literal.span.clone()),
+                                    ),
+                            }
+                        }
+                        DefineKind::Function => todo!(),
+                        DefineKind::Variable => type_environment
+                            .get_or_allocate_variable_for_entity(resolved.define.entity_id),
+                        DefineKind::UserType => todo!(),
+                        DefineKind::Generics => todo!(),
+                        DefineKind::TypeAlias => todo!(),
+                    },
+                    None => match package_resource_set.get(literal.value) {
+                        Some(_) => get_module_import_type(
+                            ast,
+                            literal,
+                            literal.value.to_string(),
+                            &mut chain_start_position,
+                            type_environment,
+                            moduled_name_type_map,
+                            package_resource_set,
+                            module_path,
+                            errors,
+                        ),
+                        None => type_environment.create_type_variable_id_with_set(),
+                    },
                 }
             }
             SimplePrimary::StringLiteral(literal) => todo!(),
@@ -1171,4 +1304,85 @@ fn infer_type_for_primary(
     };
 
     first_type_variable_id
+}
+
+fn get_module_import_type(
+    ast: &Primary,
+    first_literal: &Literal,
+    mut path_name: String,
+    chain_start_position: &mut usize,
+    type_environment: &mut TypeEnvironment,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
+    package_resource_set: &PackageResourceSet,
+    module_path: &ModulePath,
+    errors: &mut std::vec::Vec<TypeError>,
+) -> TypeVariableID {
+    let mut import_type = Type::Unknown;
+    let mut last_literal = first_literal;
+    for (index, chain) in ast.chain.iter().enumerate() {
+        if chain.separator.value != PrimarySeparator::DoubleColon {
+            break;
+        }
+
+        let Some(second) = &chain.second else {
+            break;
+        };
+
+        let mut new_path = path_name.clone();
+        new_path += "::";
+        new_path += second.literal.value;
+
+        last_literal = &second.literal;
+
+        if package_resource_set.get(&new_path).is_none() {
+            *chain_start_position = index;
+
+            match moduled_name_type_map
+                .get(&path_name)
+                .unwrap()
+                .get(second.literal.value)
+            {
+                Some(ty) => {
+                    import_type = ty.clone();
+                }
+                None => {
+                    let error = TypeError {
+                        kind: TypeErrorKind::UnknownModuleElementType,
+                        span: second.literal.span.clone(),
+                        module_path: module_path.clone(),
+                    };
+                    errors.push(error);
+                }
+            }
+
+            break;
+        }
+
+        path_name = new_path;
+    }
+
+    type_environment.create_and_set_entity_type(
+        last_literal.into(),
+        Spanned::new(import_type, last_literal.span.clone()),
+    )
+}
+
+fn infer_type_for_primary_right(
+    ast: &PrimaryRight,
+    prev_type_variable_id: TypeVariableID,
+    as_expression: bool,
+    type_environment: &mut TypeEnvironment,
+    return_type: &Spanned<Type>,
+    this_type: &Option<Type>,
+    generics: &HashMap<EntityID, Arc<GenericType>>,
+    implements_infos: &ImplementsInfoSet,
+    import_map: &HashMap<EntityID, ImportElement>,
+    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    user_type_set: &GlobalUserTypeSet,
+    module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
+    errors: &mut std::vec::Vec<TypeError>,
+) {
 }

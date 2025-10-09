@@ -8,6 +8,7 @@ pub mod user_type_collector;
 mod test {
     use std::path::Path;
 
+    use catla_import::resource::PackageResourceSet;
     use catla_name_resolver::resolve_name;
     use catla_parser::CatlaAST;
     use catla_util::module_path::ModulePath;
@@ -69,16 +70,19 @@ let c = b
             &mut errors,
         );
 
+        let moduled_name_type_map = HashMap::new();
+        let package_resource_set = PackageResourceSet::new();
         let result = infer_type(
             ast.ast(),
             &mut generics,
             &implements_infos,
             &import_map,
             &module_entity_type_map,
-            &moduled_name_user_type_map,
+            &moduled_name_type_map,
             &name_resolved_map,
             &user_type_set,
             &module_path,
+            &package_resource_set,
             &mut errors,
         );
         dbg!(errors);

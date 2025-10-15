@@ -1303,7 +1303,21 @@ fn infer_type_for_primary(
         PrimaryLeftExpr::Loop { loop_expression } => todo!(),
     };
 
-    first_type_variable_id
+    let mut last_type_variable_id = first_type_variable_id;
+    loop {
+        if chain_start_position >= ast.chain.len() {
+            break;
+        }
+
+        let chain = &ast.chain[chain_start_position];
+        chain_start_position += 1;
+
+        if let Some(second) = &chain.second {
+            
+        }
+    }
+
+    last_type_variable_id
 }
 
 fn get_module_import_type(
@@ -1365,24 +1379,4 @@ fn get_module_import_type(
         last_literal.into(),
         Spanned::new(import_type, last_literal.span.clone()),
     )
-}
-
-fn infer_type_for_primary_right(
-    ast: &PrimaryRight,
-    prev_type_variable_id: TypeVariableID,
-    as_expression: bool,
-    type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
-    this_type: &Option<Type>,
-    generics: &HashMap<EntityID, Arc<GenericType>>,
-    implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
-    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
-    user_type_set: &GlobalUserTypeSet,
-    module_path: &ModulePath,
-    package_resource_set: &PackageResourceSet,
-    errors: &mut std::vec::Vec<TypeError>,
-) {
 }

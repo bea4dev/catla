@@ -1,7 +1,6 @@
 use std::ops::Range;
 
-use catla_parser::ast::Spanned;
-use catla_util::module_path::ModulePath;
+use catla_util::module_path::{ModulePath, Moduled};
 
 #[derive(Debug)]
 pub struct TypeError {
@@ -19,7 +18,7 @@ pub enum TypeErrorKind {
     InvalidGenericsCount,
     MissingStaticVariableType,
     TypeMismatch {
-        left: Spanned<String>,
-        right: Spanned<String>,
+        left: Moduled<String>,
+        right: Moduled<String>,
     },
 }

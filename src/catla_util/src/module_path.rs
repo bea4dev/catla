@@ -1,6 +1,7 @@
 use std::{
     fmt::Display,
     hash::Hash,
+    ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -35,5 +36,26 @@ impl PartialEq for ModulePath {
 impl Hash for ModulePath {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.path.hash(state);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Moduled<T> {
+    pub module_path: ModulePath,
+    pub span: Range<usize>,
+    pub value: T,
+}
+
+impl<T> Moduled<T> {
+    pub fn new(value: T, module_path: ModulePath, span: Range<usize>) -> Self {
+        Self {
+            module_path,
+            span,
+            value,
+        }
+    }
+
+    pub fn map<V, F: FnOnce(T) -> V>(self, f: F) -> Moduled<V> {
+        Moduled::new(f(self.value), self.module_path, self.span)
     }
 }

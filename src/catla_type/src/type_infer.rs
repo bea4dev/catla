@@ -1,4 +1,23 @@
+use allocator_api2::vec::Vec;
+use bumpalo::Bump;
+use catla_import::{ImportElement, resource::PackageResourceSet};
+use catla_name_resolver::{DefineKind, ResolvedInfo};
+use catla_parser::ast::{
+    AddOrSubExpression, AndExpression, Define, EntityID, EqualsExpression, Expression, Factor,
+    LessOrGreaterExpression, Literal, MulOrDivExpression, OrExpression, Primary, PrimaryLeftExpr,
+    PrimarySeparator, Program, SimplePrimary, Spanned, Statement, VariableBinding,
+};
+use catla_util::module_path::{ModulePath, Moduled};
+use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
 use std::{mem::swap, sync::Arc};
+
+use crate::{
+    error::{TypeError, TypeErrorKind},
+    types::{GenericType, GlobalUserTypeID, GlobalUserTypeSet, ImplementsInfoSet, Type},
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeVariableID(usize);
 
 /// (Hindley-Milner based) Union-Find like type inference
 ///
@@ -14,26 +33,6 @@ use std::{mem::swap, sync::Arc};
 ///           ▼
 ///
 /// a: int | b: int | c: int
-use allocator_api2::vec::Vec;
-use bumpalo::Bump;
-use catla_import::{ImportElement, resource::PackageResourceSet};
-use catla_name_resolver::{DefineKind, ResolvedInfo};
-use catla_parser::ast::{
-    AddOrSubExpression, AndExpression, Define, EntityID, EqualsExpression, Expression, Factor,
-    LessOrGreaterExpression, Literal, MulOrDivExpression, OrExpression, Primary, PrimaryLeftExpr,
-    PrimaryRight, PrimarySeparator, Program, SimplePrimary, Spanned, Statement, VariableBinding,
-};
-use catla_util::module_path::ModulePath;
-use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
-
-use crate::{
-    error::{TypeError, TypeErrorKind},
-    types::{GenericType, GlobalUserTypeID, GlobalUserTypeSet, ImplementsInfoSet, Type},
-};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TypeVariableID(usize);
-
 #[derive(Debug)]
 pub struct TypeEnvironment<'type_env_alloc> {
     module_path: ModulePath,
@@ -46,11 +45,7 @@ pub struct TypeEnvironment<'type_env_alloc> {
 }
 
 impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
-    fn new(
-        module_path: &ModulePath,
-        package_resource_set: &PackageResourceSet,
-        allocator: &'type_env_alloc Bump,
-    ) -> Self {
+    pub fn new(module_path: &ModulePath, allocator: &'type_env_alloc Bump) -> Self {
         Self {
             module_path: module_path.clone(),
             entity_var_map: HashMap::new_in(allocator),
@@ -77,7 +72,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
     fn create_and_set_entity_type(
         &mut self,
         entity_id: EntityID,
-        ty: Spanned<Type>,
+        ty: Moduled<Type>,
     ) -> TypeVariableID {
         let type_variable_id = self.get_or_allocate_variable_for_entity(entity_id);
         let type_variable_set_id = self.var_set_map.get(&type_variable_id).unwrap();
@@ -88,7 +83,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         type_variable_id
     }
 
-    fn get_entity_type(&self, entity_id: EntityID) -> Option<Spanned<Type>> {
+    fn get_entity_type(&self, entity_id: EntityID) -> Option<Moduled<Type>> {
         let type_variable_id = self.entity_var_map.get(&entity_id).unwrap();
         let type_variable_set_id = self.var_set_map.get(type_variable_id).unwrap();
         let type_variable_set = &self.type_variable_set_components[type_variable_set_id.0];
@@ -99,7 +94,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
     pub(crate) fn get_type_variable_type(
         &self,
         type_variable_id: TypeVariableID,
-    ) -> Option<Spanned<Type>> {
+    ) -> Option<Moduled<Type>> {
         let type_variable_set_id = self.var_set_map.get(&type_variable_id).unwrap();
         let type_variable_set = &self.type_variable_set_components[type_variable_set_id.0];
 
@@ -112,13 +107,13 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         TypeVariableID(old_id)
     }
 
-    fn create_type_variable_id_with_set(&mut self) -> TypeVariableID {
+    pub fn create_type_variable_id_with_set(&mut self) -> TypeVariableID {
         let type_variable_id = self.create_type_variable_id_without_set();
         self.create_variable_set(type_variable_id);
         type_variable_id
     }
 
-    fn create_type_variable_id_with_type(&mut self, ty: Spanned<Type>) -> TypeVariableID {
+    fn create_type_variable_id_with_type(&mut self, ty: Moduled<Type>) -> TypeVariableID {
         let type_variable_id = self.create_type_variable_id_without_set();
         let type_variable_set_id = self.create_variable_set(type_variable_id);
         let type_variable_set = &mut self.type_variable_set_components[type_variable_set_id.0];
@@ -176,7 +171,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
     /// set(a, b): Some(int)
     /// ```
     ///
-    fn unify(
+    pub fn unify(
         &mut self,
         left: TypeVariableID,
         right: TypeVariableID,
@@ -248,10 +243,10 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         }
     }
 
-    fn unify_type(
+    pub fn unify_type(
         &mut self,
-        left: Spanned<Type>,
-        right: Spanned<Type>,
+        left: Moduled<Type>,
+        right: Moduled<Type>,
         user_type_set: &GlobalUserTypeSet,
         errors: &mut std::vec::Vec<TypeError>,
     ) {
@@ -266,8 +261,9 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
 
             if user_type_info.is_alias {
                 return self.unify_type(
-                    Spanned::new(
+                    Moduled::new(
                         left.value.resolve_type_alias(user_type_set),
+                        left.module_path.clone(),
                         left.span.clone(),
                     ),
                     right,
@@ -287,8 +283,9 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
             if user_type_info.is_alias {
                 return self.unify_type(
                     left,
-                    Spanned::new(
+                    Moduled::new(
                         right.value.resolve_type_alias(user_type_set),
+                        right.module_path.clone(),
                         right.span.clone(),
                     ),
                     user_type_set,
@@ -393,8 +390,16 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                                 left_generics.iter().zip(right_generics.iter())
                             {
                                 self.unify_type(
-                                    Spanned::new(left_generic.clone(), left.span.clone()),
-                                    Spanned::new(right_generic.clone(), right.span.clone()),
+                                    Moduled::new(
+                                        left_generic.clone(),
+                                        left.module_path.clone(),
+                                        left.span.clone(),
+                                    ),
+                                    Moduled::new(
+                                        right_generic.clone(),
+                                        right.module_path.clone(),
+                                        right.span.clone(),
+                                    ),
                                     user_type_set,
                                     errors,
                                 );
@@ -424,8 +429,16 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                                 left_generics.iter().zip(right_generics.iter())
                             {
                                 self.unify_type(
-                                    Spanned::new(left_generic.clone(), left.span.clone()),
-                                    Spanned::new(right_generic.clone(), right.span.clone()),
+                                    Moduled::new(
+                                        left_generic.clone(),
+                                        left.module_path.clone(),
+                                        left.span.clone(),
+                                    ),
+                                    Moduled::new(
+                                        right_generic.clone(),
+                                        right.module_path.clone(),
+                                        right.span.clone(),
+                                    ),
                                     user_type_set,
                                     errors,
                                 );
@@ -445,8 +458,16 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
             Type::Array(left_base_type) => match &right.value {
                 Type::Array(right_base_type) => {
                     self.unify_type(
-                        Spanned::new(left_base_type.as_ref().clone(), left.span.clone()),
-                        Spanned::new(right_base_type.as_ref().clone(), right.span.clone()),
+                        Moduled::new(
+                            left_base_type.as_ref().clone(),
+                            left.module_path.clone(),
+                            left.span.clone(),
+                        ),
+                        Moduled::new(
+                            right_base_type.as_ref().clone(),
+                            right.module_path.clone(),
+                            right.span.clone(),
+                        ),
                         user_type_set,
                         errors,
                     );
@@ -460,8 +481,16 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                     if left_items.len() == right_items.len() {
                         for (left_item, right_item) in left_items.iter().zip(right_items.iter()) {
                             self.unify_type(
-                                Spanned::new(left_item.clone(), left.span.clone()),
-                                Spanned::new(right_item.clone(), right.span.clone()),
+                                Moduled::new(
+                                    left_item.clone(),
+                                    left.module_path.clone(),
+                                    left.span.clone(),
+                                ),
+                                Moduled::new(
+                                    right_item.clone(),
+                                    right.module_path.clone(),
+                                    right.span.clone(),
+                                ),
                                 user_type_set,
                                 errors,
                             );
@@ -475,7 +504,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                 _ => false,
             },
             Type::Unreachable => unreachable!(),
-            _ => left == right,
+            _ => left.value == right.value,
         };
 
         if !equals {
@@ -495,7 +524,20 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         }
     }
 
-    fn create_instance(&mut self, ty: &Type) -> Type {
+    pub fn test_unify_type(
+        &mut self,
+        left: Moduled<Type>,
+        right: Moduled<Type>,
+        user_type_set: &GlobalUserTypeSet,
+    ) -> bool {
+        let mut errors = std::vec::Vec::new();
+
+        self.unify_type(left, right, user_type_set, &mut errors);
+
+        errors.is_empty()
+    }
+
+    pub fn create_instance(&mut self, ty: &Type) -> Type {
         match ty {
             Type::UserType {
                 user_type_info,
@@ -543,7 +585,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
             .unwrap_or(Type::Unknown)
     }
 
-    fn resolve_type(&self, ty: &Type, user_type_set: &GlobalUserTypeSet) -> Type {
+    pub fn resolve_type(&self, ty: &Type, user_type_set: &GlobalUserTypeSet) -> Type {
         match ty {
             Type::IntegerLiteral => Type::Int32,
             Type::FloatLiteral => Type::Float32,
@@ -637,7 +679,7 @@ pub(crate) struct TypeVariableSetID(usize);
 #[derive(Debug, Clone)]
 pub(crate) struct TypeVariableSet<'type_env_alloc> {
     members: HashSet<TypeVariableID, DefaultHashBuilder, &'type_env_alloc Bump>,
-    ty: Option<Spanned<Type>>,
+    ty: Option<Moduled<Type>>,
 }
 
 impl<'type_env_alloc> TypeVariableSet<'type_env_alloc> {
@@ -669,13 +711,13 @@ pub fn infer_type(
     errors: &mut std::vec::Vec<TypeError>,
 ) -> HashMap<EntityID, Spanned<Type>> {
     let allocator = Bump::new();
-    let mut type_environment = TypeEnvironment::new(module_path, package_resource_set, &allocator);
+    let mut type_environment = TypeEnvironment::new(module_path, &allocator);
 
     infer_type_for_program(
         ast,
         false,
         &mut type_environment,
-        &Spanned::new(Type::Unit, ast.span.clone()),
+        &Moduled::new(Type::Unit, module_path.clone(), ast.span.clone()),
         &None,
         generics,
         implements_infos,
@@ -696,7 +738,7 @@ fn infer_type_for_program(
     ast: &Program,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
+    return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
@@ -765,9 +807,11 @@ fn infer_type_for_program(
                         Define::UserType(user_type_define) => todo!(),
                         Define::Variable(variable_define) => {
                             let binding_id = match &variable_define.binding {
-                                Ok(binding) => {
-                                    infer_type_for_variable_binding(binding, type_environment)
-                                }
+                                Ok(binding) => infer_type_for_variable_binding(
+                                    binding,
+                                    type_environment,
+                                    module_path,
+                                ),
                                 Err(_) => type_environment.create_type_variable_id_with_set(),
                             };
 
@@ -813,6 +857,7 @@ fn infer_type_for_program(
 fn infer_type_for_variable_binding(
     ast: &VariableBinding,
     type_environment: &mut TypeEnvironment,
+    module_path: &ModulePath,
 ) -> TypeVariableID {
     match ast {
         VariableBinding::Literal(literal) => {
@@ -821,14 +866,16 @@ fn infer_type_for_variable_binding(
         VariableBinding::Binding { bindings, span } => {
             let tuple_items = bindings
                 .iter()
-                .map(|binding| infer_type_for_variable_binding(binding, type_environment))
+                .map(|binding| {
+                    infer_type_for_variable_binding(binding, type_environment, module_path)
+                })
                 .map(|id| Type::TypeVariable(id))
                 .collect();
             let tuple_type = Type::Tuple(Arc::new(tuple_items));
 
             type_environment.create_and_set_entity_type(
                 EntityID::from(ast),
-                Spanned::new(tuple_type, span.clone()),
+                Moduled::new(tuple_type, module_path.clone(), span.clone()),
             )
         }
     }
@@ -838,7 +885,7 @@ fn infer_type_for_expression(
     ast: &Expression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
+    return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
@@ -873,7 +920,11 @@ fn infer_type_for_expression(
                 ),
                 None => type_environment.create_and_set_entity_type(
                     EntityID::from(ast),
-                    Spanned::new(Type::Unit, return_expression.span.clone()),
+                    Moduled::new(
+                        Type::Unit,
+                        module_path.clone(),
+                        return_expression.span.clone(),
+                    ),
                 ),
             };
 
@@ -881,7 +932,11 @@ fn infer_type_for_expression(
 
             type_environment.unify_type(
                 return_type.clone(),
-                Spanned::new(return_expression_type, return_expression.span.clone()),
+                Moduled::new(
+                    return_expression_type,
+                    module_path.clone(),
+                    return_expression.span.clone(),
+                ),
                 user_type_set,
                 errors,
             );
@@ -913,7 +968,7 @@ fn infer_type_for_or_expression(
     ast: &OrExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
+    return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
@@ -953,7 +1008,7 @@ fn infer_type_for_and_expression(
     ast: &AndExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
+    return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
@@ -993,7 +1048,7 @@ fn infer_type_for_equals_expression(
     ast: &EqualsExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
+    return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
@@ -1033,7 +1088,7 @@ fn infer_type_for_less_or_greater_expression(
     ast: &LessOrGreaterExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
+    return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
@@ -1073,7 +1128,7 @@ fn infer_type_for_add_or_sub_expression(
     ast: &AddOrSubExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
+    return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
@@ -1113,7 +1168,7 @@ fn infer_type_for_mul_or_div_expression(
     ast: &MulOrDivExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
+    return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
@@ -1153,7 +1208,7 @@ fn infer_type_for_factor(
     ast: &Factor,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
+    return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
@@ -1195,7 +1250,7 @@ fn infer_type_for_primary(
     ast: &Primary,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
-    return_type: &Spanned<Type>,
+    return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
@@ -1252,13 +1307,21 @@ fn infer_type_for_primary(
 
                                     type_environment.create_and_set_entity_type(
                                         literal.into(),
-                                        Spanned::new(instance, literal.span.clone()),
+                                        Moduled::new(
+                                            instance,
+                                            module_path.clone(),
+                                            literal.span.clone(),
+                                        ),
                                     )
                                 }
                                 ImportElement::Unknown => type_environment
                                     .create_and_set_entity_type(
                                         literal.into(),
-                                        Spanned::new(Type::Unknown, literal.span.clone()),
+                                        Moduled::new(
+                                            Type::Unknown,
+                                            module_path.clone(),
+                                            literal.span.clone(),
+                                        ),
                                     ),
                             }
                         }
@@ -1288,7 +1351,11 @@ fn infer_type_for_primary(
             SimplePrimary::StringLiteral(literal) => todo!(),
             SimplePrimary::NumericLiteral(literal) => type_environment.create_and_set_entity_type(
                 EntityID::from(literal),
-                Spanned::new(Type::IntegerLiteral, literal.span.clone()),
+                Moduled::new(
+                    Type::IntegerLiteral,
+                    module_path.clone(),
+                    literal.span.clone(),
+                ),
             ),
             SimplePrimary::Null(range) => todo!(),
             SimplePrimary::True(range) => todo!(),
@@ -1303,7 +1370,7 @@ fn infer_type_for_primary(
         PrimaryLeftExpr::Loop { loop_expression } => todo!(),
     };
 
-    let mut last_type_variable_id = first_type_variable_id;
+        let mut last_type_variable_id = first_type_variable_id;
     loop {
         if chain_start_position >= ast.chain.len() {
             break;
@@ -1312,9 +1379,7 @@ fn infer_type_for_primary(
         let chain = &ast.chain[chain_start_position];
         chain_start_position += 1;
 
-        if let Some(second) = &chain.second {
-            
-        }
+        if let Some(second) = &chain.second {}
     }
 
     last_type_variable_id
@@ -1377,6 +1442,6 @@ fn get_module_import_type(
 
     type_environment.create_and_set_entity_type(
         last_literal.into(),
-        Spanned::new(import_type, last_literal.span.clone()),
+        Moduled::new(import_type, module_path.clone(), last_literal.span.clone()),
     )
 }

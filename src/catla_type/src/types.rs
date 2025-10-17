@@ -3,8 +3,9 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+use bumpalo::Bump;
 use catla_parser::ast::{EntityID, Spanned};
-use catla_util::module_path::ModulePath;
+use catla_util::module_path::{ModulePath, Moduled};
 use derivative::Derivative;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
@@ -217,6 +218,86 @@ impl Type {
             _ => self.clone(),
         }
     }
+
+    pub fn replace_generics(
+        &self,
+        replace_before: &[Arc<GenericType>],
+        replace_after: &[TypeVariableID],
+    ) -> Type {
+        match self {
+            Type::UserType {
+                user_type_info,
+                generics,
+            } => {
+                let mut new_generics = Vec::with_capacity(generics.len());
+
+                for generic in generics.iter() {
+                    new_generics.push(generic.replace_generics(replace_before, replace_after));
+                }
+
+                Type::UserType {
+                    user_type_info: *user_type_info,
+                    generics: Arc::new(new_generics),
+                }
+            }
+            Type::Function {
+                function_info,
+                generics,
+            } => {
+                let mut new_generics = Vec::with_capacity(generics.len());
+
+                for generic in generics.iter() {
+                    new_generics.push(generic.replace_generics(replace_before, replace_after));
+                }
+
+                let mut new_arguments = Vec::with_capacity(function_info.arguments.len());
+
+                for argument in function_info.arguments.iter() {
+                    new_arguments.push(argument.replace_generics(replace_before, replace_after));
+                }
+
+                let new_return_type = function_info
+                    .return_type
+                    .replace_generics(replace_before, replace_after);
+
+                let new_function_info = FunctionTypeInfo {
+                    module_path: function_info.module_path.clone(),
+                    name: function_info.name.clone(),
+                    generics: function_info.generics.clone(),
+                    arguments: new_arguments,
+                    return_type: new_return_type,
+                };
+
+                Type::Function {
+                    function_info: Arc::new(new_function_info),
+                    generics: Arc::new(new_generics),
+                }
+            }
+            Type::Generic(generic_type) => {
+                for (before, after) in replace_before.iter().zip(replace_after.iter()) {
+                    if before.module_path == generic_type.module_path
+                        && before.entity_id == generic_type.entity_id
+                    {
+                        return Type::TypeVariable(*after);
+                    }
+                }
+                return self.clone();
+            }
+            Type::Array(base_type) => Type::Array(Arc::new(
+                base_type.replace_generics(replace_before, replace_after),
+            )),
+            Type::Tuple(items) => {
+                let mut new_items = Vec::with_capacity(items.len());
+
+                for item in items.iter() {
+                    new_items.push(item.replace_generics(replace_before, replace_after));
+                }
+
+                Type::Tuple(Arc::new(new_items.clone()))
+            }
+            _ => self.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -290,7 +371,7 @@ pub struct GenericType {
 
 #[derive(Debug)]
 pub struct ImplementsInfoSet {
-    map: IndexMap<EntityID, ImplementsInfo>,
+    map: IndexMap<EntityID, Arc<ImplementsInfo>>,
 }
 
 impl ImplementsInfoSet {
@@ -301,7 +382,50 @@ impl ImplementsInfoSet {
     }
 
     pub fn register(&mut self, entity_id: EntityID, info: ImplementsInfo) {
-        self.map.insert(entity_id, info);
+        self.map.insert(entity_id, Arc::new(info));
+    }
+
+    pub fn find_for(
+        &self,
+        ty: &Moduled<Type>,
+        user_type_set: &GlobalUserTypeSet,
+        type_environment: &mut TypeEnvironment,
+    ) -> ImplementsInfoSet {
+        let mut new_map = IndexMap::new();
+
+        for (&entity_id, implements_info) in self.map.iter() {
+            let temp_type = type_environment.resolve_type(&ty.value, user_type_set);
+
+            if implements_info
+                .is_implements_for(ty, user_type_set, type_environment, self)
+                .0
+            {
+                new_map.insert(entity_id, implements_info.clone());
+            }
+        }
+
+        ImplementsInfoSet { map: new_map }
+    }
+
+    pub fn is_implements(
+        &self,
+        concrete: &Moduled<Type>,
+        interface: &Moduled<Type>,
+        user_type_set: &GlobalUserTypeSet,
+        type_environment: &mut TypeEnvironment,
+    ) -> (bool, std::vec::Vec<TypeVariableID>) {
+        for implements_info in self.map.values() {
+            let (result, new_generics) = implements_info.is_implements(
+                concrete,
+                interface,
+                user_type_set,
+                type_environment,
+                self,
+            );
+
+            
+        }
+        todo!()
     }
 }
 
@@ -313,4 +437,79 @@ pub struct ImplementsInfo {
     pub where_clause: Vec<WhereClauseInfo>,
     pub element_type: HashMap<String, Spanned<Type>>,
     pub module_path: ModulePath,
+}
+
+impl ImplementsInfo {
+    pub fn is_implements_for(
+        &self,
+        ty: &Moduled<Type>,
+        user_type_set: &GlobalUserTypeSet,
+        type_environment: &mut TypeEnvironment,
+        all_implements_info_set: &ImplementsInfoSet,
+    ) -> (bool, std::vec::Vec<TypeVariableID>) {
+        let old_generics = &self.generics_define;
+        let new_generics = (0..old_generics.len())
+            .map(|_| type_environment.create_type_variable_id_with_set())
+            .collect::<Vec<_>>();
+
+        let new_concrete = self
+            .concrete
+            .value
+            .replace_generics(&old_generics, &new_generics);
+
+        if !type_environment.test_unify_type(
+            Moduled::new(
+                new_concrete,
+                self.module_path.clone(),
+                self.concrete.span.clone(),
+            ),
+            ty.clone(),
+            user_type_set,
+        ) {
+            return (false, std::vec::Vec::new());
+        }
+
+        (true, new_generics)
+    }
+
+    pub fn is_implements(
+        &self,
+        concrete: &Moduled<Type>,
+        interface: &Moduled<Type>,
+        user_type_set: &GlobalUserTypeSet,
+        type_environment: &mut TypeEnvironment,
+        all_implements_info_set: &ImplementsInfoSet,
+    ) -> (bool, std::vec::Vec<TypeVariableID>) {
+        let (result, new_generics) = self.is_implements_for(
+            concrete,
+            user_type_set,
+            type_environment,
+            all_implements_info_set,
+        );
+
+        if !result {
+            return (false, std::vec::Vec::new());
+        }
+
+        let old_generics = &self.generics_define;
+
+        let new_interface = self
+            .interface
+            .value
+            .replace_generics(&old_generics, &new_generics);
+
+        if !type_environment.test_unify_type(
+            Moduled::new(
+                new_interface,
+                self.module_path.clone(),
+                self.interface.span.clone(),
+            ),
+            interface.clone(),
+            user_type_set,
+        ) {
+            return (false, std::vec::Vec::new());
+        }
+
+        (true, new_generics)
+    }
 }

@@ -277,7 +277,7 @@ pub fn collect_module_element_type_for_program(
 
                                 let user_type_info = user_type_set.get(user_type_id);
                                 let mut user_type_info = user_type_info.write().unwrap();
-                                user_type_info.element_type.extend(element_type_holder);
+                                user_type_info.element_types.extend(element_type_holder);
                             }
                         }
                         Define::Variable(variable_define) => {
@@ -378,7 +378,7 @@ pub fn collect_module_element_type_for_program(
                                 })
                                 .unwrap_or(Type::Unknown);
 
-                            user_type_info.element_type.insert(
+                            user_type_info.element_types.insert(
                                 String::new(),
                                 Spanned::new(alias_type, type_alias.span.clone()),
                             );
@@ -635,7 +635,7 @@ fn get_function_type(
 
     FunctionTypeInfo {
         module_path: module_path.clone(),
-        name,
+        name: Some(name),
         generics: generic_types,
         arguments,
         return_type,
@@ -1037,34 +1037,40 @@ fn collect_where_clause(
     ast.elements
         .iter()
         .map(|element| {
-            let target = get_type(
-                &element.target_type,
-                this_type,
-                generics,
-                import_map,
-                entity_user_type_map,
-                moduled_name_user_type_map,
-                name_resolved_map,
-                user_type_set,
-                module_path,
-                errors,
+            let target = Spanned::new(
+                get_type(
+                    &element.target_type,
+                    this_type,
+                    generics,
+                    import_map,
+                    entity_user_type_map,
+                    moduled_name_user_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    errors,
+                ),
+                element.target_type.span.clone(),
             );
 
             let bounds = element
                 .bounds
                 .iter()
                 .map(|bound| {
-                    get_type(
-                        bound,
-                        this_type,
-                        generics,
-                        import_map,
-                        entity_user_type_map,
-                        moduled_name_user_type_map,
-                        name_resolved_map,
-                        user_type_set,
-                        module_path,
-                        errors,
+                    Spanned::new(
+                        get_type(
+                            bound,
+                            this_type,
+                            generics,
+                            import_map,
+                            entity_user_type_map,
+                            moduled_name_user_type_map,
+                            name_resolved_map,
+                            user_type_set,
+                            module_path,
+                            errors,
+                        ),
+                        bound.span.clone(),
                     )
                 })
                 .collect();

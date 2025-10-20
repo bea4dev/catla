@@ -75,7 +75,7 @@ pub fn collect_user_type_for_program(
                                     module_path: module_path.clone(),
                                     name: name.clone().map(|str| str.to_string()),
                                     is_alias: true,
-                                    element_type: HashMap::new(),
+                                    element_types: HashMap::new(),
                                     generics: Vec::new(),
                                     where_clause: Vec::new(),
                                 };
@@ -102,7 +102,7 @@ pub fn collect_user_type_for_program(
                                     module_path: module_path.clone(),
                                     name: name.clone().map(|str| str.to_string()),
                                     is_alias: true,
-                                    element_type: HashMap::new(),
+                                    element_types: HashMap::new(),
                                     generics: Vec::new(),
                                     where_clause: Vec::new(),
                                 };

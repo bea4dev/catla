@@ -3,7 +3,6 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use bumpalo::Bump;
 use catla_parser::ast::{EntityID, Spanned};
 use catla_util::module_path::{ModulePath, Moduled};
 use derivative::Derivative;
@@ -116,21 +115,30 @@ impl Type {
                 function_info,
                 generics,
             } => {
-                let function_name = function_info.name.value.clone();
+                let arguments = function_info
+                    .arguments
+                    .iter()
+                    .map(|argument| argument.to_display_string(user_type_set, type_environment))
+                    .collect::<Vec<_>>()
+                    .join(", ");
 
-                if generics.is_empty() {
-                    function_name
-                } else {
-                    format!(
-                        "{}<{}>",
-                        function_name,
+                let return_type = function_info
+                    .return_type
+                    .to_display_string(user_type_set, type_environment);
+
+                match generics.is_empty() {
+                    true => format!("function ({}) -> {}", arguments, return_type),
+                    false => format!(
+                        "function <{}>({}) -> {}",
                         generics
                             .iter()
                             .map(|generic| generic
                                 .to_display_string(user_type_set, type_environment))
                             .collect::<Vec<_>>()
-                            .join(", ")
-                    )
+                            .join(", "),
+                        arguments,
+                        return_type
+                    ),
                 }
             }
             Type::Generic(generic_type) => generic_type.name.value.clone(),
@@ -184,7 +192,7 @@ impl Type {
                     .map(|generic| Type::Generic(generic.clone()))
                     .zip(generics.iter());
 
-                let alias_type = user_type_info.element_type.get("").unwrap();
+                let alias_type = user_type_info.element_types.get("").unwrap();
 
                 match &alias_type.value {
                     Type::UserType {
@@ -338,21 +346,21 @@ pub struct UserTypeInfo {
     pub module_path: ModulePath,
     pub name: Spanned<String>,
     pub is_alias: bool,
-    pub element_type: HashMap<String, Spanned<Type>>,
+    pub element_types: HashMap<String, Spanned<Type>>,
     pub generics: Vec<Arc<GenericType>>,
     pub where_clause: Vec<WhereClauseInfo>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct WhereClauseInfo {
-    pub target: Type,
-    pub bounds: Vec<Type>,
+    pub target: Spanned<Type>,
+    pub bounds: Vec<Spanned<Type>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct FunctionTypeInfo {
     pub module_path: ModulePath,
-    pub name: Spanned<String>,
+    pub name: Option<Spanned<String>>,
     pub generics: Vec<Arc<GenericType>>,
     pub arguments: Vec<Type>,
     pub return_type: Type,
@@ -385,47 +393,65 @@ impl ImplementsInfoSet {
         self.map.insert(entity_id, Arc::new(info));
     }
 
-    pub fn find_for(
+    pub fn find_implements_for(
         &self,
-        ty: &Moduled<Type>,
+        ty: Moduled<Type>,
         user_type_set: &GlobalUserTypeSet,
         type_environment: &mut TypeEnvironment,
-    ) -> ImplementsInfoSet {
-        let mut new_map = IndexMap::new();
+    ) -> Vec<(Arc<ImplementsInfo>, ImplementsCheckResult)> {
+        let mut results = Vec::new();
 
-        for (&entity_id, implements_info) in self.map.iter() {
-            let temp_type = type_environment.resolve_type(&ty.value, user_type_set);
-
-            if implements_info
-                .is_implements_for(ty, user_type_set, type_environment, self)
-                .0
-            {
-                new_map.insert(entity_id, implements_info.clone());
-            }
-        }
-
-        ImplementsInfoSet { map: new_map }
-    }
-
-    pub fn is_implements(
-        &self,
-        concrete: &Moduled<Type>,
-        interface: &Moduled<Type>,
-        user_type_set: &GlobalUserTypeSet,
-        type_environment: &mut TypeEnvironment,
-    ) -> (bool, std::vec::Vec<TypeVariableID>) {
         for implements_info in self.map.values() {
-            let (result, new_generics) = implements_info.is_implements(
-                concrete,
-                interface,
+            let result = implements_info.is_implements(
+                ty.clone(),
+                None,
                 user_type_set,
                 type_environment,
                 self,
             );
 
-            
+            match &result {
+                ImplementsCheckResult::NoImplementsFound => continue,
+                ImplementsCheckResult::Conflicts { conflicts: _ }
+                | ImplementsCheckResult::Success {
+                    new_concrete: _,
+                    new_interface: _,
+                    new_generics: _,
+                } => results.push((implements_info.clone(), result)),
+            }
         }
-        todo!()
+
+        results
+    }
+
+    pub fn is_implements(
+        &self,
+        concrete: Moduled<Type>,
+        interface: Moduled<Type>,
+        user_type_set: &GlobalUserTypeSet,
+        type_environment: &mut TypeEnvironment,
+    ) -> ImplementsCheckResult {
+        for implements_info in self.map.values() {
+            let result = implements_info.is_implements(
+                concrete.clone(),
+                Some(interface.clone()),
+                user_type_set,
+                type_environment,
+                self,
+            );
+
+            match &result {
+                ImplementsCheckResult::NoImplementsFound => continue,
+                ImplementsCheckResult::Conflicts { conflicts: _ }
+                | ImplementsCheckResult::Success {
+                    new_concrete: _,
+                    new_interface: _,
+                    new_generics: _,
+                } => return result,
+            }
+        }
+
+        ImplementsCheckResult::NoImplementsFound
     }
 }
 
@@ -440,13 +466,19 @@ pub struct ImplementsInfo {
 }
 
 impl ImplementsInfo {
-    pub fn is_implements_for(
+    pub fn is_implements(
         &self,
-        ty: &Moduled<Type>,
+        concrete: Moduled<Type>,
+        interface: Option<Moduled<Type>>,
         user_type_set: &GlobalUserTypeSet,
         type_environment: &mut TypeEnvironment,
         all_implements_info_set: &ImplementsInfoSet,
-    ) -> (bool, std::vec::Vec<TypeVariableID>) {
+    ) -> ImplementsCheckResult {
+        let retake_concrete = concrete.map(|ty| type_environment.retake_type_variable(&ty));
+
+        let retake_interface =
+            interface.map(|ty| ty.map(|ty| type_environment.retake_type_variable(&ty)));
+
         let old_generics = &self.generics_define;
         let new_generics = (0..old_generics.len())
             .map(|_| type_environment.create_type_variable_id_with_set())
@@ -457,42 +489,6 @@ impl ImplementsInfo {
             .value
             .replace_generics(&old_generics, &new_generics);
 
-        if !type_environment.test_unify_type(
-            Moduled::new(
-                new_concrete,
-                self.module_path.clone(),
-                self.concrete.span.clone(),
-            ),
-            ty.clone(),
-            user_type_set,
-        ) {
-            return (false, std::vec::Vec::new());
-        }
-
-        (true, new_generics)
-    }
-
-    pub fn is_implements(
-        &self,
-        concrete: &Moduled<Type>,
-        interface: &Moduled<Type>,
-        user_type_set: &GlobalUserTypeSet,
-        type_environment: &mut TypeEnvironment,
-        all_implements_info_set: &ImplementsInfoSet,
-    ) -> (bool, std::vec::Vec<TypeVariableID>) {
-        let (result, new_generics) = self.is_implements_for(
-            concrete,
-            user_type_set,
-            type_environment,
-            all_implements_info_set,
-        );
-
-        if !result {
-            return (false, std::vec::Vec::new());
-        }
-
-        let old_generics = &self.generics_define;
-
         let new_interface = self
             .interface
             .value
@@ -500,16 +496,107 @@ impl ImplementsInfo {
 
         if !type_environment.test_unify_type(
             Moduled::new(
-                new_interface,
+                new_concrete,
                 self.module_path.clone(),
-                self.interface.span.clone(),
+                self.concrete.span.clone(),
             ),
-            interface.clone(),
+            retake_concrete.clone(),
             user_type_set,
         ) {
-            return (false, std::vec::Vec::new());
+            return ImplementsCheckResult::NoImplementsFound;
         }
 
-        (true, new_generics)
+        if let Some(retake_interface) = &retake_interface {
+            if !type_environment.test_unify_type(
+                Moduled::new(
+                    new_interface,
+                    self.module_path.clone(),
+                    self.interface.span.clone(),
+                ),
+                retake_interface.clone(),
+                user_type_set,
+            ) {
+                return ImplementsCheckResult::NoImplementsFound;
+            }
+        }
+
+        for where_bounds in self.where_clause.iter() {
+            let new_target = where_bounds
+                .target
+                .value
+                .replace_generics(&old_generics, &new_generics);
+
+            for bound in where_bounds.bounds.iter() {
+                let new_bound = bound.value.replace_generics(&old_generics, &new_generics);
+
+                match all_implements_info_set.is_implements(
+                    Moduled::new(
+                        new_target.clone(),
+                        self.module_path.clone(),
+                        where_bounds.target.span.clone(),
+                    ),
+                    Moduled::new(
+                        new_bound.clone(),
+                        self.module_path.clone(),
+                        bound.span.clone(),
+                    ),
+                    user_type_set,
+                    type_environment,
+                ) {
+                    ImplementsCheckResult::NoImplementsFound => {
+                        return ImplementsCheckResult::NoImplementsFound;
+                    }
+                    ImplementsCheckResult::Conflicts { conflicts } => {
+                        return ImplementsCheckResult::Conflicts { conflicts };
+                    }
+                    ImplementsCheckResult::Success {
+                        new_concrete,
+                        new_interface,
+                        new_generics: _,
+                    } => {
+                        let target_result = type_environment.test_unify_type(
+                            Moduled::new(
+                                new_target.clone(),
+                                self.module_path.clone(),
+                                where_bounds.target.span.clone(),
+                            ),
+                            new_concrete,
+                            user_type_set,
+                        );
+                        if !target_result {
+                            unreachable!("target unify must not fail!");
+                        }
+
+                        let bound_result = type_environment.test_unify_type(
+                            Moduled::new(new_bound, self.module_path.clone(), bound.span.clone()),
+                            new_interface.unwrap(),
+                            user_type_set,
+                        );
+                        if !bound_result {
+                            unreachable!("bound unify must not fail!");
+                        }
+                    }
+                }
+            }
+        }
+
+        ImplementsCheckResult::Success {
+            new_concrete: retake_concrete,
+            new_interface: retake_interface,
+            new_generics,
+        }
     }
+}
+
+#[derive(Debug)]
+pub enum ImplementsCheckResult {
+    NoImplementsFound,
+    Conflicts {
+        conflicts: Vec<Moduled<Type>>,
+    },
+    Success {
+        new_concrete: Moduled<Type>,
+        new_interface: Option<Moduled<Type>>,
+        new_generics: Vec<TypeVariableID>,
+    },
 }

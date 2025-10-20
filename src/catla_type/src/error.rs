@@ -21,4 +21,7 @@ pub enum TypeErrorKind {
         left: Moduled<String>,
         right: Moduled<String>,
     },
+    UnknownUserTypeElement,
+    NotFieldInFieldAssign,
+    NotUserTypeInFieldAssign,
 }

@@ -4,8 +4,9 @@ use catla_import::{ImportElement, resource::PackageResourceSet};
 use catla_name_resolver::{DefineKind, ResolvedInfo};
 use catla_parser::ast::{
     AddOrSubExpression, AndExpression, Define, EntityID, EqualsExpression, Expression, Factor,
-    LessOrGreaterExpression, Literal, MulOrDivExpression, OrExpression, Primary, PrimaryLeftExpr,
-    PrimarySeparator, Program, SimplePrimary, Spanned, Statement, VariableBinding,
+    LessOrGreaterExpression, Literal, MulOrDivExpression, NewObjectExpression, OrExpression,
+    Primary, PrimaryLeftExpr, PrimarySeparator, Program, SimplePrimary, Spanned, Statement,
+    VariableBinding,
 };
 use catla_util::module_path::{ModulePath, Moduled};
 use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
@@ -13,7 +14,9 @@ use std::{mem::swap, sync::Arc};
 
 use crate::{
     error::{TypeError, TypeErrorKind},
-    types::{GenericType, GlobalUserTypeID, GlobalUserTypeSet, ImplementsInfoSet, Type},
+    types::{
+        FunctionTypeInfo, GenericType, GlobalUserTypeID, GlobalUserTypeSet, ImplementsInfoSet, Type,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -622,8 +625,21 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                     .map(|generic| self.resolve_type(generic, user_type_set))
                     .collect();
 
+                let mut new_arguments = std::vec::Vec::with_capacity(function_info.arguments.len());
+                for argument in function_info.arguments.iter() {
+                    new_arguments.push(self.resolve_type(argument, user_type_set));
+                }
+
+                let new_return_type = self.resolve_type(&function_info.return_type, user_type_set);
+
                 Type::Function {
-                    function_info: function_info.clone(),
+                    function_info: Arc::new(FunctionTypeInfo {
+                        module_path: function_info.module_path.clone(),
+                        name: function_info.name.clone(),
+                        generics: function_info.generics.clone(),
+                        arguments: new_arguments,
+                        return_type: new_return_type,
+                    }),
                     generics: Arc::new(generics),
                 }
             }
@@ -639,6 +655,80 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                     .map(|item| self.resolve_type(item, user_type_set))
                     .collect();
                 Type::Tuple(Arc::new(items))
+            }
+            _ => ty.clone(),
+        }
+    }
+
+    pub fn retake_type_variable(&mut self, ty: &Type) -> Type {
+        match ty {
+            Type::UserType {
+                user_type_info,
+                generics,
+            } => {
+                let mut new_generics = std::vec::Vec::with_capacity(generics.len());
+                for generic in generics.iter() {
+                    new_generics.push(self.retake_type_variable(generic));
+                }
+
+                Type::UserType {
+                    user_type_info: *user_type_info,
+                    generics: Arc::new(new_generics),
+                }
+            }
+            Type::Function {
+                function_info,
+                generics,
+            } => {
+                let mut new_generics = std::vec::Vec::with_capacity(generics.len());
+                for generic in generics.iter() {
+                    new_generics.push(self.retake_type_variable(generic));
+                }
+
+                let mut new_arguments = std::vec::Vec::with_capacity(function_info.arguments.len());
+                for argument in function_info.arguments.iter() {
+                    new_arguments.push(self.retake_type_variable(argument));
+                }
+
+                let new_return_type = self.retake_type_variable(&function_info.return_type);
+
+                Type::Function {
+                    function_info: Arc::new(FunctionTypeInfo {
+                        module_path: function_info.module_path.clone(),
+                        name: function_info.name.clone(),
+                        generics: function_info.generics.clone(),
+                        arguments: new_arguments,
+                        return_type: new_return_type,
+                    }),
+                    generics: Arc::new(new_generics),
+                }
+            }
+            Type::TypeVariable(type_variable_id) => {
+                let type_variable_set_id = self.var_set_map.get(type_variable_id).unwrap();
+                let type_variable_set = &self.type_variable_set_components[type_variable_set_id.0];
+                let resolved_type = type_variable_set
+                    .ty
+                    .as_ref()
+                    .cloned()
+                    .map(|ty| ty.map(|ty| self.retake_type_variable(&ty)));
+
+                let new_type_variable_id = self.create_type_variable_id_with_set();
+                let new_type_variable_set_id = self.var_set_map.get(&new_type_variable_id).unwrap();
+                let new_type_variable_set =
+                    &mut self.type_variable_set_components[new_type_variable_set_id.0];
+
+                new_type_variable_set.ty = resolved_type;
+
+                Type::TypeVariable(new_type_variable_id)
+            }
+            Type::Array(base_type) => Type::Array(Arc::new(self.retake_type_variable(&base_type))),
+            Type::Tuple(items) => {
+                let mut new_items = std::vec::Vec::with_capacity(items.len());
+                for item in items.iter() {
+                    new_items.push(self.retake_type_variable(item));
+                }
+
+                Type::Tuple(Arc::new(new_items))
             }
             _ => ty.clone(),
         }
@@ -1279,7 +1369,7 @@ fn infer_type_for_primary(
                         DefineKind::Import => {
                             match import_map.get(&resolved.define.entity_id).unwrap() {
                                 ImportElement::ModuleAlias { path } => {
-                                    let mut path_name =
+                                    let path_name =
                                         path.iter().cloned().collect::<Vec<_>>().join("::");
 
                                     get_module_import_type(
@@ -1363,14 +1453,202 @@ fn infer_type_for_primary(
             SimplePrimary::This(range) => todo!(),
             SimplePrimary::LargeThis(range) => todo!(),
         },
-        PrimaryLeftExpr::NewObject { new_object } => todo!(),
+        PrimaryLeftExpr::NewObject { new_object } => {
+            fn infer_type_for_new_object_expression(
+                ast: &NewObjectExpression,
+                object_type: Spanned<Type>,
+                type_environment: &mut TypeEnvironment,
+                return_type: &Moduled<Type>,
+                this_type: &Option<Type>,
+                generics: &HashMap<EntityID, Arc<GenericType>>,
+                implements_infos: &ImplementsInfoSet,
+                import_map: &HashMap<EntityID, ImportElement>,
+                entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+                moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
+                name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+                user_type_set: &GlobalUserTypeSet,
+                module_path: &ModulePath,
+                package_resource_set: &PackageResourceSet,
+                errors: &mut std::vec::Vec<TypeError>,
+            ) -> TypeVariableID {
+                match object_type.value.resolve_type_alias(user_type_set) {
+                    Type::UserType {
+                        user_type_info,
+                        generics: _,
+                    } => {
+                        let user_type_info = user_type_set.get(user_type_info);
+                        let user_type_info = user_type_info.read().unwrap();
+
+                        let old_generics = &user_type_info.generics;
+                        let new_generics = (0..old_generics.len())
+                            .map(|_| type_environment.create_type_variable_id_with_set())
+                            .collect::<Vec<_>>();
+
+                        let mut assigned_field_names = HashSet::new();
+                        for field_assign in ast.field_assign.elements.iter() {
+                            let field_name = field_assign.field.value;
+                            let field_type = match user_type_info.element_types.get(field_name) {
+                                Some(field_type) => field_type
+                                    .clone()
+                                    .map(|ty| ty.replace_generics(&old_generics, &new_generics)),
+                                None => {
+                                    let error = TypeError {
+                                        kind: TypeErrorKind::UnknownUserTypeElement,
+                                        span: field_assign.field.span.clone(),
+                                        module_path: module_path.clone(),
+                                    };
+                                    errors.push(error);
+                                    continue;
+                                }
+                            };
+
+                            if let Type::Function {
+                                function_info,
+                                generics: _,
+                            } = &field_type.value
+                            {
+                                if function_info.name.is_none() {
+                                    let error = TypeError {
+                                        kind: TypeErrorKind::NotFieldInFieldAssign,
+                                        span: field_assign.field.span.clone(),
+                                        module_path: module_path.clone(),
+                                    };
+                                    errors.push(error);
+                                }
+                            }
+
+                            let origin_field =
+                                type_environment.create_type_variable_id_with_type(Moduled::new(
+                                    field_type.value,
+                                    user_type_info.module_path.clone(),
+                                    field_type.span.clone(),
+                                ));
+                            let assign_field = infer_type_for_expression(
+                                &field_assign.expression,
+                                true,
+                                type_environment,
+                                return_type,
+                                this_type,
+                                generics,
+                                implements_infos,
+                                import_map,
+                                entity_user_type_map,
+                                moduled_name_type_map,
+                                name_resolved_map,
+                                user_type_set,
+                                module_path,
+                                package_resource_set,
+                                errors,
+                            );
+
+                            type_environment.unify(
+                                origin_field,
+                                assign_field,
+                                user_type_set,
+                                errors,
+                            );
+
+                            assigned_field_names.insert(field_name);
+                        }
+
+                        todo!()
+                    }
+                    _ => {
+                        let error = TypeError {
+                            kind: TypeErrorKind::NotUserTypeInFieldAssign,
+                            span: object_type.span.clone(),
+                            module_path: module_path.clone(),
+                        };
+                        errors.push(error);
+
+                        type_environment.create_type_variable_id_with_type(Moduled::new(
+                            Type::Unknown,
+                            module_path.clone(),
+                            ast.span.clone(),
+                        ))
+                    }
+                }
+            }
+
+            match new_object.path.first() {
+                Some(literal) => match name_resolved_map.get(&EntityID::from(literal)) {
+                    Some(resolved) => todo!(),
+                    None => {
+                        let type_module_path = &new_object.path[..new_object.path.len() - 1];
+                        let type_literal = new_object.path.last().unwrap();
+
+                        let type_module_path_name = type_module_path
+                            .iter()
+                            .map(|literal| literal.value.to_string())
+                            .collect::<Vec<_>>()
+                            .join("::");
+
+                        match package_resource_set.get(&type_module_path_name) {
+                            Some(_) => {
+                                match moduled_name_type_map
+                                    .get(&type_module_path_name)
+                                    .unwrap()
+                                    .get(type_literal.value)
+                                {
+                                    Some(ty) => infer_type_for_new_object_expression(
+                                        new_object,
+                                        Spanned::new(ty.clone(), type_literal.span.clone()),
+                                        type_environment,
+                                        return_type,
+                                        this_type,
+                                        generics,
+                                        implements_infos,
+                                        import_map,
+                                        entity_user_type_map,
+                                        moduled_name_type_map,
+                                        name_resolved_map,
+                                        user_type_set,
+                                        module_path,
+                                        package_resource_set,
+                                        errors,
+                                    ),
+                                    None => {
+                                        let error = TypeError {
+                                            kind: TypeErrorKind::UnknownModuleElementType,
+                                            span: type_literal.span.clone(),
+                                            module_path: module_path.clone(),
+                                        };
+                                        errors.push(error);
+
+                                        type_environment.create_type_variable_id_with_type(
+                                            Moduled::new(
+                                                Type::Unknown,
+                                                module_path.clone(),
+                                                new_object.span.clone(),
+                                            ),
+                                        )
+                                    }
+                                }
+                            }
+                            None => {
+                                type_environment.create_type_variable_id_with_type(Moduled::new(
+                                    Type::Unknown,
+                                    module_path.clone(),
+                                    new_object.span.clone(),
+                                ))
+                            }
+                        }
+                    }
+                },
+                None => type_environment.create_type_variable_id_with_type(Moduled::new(
+                    Type::Unknown,
+                    module_path.clone(),
+                    new_object.span.clone(),
+                )),
+            }
+        }
         PrimaryLeftExpr::NewArray { new_array } => todo!(),
         PrimaryLeftExpr::NewArrayInit { new_array_init } => todo!(),
         PrimaryLeftExpr::If { if_expression } => todo!(),
         PrimaryLeftExpr::Loop { loop_expression } => todo!(),
     };
 
-        let mut last_type_variable_id = first_type_variable_id;
+    let mut last_type_variable_id = first_type_variable_id;
     loop {
         if chain_start_position >= ast.chain.len() {
             break;

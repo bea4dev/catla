@@ -195,6 +195,15 @@ pub enum VariableBinding<'input, 'allocator> {
     },
 }
 
+impl VariableBinding<'_, '_> {
+    pub fn span(&self) -> Range<usize> {
+        match self {
+            VariableBinding::Literal(literal) => literal.span.clone(),
+            VariableBinding::Binding { bindings: _, span } => span.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ThisMutability {
     pub is_mutable: Spanned<bool>,
@@ -260,7 +269,7 @@ pub struct Implements<'input, 'allocator> {
     pub implements: Range<usize>,
     pub generics: Option<GenericsDefine<'input, 'allocator>>,
     pub interface: Result<TypeInfo<'input, 'allocator>, ()>,
-    pub target: Result<TypeInfo<'input, 'allocator>, ()>,
+    pub concrete: Result<TypeInfo<'input, 'allocator>, ()>,
     pub where_clause: Option<WhereClause<'input, 'allocator>>,
     pub block: Result<Block<'input, 'allocator>, ()>,
     pub span: Range<usize>,

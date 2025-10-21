@@ -483,7 +483,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                     );
                 }
 
-                if let Ok(target) = &implements.target {
+                if let Ok(target) = &implements.concrete {
                     resolve_name_for_type_info(
                         target,
                         environment,

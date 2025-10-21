@@ -53,25 +53,7 @@ let c = b
         let mut generics = HashMap::new();
         let import_map = HashMap::new();
         let moduled_name_user_type_map = HashMap::new();
-        collect_module_element_type_for_program(
-            ast.ast(),
-            &None,
-            &mut None,
-            &mut generics,
-            &mut module_element_entity_type_map,
-            &mut module_element_name_type_map,
-            &mut implements_infos,
-            &import_map,
-            &module_entity_user_type_map,
-            &moduled_name_user_type_map,
-            &name_resolved_map,
-            &user_type_set,
-            &module_path,
-            &mut errors,
-        );
-
         let mut module_entity_type_map = HashMap::new();
-        module_entity_type_map.extend(module_element_entity_type_map);
         module_entity_type_map.extend(module_entity_user_type_map.iter().map(
             |(entity_id, user_type_id)| {
                 (
@@ -83,6 +65,24 @@ let c = b
                 )
             },
         ));
+        collect_module_element_type_for_program(
+            ast.ast(),
+            &None,
+            &mut None,
+            &mut generics,
+            &mut module_element_entity_type_map,
+            &mut module_element_name_type_map,
+            &mut implements_infos,
+            &import_map,
+            &module_entity_type_map,
+            &moduled_name_user_type_map,
+            &name_resolved_map,
+            &user_type_set,
+            &module_path,
+            &mut errors,
+        );
+
+        module_entity_type_map.extend(module_element_entity_type_map);
 
         let moduled_name_type_map = HashMap::new();
         let package_resource_set = PackageResourceSet::new();

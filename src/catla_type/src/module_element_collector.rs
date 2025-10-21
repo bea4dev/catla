@@ -29,8 +29,8 @@ pub fn collect_module_element_type_for_program(
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -191,30 +191,27 @@ pub fn collect_module_element_type_for_program(
                             }
                         }
                         Define::UserType(user_type_define) => {
-                            let user_type_id = *entity_user_type_map
+                            let user_type = entity_user_type_map
                                 .get(&EntityID::from(user_type_define))
-                                .unwrap();
+                                .unwrap()
+                                .clone();
 
-                            let this_type = Some(Type::UserType {
+                            let Type::UserType {
                                 user_type_info: user_type_id,
-                                generics: Arc::new(Vec::new()),
-                            });
+                                generics: _,
+                            } = user_type
+                            else {
+                                unreachable!()
+                            };
 
-                            module_element_entity_type_map.insert(
-                                user_type_define.into(),
-                                Type::UserType {
-                                    user_type_info: user_type_id,
-                                    generics: Arc::new(Vec::new()),
-                                },
-                            );
+                            let this_type = Some(user_type.clone());
+
+                            module_element_entity_type_map
+                                .insert(user_type_define.into(), user_type.clone());
+
                             if let Ok(name) = &user_type_define.name {
-                                module_element_name_type_map.insert(
-                                    name.value.to_string(),
-                                    Type::UserType {
-                                        user_type_info: user_type_id,
-                                        generics: Arc::new(Vec::new()),
-                                    },
-                                );
+                                module_element_name_type_map
+                                    .insert(name.value.to_string(), user_type);
                             }
 
                             if let Some(generics_define) = &user_type_define.generics {
@@ -353,10 +350,20 @@ pub fn collect_module_element_type_for_program(
                                 );
                             }
 
-                            let user_type_id = *entity_user_type_map
+                            let user_type = entity_user_type_map
                                 .get(&EntityID::from(type_alias))
-                                .unwrap();
-                            let user_type_info = user_type_set.get(user_type_id);
+                                .unwrap()
+                                .clone();
+
+                            let Type::UserType {
+                                user_type_info,
+                                generics: _,
+                            } = user_type
+                            else {
+                                unreachable!()
+                            };
+
+                            let user_type_info = user_type_set.get(user_type_info);
                             let mut user_type_info = user_type_info.write().unwrap();
 
                             let alias_type = type_alias
@@ -463,7 +470,7 @@ pub fn collect_module_element_type_for_program(
                     .unwrap_or(Spanned::new(Type::Unknown, implements.span.clone()));
 
                 let concrete = implements
-                    .target
+                    .concrete
                     .as_ref()
                     .map(|concrete_type| {
                         Spanned::new(
@@ -545,8 +552,8 @@ fn get_function_type(
     this_type: &Option<Type>,
     generics: &mut HashMap<EntityID, Arc<GenericType>>,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -647,8 +654,8 @@ fn collect_generics_define(
     this_type: &Option<Type>,
     generics: &mut HashMap<EntityID, Arc<GenericType>>,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -694,8 +701,8 @@ pub(crate) fn get_type(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -779,8 +786,8 @@ fn get_base_type(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -808,10 +815,7 @@ fn get_base_type(
                                 .unwrap()
                                 .get(element)
                             {
-                                Some(user_type) => Type::UserType {
-                                    user_type_info: *user_type,
-                                    generics: Arc::new(Vec::new()),
-                                },
+                                Some(user_type) => user_type.clone(),
                                 None => {
                                     let error = TypeError {
                                         kind: TypeErrorKind::NotFoundModuleElementType,
@@ -845,10 +849,7 @@ fn get_base_type(
                                         match module_element_type_map
                                             .get(ast.path.last().unwrap().value)
                                         {
-                                            Some(user_type) => Type::UserType {
-                                                user_type_info: *user_type,
-                                                generics: Arc::new(Vec::new()),
-                                            },
+                                            Some(user_type) => user_type.clone(),
                                             None => {
                                                 let error = TypeError {
                                                     kind: TypeErrorKind::NotFoundModuleElementType,
@@ -884,15 +885,10 @@ fn get_base_type(
                 DefineKind::Function => Type::Unknown,
                 DefineKind::Variable => Type::Unknown,
                 DefineKind::UserType => match ast.path.len() {
-                    1 => {
-                        let user_type_id = *entity_user_type_map
-                            .get(&resolved.define.entity_id)
-                            .unwrap();
-                        Type::UserType {
-                            user_type_info: user_type_id,
-                            generics: Arc::new(Vec::new()),
-                        }
-                    }
+                    1 => entity_user_type_map
+                        .get(&resolved.define.entity_id)
+                        .unwrap()
+                        .clone(),
                     _ => Type::Unknown,
                 },
                 DefineKind::Generics => match ast.path.len() {
@@ -938,10 +934,7 @@ fn get_base_type(
                     match moduled_name_user_type_map.get(&module_name) {
                         Some(module_element_map) => {
                             match module_element_map.get(ast.path.last().unwrap().value) {
-                                Some(user_type) => Type::UserType {
-                                    user_type_info: *user_type,
-                                    generics: Arc::new(Vec::new()),
-                                },
+                                Some(user_type) => user_type.clone(),
                                 None => {
                                     let error = TypeError {
                                         kind: TypeErrorKind::NotFoundModuleElementType,
@@ -1015,8 +1008,8 @@ fn collect_where_clause(
     this_type: &Option<Type>,
     generics: &mut HashMap<EntityID, Arc<GenericType>>,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -1075,8 +1068,8 @@ fn collect_module_element_type_for_expression(
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -1169,8 +1162,8 @@ macro_rules! collect_module_element_type_for_2op {
             module_element_name_type_map: &mut HashMap<String, Type>,
             implements_infos: &mut ImplementsInfoSet,
             import_map: &HashMap<EntityID, ImportElement>,
-            entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-            moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+            entity_user_type_map: &HashMap<EntityID, Type>,
+            moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
             name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
             user_type_set: &GlobalUserTypeSet,
             module_path: &ModulePath,
@@ -1216,8 +1209,8 @@ macro_rules! collect_module_element_type_for_2op {
             module_element_name_type_map: &mut HashMap<String, Type>,
             implements_infos: &mut ImplementsInfoSet,
             import_map: &HashMap<EntityID, ImportElement>,
-            entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-            moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+            entity_user_type_map: &HashMap<EntityID, Type>,
+            moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
             name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
             user_type_set: &GlobalUserTypeSet,
             module_path: &ModulePath,
@@ -1304,8 +1297,8 @@ fn collect_module_element_type_for_factor(
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -1336,8 +1329,8 @@ fn collect_module_element_type_for_primary(
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -1382,8 +1375,8 @@ fn collect_module_element_type_for_primary_left(
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -1659,8 +1652,8 @@ fn collect_module_element_type_for_primary_right(
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,
@@ -1712,8 +1705,8 @@ fn collect_module_element_type_for_mapping_operator(
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
-    moduled_name_user_type_map: &HashMap<String, HashMap<String, GlobalUserTypeID>>,
+    entity_user_type_map: &HashMap<EntityID, Type>,
+    moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
     module_path: &ModulePath,

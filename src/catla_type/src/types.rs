@@ -435,6 +435,7 @@ impl ImplementsInfoSet {
         user_type_set: &GlobalUserTypeSet,
         type_environment: &mut TypeEnvironment,
     ) -> ImplementsCheckResult {
+        println!("1");
         for implements_info in self.map.values() {
             let result = implements_info.is_implements(
                 concrete.clone(),

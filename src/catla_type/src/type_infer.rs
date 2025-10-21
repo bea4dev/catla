@@ -6,7 +6,7 @@ use catla_parser::ast::{
     AddOrSubExpression, AndExpression, Define, EntityID, EqualsExpression, Expression, Factor,
     LessOrGreaterExpression, Literal, MulOrDivExpression, NewObjectExpression, OrExpression,
     Primary, PrimaryLeftExpr, PrimarySeparator, Program, SimplePrimary, Spanned, Statement,
-    VariableBinding,
+    StatementAttribute, VariableBinding,
 };
 use catla_util::module_path::{ModulePath, Moduled};
 use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
@@ -15,7 +15,8 @@ use std::{mem::swap, sync::Arc};
 use crate::{
     error::{TypeError, TypeErrorKind},
     types::{
-        FunctionTypeInfo, GenericType, GlobalUserTypeID, GlobalUserTypeSet, ImplementsInfoSet, Type,
+        FunctionTypeInfo, GenericType, GlobalUserTypeID, GlobalUserTypeSet, ImplementsCheckResult,
+        ImplementsInfoSet, Type,
     },
 };
 
@@ -117,6 +118,10 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
     }
 
     fn create_type_variable_id_with_type(&mut self, ty: Moduled<Type>) -> TypeVariableID {
+        if let Type::TypeVariable(type_variable_id) = &ty.value {
+            return *type_variable_id;
+        }
+
         let type_variable_id = self.create_type_variable_id_without_set();
         let type_variable_set_id = self.create_variable_set(type_variable_id);
         let type_variable_set = &mut self.type_variable_set_components[type_variable_set_id.0];
@@ -300,6 +305,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         match (&left.value, &right.value) {
             (Type::TypeVariable(left_variable_id), Type::TypeVariable(right_variable_id)) => {
                 self.unify(*left_variable_id, *right_variable_id, user_type_set, errors);
+                return;
             }
             (Type::TypeVariable(left_variable_id), _) => {
                 let left_type = self.get_type_variable_type(*left_variable_id);
@@ -337,6 +343,8 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                         variable_set.ty = Some(right.clone());
                     }
                 }
+
+                return;
             }
             (_, Type::TypeVariable(right_variable_id)) => {
                 let right_type = self.get_type_variable_type(*right_variable_id);
@@ -372,6 +380,8 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                         variable_set.ty = Some(left.clone());
                     }
                 }
+
+                return;
             }
             _ => {}
         }
@@ -538,6 +548,169 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         self.unify_type(left, right, user_type_set, &mut errors);
 
         errors.is_empty()
+    }
+
+    fn borrow_type_variable_set(&self, type_variable_id: TypeVariableID) -> &TypeVariableSet {
+        let type_variable_set_id = self.var_set_map.get(&type_variable_id).unwrap();
+        &self.type_variable_set_components[type_variable_set_id.0]
+    }
+
+    fn borrow_mut_type_variable_set(
+        &mut self,
+        type_variable_id: TypeVariableID,
+    ) -> &mut TypeVariableSet<'type_env_alloc> {
+        let type_variable_set_id = self.var_set_map.get(&type_variable_id).unwrap();
+        &mut self.type_variable_set_components[type_variable_set_id.0]
+    }
+
+    fn get_user_type_element(
+        &mut self,
+        type_variable_id: Spanned<TypeVariableID>,
+        literal: &Literal,
+        implements_infos: &ImplementsInfoSet,
+        user_type_set: &GlobalUserTypeSet,
+        errors: &mut std::vec::Vec<TypeError>,
+    ) -> TypeVariableID {
+        let mut canditates = Vec::new();
+
+        if let Some(ty) = self
+            .borrow_type_variable_set(type_variable_id.value)
+            .ty
+            .as_ref()
+            .cloned()
+        {
+            if let Type::UserType {
+                user_type_info,
+                generics,
+            } = &ty.value
+            {
+                let user_type_info = user_type_set.get(*user_type_info);
+                let user_type_info = user_type_info.read().unwrap();
+
+                let old_generics = &user_type_info.generics;
+                let new_generics = generics;
+
+                if let Some(element_type) = user_type_info.element_types.get(literal.value) {
+                    canditates.push(Moduled::new(
+                        element_type
+                            .value
+                            .replace_generics(&old_generics, &new_generics),
+                        user_type_info.module_path.clone(),
+                        element_type.span.clone(),
+                    ));
+                }
+            }
+        }
+
+        let results = implements_infos.find_implements_for(
+            Moduled::new(
+                Type::TypeVariable(type_variable_id.value),
+                self.module_path.clone(),
+                type_variable_id.span.clone(),
+            ),
+            user_type_set,
+            self,
+        );
+
+        let mut concretes = Vec::new();
+
+        for (implements_info, result) in results {
+            match result {
+                ImplementsCheckResult::NoImplementsFound => unreachable!(),
+                ImplementsCheckResult::Conflicts { conflicts } => {
+                    let error = TypeError {
+                        kind: TypeErrorKind::ConflictedImplementInTypeInfer {
+                            conflicts: conflicts
+                                .into_iter()
+                                .map(|conflict| {
+                                    conflict
+                                        .map(|ty| ty.to_display_string(user_type_set, Some(self)))
+                                })
+                                .collect(),
+                        },
+                        span: literal.span.clone(),
+                        module_path: self.module_path.clone(),
+                    };
+                    errors.push(error);
+                }
+                ImplementsCheckResult::Success {
+                    new_concrete,
+                    new_interface: _,
+                    new_generics,
+                } => {
+                    let Some(element_type) = implements_info.element_type.get(literal.value) else {
+                        continue;
+                    };
+
+                    self.test_unify_type(
+                        Moduled::new(
+                            Type::TypeVariable(type_variable_id.value),
+                            self.module_path.clone(),
+                            type_variable_id.span.clone(),
+                        ),
+                        new_concrete.clone(),
+                        user_type_set,
+                    );
+
+                    concretes.push(new_concrete);
+
+                    let old_generics = &implements_info.generics_define;
+
+                    let element_type = element_type
+                        .value
+                        .replace_generics(&old_generics, &new_generics);
+
+                    canditates.push(Moduled::new(
+                        element_type,
+                        self.module_path.clone(),
+                        literal.span.clone(),
+                    ));
+                }
+            }
+        }
+
+        match canditates.len() {
+            0 => {
+                let error = TypeError {
+                    kind: TypeErrorKind::NoElement,
+                    span: literal.span.clone(),
+                    module_path: self.module_path.clone(),
+                };
+                errors.push(error);
+
+                self.create_type_variable_id_with_type(Moduled::new(
+                    Type::Unknown,
+                    self.module_path.clone(),
+                    literal.span.clone(),
+                ))
+            }
+            1 => self.create_type_variable_id_with_type(Moduled::new(
+                canditates.first().unwrap().value.clone(),
+                self.module_path.clone(),
+                literal.span.clone(),
+            )),
+            _ => {
+                let error = TypeError {
+                    kind: TypeErrorKind::MultiImplements {
+                        concretes: concretes
+                            .into_iter()
+                            .map(|concrete| {
+                                concrete.map(|ty| ty.to_display_string(user_type_set, Some(self)))
+                            })
+                            .collect(),
+                    },
+                    span: literal.span.clone(),
+                    module_path: self.module_path.clone(),
+                };
+                errors.push(error);
+
+                self.create_type_variable_id_with_type(Moduled::new(
+                    canditates.first().unwrap().value.clone(),
+                    self.module_path.clone(),
+                    literal.span.clone(),
+                ))
+            }
+        }
     }
 
     pub fn create_instance(&mut self, ty: &Type) -> Type {
@@ -792,7 +965,7 @@ pub fn infer_type(
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -806,13 +979,14 @@ pub fn infer_type(
     infer_type_for_program(
         ast,
         false,
+        false,
         &mut type_environment,
         &Moduled::new(Type::Unit, module_path.clone(), ast.span.clone()),
         &None,
         generics,
         implements_infos,
         import_map,
-        entity_user_type_map,
+        module_entity_type_map,
         moduled_name_type_map,
         name_resolved_map,
         user_type_set,
@@ -827,13 +1001,14 @@ pub fn infer_type(
 fn infer_type_for_program(
     ast: &Program,
     as_expression: bool,
+    in_user_type_define: bool,
     type_environment: &mut TypeEnvironment,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -853,7 +1028,7 @@ fn infer_type_for_program(
                     generics,
                     implements_infos,
                     import_map,
-                    entity_user_type_map,
+                    module_entity_type_map,
                     moduled_name_type_map,
                     name_resolved_map,
                     user_type_set,
@@ -871,7 +1046,7 @@ fn infer_type_for_program(
                         generics,
                         implements_infos,
                         import_map,
-                        entity_user_type_map,
+                        module_entity_type_map,
                         moduled_name_type_map,
                         name_resolved_map,
                         user_type_set,
@@ -894,44 +1069,73 @@ fn infer_type_for_program(
                 if let Ok(define) = &define_with_attribute.define {
                     match define {
                         Define::Function(function_define) => todo!(),
-                        Define::UserType(user_type_define) => todo!(),
-                        Define::Variable(variable_define) => {
-                            let binding_id = match &variable_define.binding {
-                                Ok(binding) => infer_type_for_variable_binding(
-                                    binding,
-                                    type_environment,
-                                    module_path,
-                                ),
-                                Err(_) => type_environment.create_type_variable_id_with_set(),
-                            };
-
-                            let expression_id = match &variable_define.expression {
-                                Some(expression) => infer_type_for_expression(
-                                    expression,
-                                    as_expression,
+                        Define::UserType(user_type_define) => {
+                            if let Ok(block) = &user_type_define.block {
+                                infer_type_for_program(
+                                    block.program,
+                                    false,
+                                    true,
                                     type_environment,
                                     return_type,
                                     this_type,
                                     generics,
                                     implements_infos,
                                     import_map,
-                                    entity_user_type_map,
+                                    module_entity_type_map,
                                     moduled_name_type_map,
                                     name_resolved_map,
                                     user_type_set,
                                     module_path,
                                     package_resource_set,
                                     errors,
-                                ),
-                                None => type_environment.create_type_variable_id_with_set(),
-                            };
+                                );
+                            }
+                        }
+                        Define::Variable(variable_define) => {
+                            let required_type_infer = !define_with_attribute
+                                .attribute
+                                .iter()
+                                .any(|attribute| attribute.value == StatementAttribute::Static)
+                                && !in_user_type_define;
 
-                            type_environment.unify(
-                                binding_id,
-                                expression_id,
-                                user_type_set,
-                                errors,
-                            );
+                            if required_type_infer {
+                                let binding_id = match &variable_define.binding {
+                                    Ok(binding) => infer_type_for_variable_binding(
+                                        binding,
+                                        type_environment,
+                                        module_path,
+                                    ),
+                                    Err(_) => type_environment.create_type_variable_id_with_set(),
+                                };
+
+                                let expression_id = match &variable_define.expression {
+                                    Some(expression) => infer_type_for_expression(
+                                        expression,
+                                        as_expression,
+                                        type_environment,
+                                        return_type,
+                                        this_type,
+                                        generics,
+                                        implements_infos,
+                                        import_map,
+                                        module_entity_type_map,
+                                        moduled_name_type_map,
+                                        name_resolved_map,
+                                        user_type_set,
+                                        module_path,
+                                        package_resource_set,
+                                        errors,
+                                    ),
+                                    None => type_environment.create_type_variable_id_with_set(),
+                                };
+
+                                type_environment.unify(
+                                    binding_id,
+                                    expression_id,
+                                    user_type_set,
+                                    errors,
+                                );
+                            }
                         }
                         Define::TypeAlias(_) => {}
                     }
@@ -980,7 +1184,7 @@ fn infer_type_for_expression(
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -1000,7 +1204,7 @@ fn infer_type_for_expression(
                     generics,
                     implements_infos,
                     import_map,
-                    entity_user_type_map,
+                    module_entity_type_map,
                     moduled_name_type_map,
                     name_resolved_map,
                     user_type_set,
@@ -1043,7 +1247,7 @@ fn infer_type_for_expression(
             generics,
             implements_infos,
             import_map,
-            entity_user_type_map,
+            module_entity_type_map,
             moduled_name_type_map,
             name_resolved_map,
             user_type_set,
@@ -1063,7 +1267,7 @@ fn infer_type_for_or_expression(
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -1081,7 +1285,7 @@ fn infer_type_for_or_expression(
             generics,
             implements_infos,
             import_map,
-            entity_user_type_map,
+            module_entity_type_map,
             moduled_name_type_map,
             name_resolved_map,
             user_type_set,
@@ -1103,7 +1307,7 @@ fn infer_type_for_and_expression(
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -1121,7 +1325,7 @@ fn infer_type_for_and_expression(
             generics,
             implements_infos,
             import_map,
-            entity_user_type_map,
+            module_entity_type_map,
             moduled_name_type_map,
             name_resolved_map,
             user_type_set,
@@ -1143,7 +1347,7 @@ fn infer_type_for_equals_expression(
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -1161,7 +1365,7 @@ fn infer_type_for_equals_expression(
             generics,
             implements_infos,
             import_map,
-            entity_user_type_map,
+            module_entity_type_map,
             moduled_name_type_map,
             name_resolved_map,
             user_type_set,
@@ -1183,7 +1387,7 @@ fn infer_type_for_less_or_greater_expression(
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -1201,7 +1405,7 @@ fn infer_type_for_less_or_greater_expression(
             generics,
             implements_infos,
             import_map,
-            entity_user_type_map,
+            module_entity_type_map,
             moduled_name_type_map,
             name_resolved_map,
             user_type_set,
@@ -1223,7 +1427,7 @@ fn infer_type_for_add_or_sub_expression(
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -1241,7 +1445,7 @@ fn infer_type_for_add_or_sub_expression(
             generics,
             implements_infos,
             import_map,
-            entity_user_type_map,
+            module_entity_type_map,
             moduled_name_type_map,
             name_resolved_map,
             user_type_set,
@@ -1263,7 +1467,7 @@ fn infer_type_for_mul_or_div_expression(
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -1281,7 +1485,7 @@ fn infer_type_for_mul_or_div_expression(
             generics,
             implements_infos,
             import_map,
-            entity_user_type_map,
+            module_entity_type_map,
             moduled_name_type_map,
             name_resolved_map,
             user_type_set,
@@ -1303,7 +1507,7 @@ fn infer_type_for_factor(
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -1323,7 +1527,7 @@ fn infer_type_for_factor(
                 generics,
                 implements_infos,
                 import_map,
-                entity_user_type_map,
+                module_entity_type_map,
                 moduled_name_type_map,
                 name_resolved_map,
                 user_type_set,
@@ -1345,7 +1549,7 @@ fn infer_type_for_primary(
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
-    entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
     user_type_set: &GlobalUserTypeSet,
@@ -1420,7 +1624,6 @@ fn infer_type_for_primary(
                             .get_or_allocate_variable_for_entity(resolved.define.entity_id),
                         DefineKind::UserType => todo!(),
                         DefineKind::Generics => todo!(),
-                        DefineKind::TypeAlias => todo!(),
                     },
                     None => match package_resource_set.get(literal.value) {
                         Some(_) => get_module_import_type(
@@ -1463,7 +1666,7 @@ fn infer_type_for_primary(
                 generics: &HashMap<EntityID, Arc<GenericType>>,
                 implements_infos: &ImplementsInfoSet,
                 import_map: &HashMap<EntityID, ImportElement>,
-                entity_user_type_map: &HashMap<EntityID, GlobalUserTypeID>,
+                module_entity_type_map: &HashMap<EntityID, Type>,
                 moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
                 name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
                 user_type_set: &GlobalUserTypeSet,
@@ -1473,16 +1676,20 @@ fn infer_type_for_primary(
             ) -> TypeVariableID {
                 match object_type.value.resolve_type_alias(user_type_set) {
                     Type::UserType {
-                        user_type_info,
+                        user_type_info: user_type_id,
                         generics: _,
                     } => {
-                        let user_type_info = user_type_set.get(user_type_info);
+                        let user_type_info = user_type_set.get(user_type_id);
                         let user_type_info = user_type_info.read().unwrap();
 
                         let old_generics = &user_type_info.generics;
                         let new_generics = (0..old_generics.len())
-                            .map(|_| type_environment.create_type_variable_id_with_set())
-                            .collect::<Vec<_>>();
+                            .map(|_| {
+                                Type::TypeVariable(
+                                    type_environment.create_type_variable_id_with_set(),
+                                )
+                            })
+                            .collect::<std::vec::Vec<_>>();
 
                         let mut assigned_field_names = HashSet::new();
                         for field_assign in ast.field_assign.elements.iter() {
@@ -1532,7 +1739,7 @@ fn infer_type_for_primary(
                                 generics,
                                 implements_infos,
                                 import_map,
-                                entity_user_type_map,
+                                module_entity_type_map,
                                 moduled_name_type_map,
                                 name_resolved_map,
                                 user_type_set,
@@ -1551,11 +1758,18 @@ fn infer_type_for_primary(
                             assigned_field_names.insert(field_name);
                         }
 
-                        todo!()
+                        type_environment.create_type_variable_id_with_type(Moduled::new(
+                            Type::UserType {
+                                user_type_info: user_type_id,
+                                generics: Arc::new(new_generics),
+                            },
+                            module_path.clone(),
+                            ast.span.clone(),
+                        ))
                     }
                     _ => {
                         let error = TypeError {
-                            kind: TypeErrorKind::NotUserTypeInFieldAssign,
+                            kind: TypeErrorKind::NotUserTypeInNewObjectExpr,
                             span: object_type.span.clone(),
                             module_path: module_path.clone(),
                         };
@@ -1572,7 +1786,210 @@ fn infer_type_for_primary(
 
             match new_object.path.first() {
                 Some(literal) => match name_resolved_map.get(&EntityID::from(literal)) {
-                    Some(resolved) => todo!(),
+                    Some(resolved) => match resolved.define.kind {
+                        DefineKind::Import => {
+                            match new_object.path.len() {
+                                1 => match import_map.get(&resolved.define.entity_id).unwrap() {
+                                    ImportElement::ModuleElement { path, element } => {
+                                        let module_path_name =
+                                            path.iter().cloned().collect::<Vec<_>>().join("::");
+                                        let ty = moduled_name_type_map
+                                            .get(&module_path_name)
+                                            .unwrap()
+                                            .get(element)
+                                            .unwrap();
+
+                                        infer_type_for_new_object_expression(
+                                            new_object,
+                                            Spanned::new(ty.clone(), literal.span.clone()),
+                                            type_environment,
+                                            return_type,
+                                            this_type,
+                                            generics,
+                                            implements_infos,
+                                            import_map,
+                                            module_entity_type_map,
+                                            moduled_name_type_map,
+                                            name_resolved_map,
+                                            user_type_set,
+                                            module_path,
+                                            package_resource_set,
+                                            errors,
+                                        )
+                                    }
+                                    _ => {
+                                        let error = TypeError {
+                                            kind: TypeErrorKind::UnknownModuleElementType,
+                                            span: literal.span.clone(),
+                                            module_path: module_path.clone(),
+                                        };
+                                        errors.push(error);
+
+                                        type_environment.create_type_variable_id_with_type(
+                                            Moduled::new(
+                                                Type::Unknown,
+                                                module_path.clone(),
+                                                literal.span.clone(),
+                                            ),
+                                        )
+                                    }
+                                },
+                                _ => match import_map.get(&resolved.define.entity_id).unwrap() {
+                                    ImportElement::ModuleAlias { path } => {
+                                        let module_path_name = path
+                                            .iter()
+                                            .cloned()
+                                            .chain(
+                                                new_object.path[..new_object.path.len() - 1]
+                                                    .iter()
+                                                    .map(|path| path.value.to_string()),
+                                            )
+                                            .collect::<Vec<_>>()
+                                            .join("::");
+
+                                        match moduled_name_type_map.get(&module_path_name) {
+                                            Some(name_type_map) => {
+                                                match name_type_map
+                                                    .get(new_object.path.last().unwrap().value)
+                                                {
+                                                    Some(ty) => {
+                                                        infer_type_for_new_object_expression(
+                                                            new_object,
+                                                            Spanned::new(
+                                                                ty.clone(),
+                                                                new_object
+                                                                    .path
+                                                                    .last()
+                                                                    .unwrap()
+                                                                    .span
+                                                                    .clone(),
+                                                            ),
+                                                            type_environment,
+                                                            return_type,
+                                                            this_type,
+                                                            generics,
+                                                            implements_infos,
+                                                            import_map,
+                                                            module_entity_type_map,
+                                                            moduled_name_type_map,
+                                                            name_resolved_map,
+                                                            user_type_set,
+                                                            module_path,
+                                                            package_resource_set,
+                                                            errors,
+                                                        )
+                                                    }
+                                                    None => {
+                                                        let error = TypeError {
+                                                        kind: TypeErrorKind::UnknownModuleElementType,
+                                                        span: new_object.path.last().unwrap().span.clone(),
+                                                        module_path: module_path.clone(),
+                                                    };
+                                                        errors.push(error);
+
+                                                        type_environment
+                                                            .create_type_variable_id_with_type(
+                                                                Moduled::new(
+                                                                    Type::Unknown,
+                                                                    module_path.clone(),
+                                                                    new_object
+                                                                        .path
+                                                                        .last()
+                                                                        .unwrap()
+                                                                        .span
+                                                                        .clone(),
+                                                                ),
+                                                            )
+                                                    }
+                                                }
+                                            }
+                                            None => type_environment
+                                                .create_type_variable_id_with_type(Moduled::new(
+                                                    Type::Unknown,
+                                                    module_path.clone(),
+                                                    new_object.span.clone(),
+                                                )),
+                                        }
+                                    }
+                                    _ => {
+                                        let error = TypeError {
+                                            kind: TypeErrorKind::UnknownModuleElementType,
+                                            span: new_object.path.last().unwrap().span.clone(),
+                                            module_path: module_path.clone(),
+                                        };
+                                        errors.push(error);
+
+                                        type_environment.create_type_variable_id_with_type(
+                                            Moduled::new(
+                                                Type::Unknown,
+                                                module_path.clone(),
+                                                new_object.path.last().unwrap().span.clone(),
+                                            ),
+                                        )
+                                    }
+                                },
+                            }
+                        }
+                        DefineKind::UserType => match new_object.path.len() {
+                            1 => {
+                                let ty = module_entity_type_map
+                                    .get(&resolved.define.entity_id)
+                                    .unwrap();
+
+                                infer_type_for_new_object_expression(
+                                    new_object,
+                                    Spanned::new(
+                                        ty.clone(),
+                                        new_object.path.first().unwrap().span.clone(),
+                                    ),
+                                    type_environment,
+                                    return_type,
+                                    this_type,
+                                    generics,
+                                    implements_infos,
+                                    import_map,
+                                    module_entity_type_map,
+                                    moduled_name_type_map,
+                                    name_resolved_map,
+                                    user_type_set,
+                                    module_path,
+                                    package_resource_set,
+                                    errors,
+                                )
+                            }
+                            _ => {
+                                let first_path = new_object.path.first().unwrap();
+                                let last_path = new_object.path.last().unwrap();
+
+                                let error = TypeError {
+                                    kind: TypeErrorKind::ExtraUserTypePath,
+                                    span: first_path.span.start..last_path.span.end,
+                                    module_path: module_path.clone(),
+                                };
+                                errors.push(error);
+
+                                type_environment.create_type_variable_id_with_type(Moduled::new(
+                                    Type::Unknown,
+                                    module_path.clone(),
+                                    new_object.path.last().unwrap().span.clone(),
+                                ))
+                            }
+                        },
+                        _ => {
+                            let error = TypeError {
+                                kind: TypeErrorKind::NotUserTypeInNewObjectExpr,
+                                span: literal.span.clone(),
+                                module_path: module_path.clone(),
+                            };
+                            errors.push(error);
+
+                            type_environment.create_type_variable_id_with_type(Moduled::new(
+                                Type::Unknown,
+                                module_path.clone(),
+                                new_object.path.last().unwrap().span.clone(),
+                            ))
+                        }
+                    },
                     None => {
                         let type_module_path = &new_object.path[..new_object.path.len() - 1];
                         let type_literal = new_object.path.last().unwrap();
@@ -1599,7 +2016,7 @@ fn infer_type_for_primary(
                                         generics,
                                         implements_infos,
                                         import_map,
-                                        entity_user_type_map,
+                                        module_entity_type_map,
                                         moduled_name_type_map,
                                         name_resolved_map,
                                         user_type_set,
@@ -1657,7 +2074,9 @@ fn infer_type_for_primary(
         let chain = &ast.chain[chain_start_position];
         chain_start_position += 1;
 
-        if let Some(second) = &chain.second {}
+        if let Some(second) = &chain.second {
+            let element_type = type_environment.get_user_type_element(last_type_variable_id, literal, implements_infos, user_type_set, errors)
+        }
     }
 
     last_type_variable_id

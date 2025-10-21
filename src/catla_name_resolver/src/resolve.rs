@@ -134,7 +134,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                 let define = DefineInfo {
                                     entity_id: type_alias.into(),
                                     span: name.span.clone(),
-                                    kind: DefineKind::TypeAlias,
+                                    kind: DefineKind::UserType,
                                 };
                                 components.define(
                                     environment,

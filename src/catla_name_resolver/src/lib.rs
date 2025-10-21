@@ -193,7 +193,6 @@ pub enum DefineKind {
     Variable,
     UserType,
     Generics,
-    TypeAlias,
 }
 
 #[derive(Debug, Clone)]

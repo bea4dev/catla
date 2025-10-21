@@ -6,7 +6,7 @@ pub mod user_type_collector;
 
 #[cfg(test)]
 mod test {
-    use std::path::Path;
+    use std::{path::Path, sync::Arc};
 
     use catla_import::resource::PackageResourceSet;
     use catla_name_resolver::resolve_name;
@@ -17,7 +17,7 @@ mod test {
     use crate::{
         module_element_collector::collect_module_element_type_for_program,
         type_infer::infer_type,
-        types::{GlobalUserTypeSet, ImplementsInfoSet},
+        types::{GlobalUserTypeSet, ImplementsInfoSet, Type},
         user_type_collector::collect_user_type_for_program,
     };
 
@@ -34,13 +34,13 @@ let c = b
         let (name_resolved_map, errors) = resolve_name(ast.ast(), &Vec::new(), &HashMap::new());
         dbg!(errors);
 
-        let mut module_entity_type_map = HashMap::new();
+        let mut module_entity_user_type_map = HashMap::new();
         let mut module_name_type_map = HashMap::new();
         let user_type_set = GlobalUserTypeSet::new();
         let module_path = ModulePath::new(["test"].into_iter(), Path::new("test.catla"));
         collect_user_type_for_program(
             ast.ast(),
-            &mut module_entity_type_map,
+            &mut module_entity_user_type_map,
             &mut module_name_type_map,
             &user_type_set,
             &module_path,
@@ -62,13 +62,27 @@ let c = b
             &mut module_element_name_type_map,
             &mut implements_infos,
             &import_map,
-            &module_entity_type_map,
+            &module_entity_user_type_map,
             &moduled_name_user_type_map,
             &name_resolved_map,
             &user_type_set,
             &module_path,
             &mut errors,
         );
+
+        let mut module_entity_type_map = HashMap::new();
+        module_entity_type_map.extend(module_element_entity_type_map);
+        module_entity_type_map.extend(module_entity_user_type_map.iter().map(
+            |(entity_id, user_type_id)| {
+                (
+                    *entity_id,
+                    Type::UserType {
+                        user_type_info: *user_type_id,
+                        generics: Arc::new(Vec::new()),
+                    },
+                )
+            },
+        ));
 
         let moduled_name_type_map = HashMap::new();
         let package_resource_set = PackageResourceSet::new();

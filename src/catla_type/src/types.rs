@@ -192,6 +192,10 @@ impl Type {
                     .map(|generic| Type::Generic(generic.clone()))
                     .zip(generics.iter());
 
+                if !user_type_info.is_alias {
+                    return self.clone();
+                }
+
                 let alias_type = user_type_info.element_types.get("").unwrap();
 
                 match &alias_type.value {
@@ -230,7 +234,7 @@ impl Type {
     pub fn replace_generics(
         &self,
         replace_before: &[Arc<GenericType>],
-        replace_after: &[TypeVariableID],
+        replace_after: &[Type],
     ) -> Type {
         match self {
             Type::UserType {
@@ -270,7 +274,7 @@ impl Type {
 
                 let new_function_info = FunctionTypeInfo {
                     module_path: function_info.module_path.clone(),
-                    name: function_info.name.clone(),
+                    name: function_info.name.as_ref().cloned(),
                     generics: function_info.generics.clone(),
                     arguments: new_arguments,
                     return_type: new_return_type,
@@ -286,7 +290,7 @@ impl Type {
                     if before.module_path == generic_type.module_path
                         && before.entity_id == generic_type.entity_id
                     {
-                        return Type::TypeVariable(*after);
+                        return after.clone();
                     }
                 }
                 return self.clone();
@@ -481,7 +485,7 @@ impl ImplementsInfo {
 
         let old_generics = &self.generics_define;
         let new_generics = (0..old_generics.len())
-            .map(|_| type_environment.create_type_variable_id_with_set())
+            .map(|_| Type::TypeVariable(type_environment.create_type_variable_id_with_set()))
             .collect::<Vec<_>>();
 
         let new_concrete = self
@@ -597,6 +601,6 @@ pub enum ImplementsCheckResult {
     Success {
         new_concrete: Moduled<Type>,
         new_interface: Option<Moduled<Type>>,
-        new_generics: Vec<TypeVariableID>,
+        new_generics: Vec<Type>,
     },
 }

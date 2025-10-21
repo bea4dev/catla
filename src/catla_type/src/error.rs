@@ -23,5 +23,13 @@ pub enum TypeErrorKind {
     },
     UnknownUserTypeElement,
     NotFieldInFieldAssign,
-    NotUserTypeInFieldAssign,
+    NotUserTypeInNewObjectExpr,
+    ExtraUserTypePath,
+    ConflictedImplementInTypeInfer {
+        conflicts: Vec<Moduled<String>>,
+    },
+    NoElement,
+    MultiImplements {
+        concretes: Vec<Moduled<String>>,
+    },
 }

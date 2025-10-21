@@ -74,7 +74,7 @@ pub fn collect_user_type_for_program(
                                 let info = UserTypeInfo {
                                     module_path: module_path.clone(),
                                     name: name.clone().map(|str| str.to_string()),
-                                    is_alias: true,
+                                    is_alias: false,
                                     element_types: HashMap::new(),
                                     generics: Vec::new(),
                                     where_clause: Vec::new(),

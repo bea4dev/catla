@@ -899,18 +899,6 @@ fn get_base_type(
                     1 => Type::Generic(generics.get(&resolved.define.entity_id).unwrap().clone()),
                     _ => Type::Unknown,
                 },
-                DefineKind::TypeAlias => match ast.path.len() {
-                    1 => {
-                        let user_type_id = *entity_user_type_map
-                            .get(&resolved.define.entity_id)
-                            .unwrap();
-                        Type::UserType {
-                            user_type_info: user_type_id,
-                            generics: Arc::new(Vec::new()),
-                        }
-                    }
-                    _ => Type::Unknown,
-                },
             },
             None => match ast.path.len() {
                 1 => match first.value {

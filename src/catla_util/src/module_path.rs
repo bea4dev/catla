@@ -8,8 +8,8 @@ use std::{
 
 #[derive(Debug, Clone, Eq)]
 pub struct ModulePath {
-    path: Arc<Vec<String>>,
-    file_path: Arc<PathBuf>,
+    pub path: Arc<Vec<String>>,
+    pub file_path: Arc<PathBuf>,
 }
 
 impl ModulePath {

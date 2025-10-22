@@ -16,8 +16,8 @@ use crate::{
     error::{TypeError, TypeErrorKind},
     module_element_collector::get_type,
     types::{
-        FunctionTypeInfo, GenericType, GlobalUserTypeID, GlobalUserTypeSet, ImplementsCheckResult,
-        ImplementsInfoSet, Type,
+        FunctionTypeInfo, GenericType, GlobalUserTypeSet, ImplementsCheckResult, ImplementsInfoSet,
+        Type,
     },
 };
 

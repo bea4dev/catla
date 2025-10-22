@@ -21,12 +21,12 @@ mod test {
     #[test]
     fn infer_type_test() {
         let source = r"
-interface TestInterface {
-    function test();
+interface TestInterface<T> {
+    function test() -> T;
 }
 
-implements<T> TestInterface for TestClass<T> {
-    function test() {}
+implements<T> TestInterface<T> for TestClass<T> {
+    function test() -> T {}
 }
 
 class TestClass<T> {
@@ -67,15 +67,18 @@ let b = a.test
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("::"),
-            module_name_type_map.iter().map(|(name, user_type_id)| {
-                (
-                    name.clone(),
-                    Type::UserType {
-                        user_type_info: *user_type_id,
-                        generics: Arc::new(Vec::new()),
-                    },
-                )
-            }).collect(),
+            module_name_type_map
+                .iter()
+                .map(|(name, user_type_id)| {
+                    (
+                        name.clone(),
+                        Type::UserType {
+                            user_type_info: *user_type_id,
+                            generics: Arc::new(Vec::new()),
+                        },
+                    )
+                })
+                .collect(),
         );
 
         let mut module_entity_type_map = HashMap::new();
@@ -107,6 +110,8 @@ let b = a.test
             &module_path,
             &mut errors,
         );
+
+        user_type_set.check_generics_count(&mut errors);
 
         module_entity_type_map.extend(module_element_entity_type_map);
 

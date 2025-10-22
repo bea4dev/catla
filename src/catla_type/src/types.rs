@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc, RwLock,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    ops::Range,
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use catla_parser::ast::{EntityID, Spanned};
@@ -9,7 +12,10 @@ use derivative::Derivative;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
 
-use crate::type_infer::{TypeEnvironment, TypeVariableID};
+use crate::{
+    error::{TypeError, TypeErrorKind},
+    type_infer::{TypeEnvironment, TypeVariableID},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -318,6 +324,7 @@ pub struct GlobalUserTypeID(usize);
 #[derive(Debug, Clone)]
 pub struct GlobalUserTypeSet {
     map: Arc<RwLock<HashMap<GlobalUserTypeID, Arc<RwLock<UserTypeInfo>>>>>,
+    generics_check: Arc<RwLock<Vec<Moduled<Type>>>>,
     counter: Arc<AtomicUsize>,
 }
 
@@ -325,6 +332,7 @@ impl GlobalUserTypeSet {
     pub fn new() -> Self {
         Self {
             map: Arc::new(RwLock::new(HashMap::new())),
+            generics_check: Arc::new(RwLock::new(Vec::new())),
             counter: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -343,6 +351,43 @@ impl GlobalUserTypeSet {
         let lock = self.map.read().unwrap();
         lock.get(&id).unwrap().clone()
     }
+
+    pub fn add_generics_count_check(&self, ty: Moduled<Type>) {
+        let mut checks = self.generics_check.write().unwrap();
+        checks.push(ty);
+    }
+
+    pub fn check_generics_count(&self, errors: &mut Vec<TypeError>) {
+        let checks = self.generics_check.read().unwrap();
+
+        for check_type in checks.iter() {
+            if let Type::UserType {
+                user_type_info,
+                generics,
+            } = &check_type.value
+            {
+                let user_type_info = self.get(*user_type_info);
+                let user_type_info = user_type_info.read().unwrap();
+
+                if user_type_info.generics.len() != generics.len() {
+                    let error = TypeError {
+                        kind: TypeErrorKind::InvalidGenericsCount {
+                            expected: user_type_info.generics.len(),
+                            found: generics.len(),
+                            defined: Moduled::new(
+                                (),
+                                user_type_info.module_path.clone(),
+                                user_type_info.span.clone(),
+                            ),
+                        },
+                        span: check_type.span.clone(),
+                        module_path: check_type.module_path.clone(),
+                    };
+                    errors.push(error);
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -353,6 +398,7 @@ pub struct UserTypeInfo {
     pub element_types: HashMap<String, Spanned<Type>>,
     pub generics: Vec<Arc<GenericType>>,
     pub where_clause: Vec<WhereClauseInfo>,
+    pub span: Range<usize>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

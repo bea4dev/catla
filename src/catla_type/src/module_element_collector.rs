@@ -9,14 +9,14 @@ use catla_parser::ast::{
     PrimaryRight, Program, SimplePrimary, Spanned, Statement, StatementAttribute, TypeInfo,
     TypeInfoBase, VariableBinding, WhereClause,
 };
-use catla_util::module_path::ModulePath;
+use catla_util::module_path::{ModulePath, Moduled};
 use hashbrown::HashMap;
 
 use crate::{
     error::{TypeError, TypeErrorKind},
     types::{
-        FunctionTypeInfo, GenericType, GlobalUserTypeID, GlobalUserTypeSet, ImplementsInfo,
-        ImplementsInfoSet, Type, WhereClauseInfo,
+        FunctionTypeInfo, GenericType, GlobalUserTypeSet, ImplementsInfo, ImplementsInfoSet, Type,
+        WhereClauseInfo,
     },
 };
 
@@ -958,21 +958,9 @@ fn get_base_type(
     match &ast.generics {
         Some(generics_info) => match base_type {
             Type::UserType {
-                user_type_info: user_type_id,
+                user_type_info,
                 generics: _,
             } => {
-                let user_type_info = user_type_set.get(user_type_id);
-                let user_type_info = user_type_info.read().unwrap();
-
-                if user_type_info.generics.len() != generics_info.types.len() {
-                    let error = TypeError {
-                        kind: TypeErrorKind::InvalidGenericsCount,
-                        span: generics_info.span.clone(),
-                        module_path: module_path.clone(),
-                    };
-                    errors.push(error);
-                }
-
                 let generics_info = generics_info
                     .types
                     .iter()
@@ -992,10 +980,18 @@ fn get_base_type(
                     })
                     .collect::<Vec<_>>();
 
-                Type::UserType {
-                    user_type_info: user_type_id,
+                let ty = Type::UserType {
+                    user_type_info,
                     generics: Arc::new(generics_info),
-                }
+                };
+
+                user_type_set.add_generics_count_check(Moduled::new(
+                    ty.clone(),
+                    module_path.clone(),
+                    ast.span.clone(),
+                ));
+
+                ty
             }
             _ => base_type,
         },

@@ -78,6 +78,7 @@ pub fn collect_user_type_for_program(
                                     element_types: HashMap::new(),
                                     generics: Vec::new(),
                                     where_clause: Vec::new(),
+                                    span: user_type_define.span.clone(),
                                 };
                                 let id = user_type_set.new_user_type(info);
 
@@ -105,6 +106,7 @@ pub fn collect_user_type_for_program(
                                     element_types: HashMap::new(),
                                     generics: Vec::new(),
                                     where_clause: Vec::new(),
+                                    span: type_alias.span.clone(),
                                 };
                                 let id = user_type_set.new_user_type(info);
 

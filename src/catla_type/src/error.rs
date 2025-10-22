@@ -15,7 +15,11 @@ pub enum TypeErrorKind {
     MissingModuleElementType,
     UnknownModuleElementType,
     UnknownThis,
-    InvalidGenericsCount,
+    InvalidGenericsCount {
+        expected: usize,
+        found: usize,
+        defined: Moduled<()>,
+    },
     MissingStaticVariableType,
     TypeMismatch {
         left: Moduled<String>,

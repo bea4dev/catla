@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use catla_parser::ast::Spanned;
 use catla_util::module_path::{ModulePath, Moduled};
 
 #[derive(Debug)]
@@ -35,5 +36,21 @@ pub enum TypeErrorKind {
     NoElement,
     MultiImplements {
         concretes: Vec<Moduled<String>>,
+    },
+    NotSatisfied {
+        target: Moduled<String>,
+        origin_target: Moduled<String>,
+        origin_bound: Moduled<String>,
+    },
+    UnknownTypeAtThisPoint,
+    NotFunctionType {
+        not_function_type_from: Spanned<String>,
+    },
+    NotFunctionOrUserType {
+        invalid_type_from: Spanned<String>,
+    },
+    FunctionArgumentCountMismatch {
+        expected: Moduled<usize>,
+        found: Moduled<usize>,
     },
 }

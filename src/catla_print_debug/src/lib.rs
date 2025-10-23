@@ -21,20 +21,37 @@ mod test {
     #[test]
     fn infer_type_test() {
         let source = r"
-interface TestInterface<T> {
-    function test() -> T;
+interface Nat {}
+
+struct Zero {}
+implements Nat for Zero {}
+
+struct Succ<N: Nat> {
+    let n: N
+}
+implements<N: Nat> Nat for Succ<N> {}
+
+interface Add<R: Nat, Answer: Nat> {
+    function add(r: R) -> Answer {}
+}
+implements<N: Nat> Add<N, N> for Zero {
+    function add(r: N) -> N {}
+}
+implements<N: Nat, M: Nat, Sum: Nat> Add<N, Succ<Sum>> for Succ<M> where N: Add<M, Sum> {
+    function add(r: N) -> Succ<Sum> {}
 }
 
-implements<T> TestInterface<T> for TestClass<T> {
-    function test() -> T {}
-}
+type One = Succ<Zero>
+type Two = Succ<One>
+type Three = Succ<Two>
+type Four = Succ<Three>
 
-class TestClass<T> {
-    let field: T
-}
+let zero = new Zero {}
+let one = new One { n: zero }
+let two = new Two { n: one }
+let three = new Three { n: two }
 
-let a = new TestClass { field: 100 }
-let b = a.test
+let test = one.add
         ";
         let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
 
@@ -55,7 +72,7 @@ let b = a.test
 
         let mut module_element_entity_type_map = HashMap::new();
         let mut module_element_name_type_map = HashMap::new();
-        let mut implements_infos = ImplementsInfoSet::new();
+        let mut implements_infos = ImplementsInfoSet::new(None);
         let mut errors = Vec::new();
         let mut generics = HashMap::new();
         let import_map = HashMap::new();
@@ -110,8 +127,6 @@ let b = a.test
             &module_path,
             &mut errors,
         );
-
-        user_type_set.check_generics_count(&mut errors);
 
         module_entity_type_map.extend(module_element_entity_type_map);
 

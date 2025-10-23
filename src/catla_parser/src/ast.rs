@@ -113,6 +113,16 @@ impl<T> Spanned<T> {
     }
 }
 
+pub trait WithSpan: Sized {
+    fn with_span(self, span: Range<usize>) -> Spanned<Self>;
+}
+
+impl<T: Sized> WithSpan for T {
+    fn with_span(self, span: Range<usize>) -> Spanned<Self> {
+        Spanned::new(self, span)
+    }
+}
+
 pub type Literal<'input> = Spanned<&'input str>;
 
 #[derive(Debug)]

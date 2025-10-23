@@ -12,10 +12,7 @@ use derivative::Derivative;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
 
-use crate::{
-    error::{TypeError, TypeErrorKind},
-    type_infer::{TypeEnvironment, TypeVariableID},
-};
+use crate::type_infer::{TypeEnvironment, TypeVariableID};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -124,12 +121,17 @@ impl Type {
                 let arguments = function_info
                     .arguments
                     .iter()
-                    .map(|argument| argument.to_display_string(user_type_set, type_environment))
+                    .map(|argument| {
+                        argument
+                            .value
+                            .to_display_string(user_type_set, type_environment)
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
 
                 let return_type = function_info
                     .return_type
+                    .value
                     .to_display_string(user_type_set, type_environment);
 
                 match generics.is_empty() {
@@ -271,12 +273,17 @@ impl Type {
                 let mut new_arguments = Vec::with_capacity(function_info.arguments.len());
 
                 for argument in function_info.arguments.iter() {
-                    new_arguments.push(argument.replace_generics(replace_before, replace_after));
+                    new_arguments.push(
+                        argument.clone().map(|argument| {
+                            argument.replace_generics(replace_before, replace_after)
+                        }),
+                    );
                 }
 
                 let new_return_type = function_info
                     .return_type
-                    .replace_generics(replace_before, replace_after);
+                    .clone()
+                    .map(|return_type| return_type.replace_generics(replace_before, replace_after));
 
                 let new_function_info = FunctionTypeInfo {
                     module_path: function_info.module_path.clone(),
@@ -284,6 +291,14 @@ impl Type {
                     generics: function_info.generics.clone(),
                     arguments: new_arguments,
                     return_type: new_return_type,
+                    where_clause: function_info
+                        .where_clause
+                        .iter()
+                        .map(|where_clause| {
+                            where_clause.replace_generics(replace_before, replace_after)
+                        })
+                        .collect(),
+                    span: function_info.span.clone(),
                 };
 
                 Type::Function {
@@ -324,7 +339,6 @@ pub struct GlobalUserTypeID(usize);
 #[derive(Debug, Clone)]
 pub struct GlobalUserTypeSet {
     map: Arc<RwLock<HashMap<GlobalUserTypeID, Arc<RwLock<UserTypeInfo>>>>>,
-    generics_check: Arc<RwLock<Vec<Moduled<Type>>>>,
     counter: Arc<AtomicUsize>,
 }
 
@@ -332,7 +346,6 @@ impl GlobalUserTypeSet {
     pub fn new() -> Self {
         Self {
             map: Arc::new(RwLock::new(HashMap::new())),
-            generics_check: Arc::new(RwLock::new(Vec::new())),
             counter: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -351,43 +364,6 @@ impl GlobalUserTypeSet {
         let lock = self.map.read().unwrap();
         lock.get(&id).unwrap().clone()
     }
-
-    pub fn add_generics_count_check(&self, ty: Moduled<Type>) {
-        let mut checks = self.generics_check.write().unwrap();
-        checks.push(ty);
-    }
-
-    pub fn check_generics_count(&self, errors: &mut Vec<TypeError>) {
-        let checks = self.generics_check.read().unwrap();
-
-        for check_type in checks.iter() {
-            if let Type::UserType {
-                user_type_info,
-                generics,
-            } = &check_type.value
-            {
-                let user_type_info = self.get(*user_type_info);
-                let user_type_info = user_type_info.read().unwrap();
-
-                if user_type_info.generics.len() != generics.len() {
-                    let error = TypeError {
-                        kind: TypeErrorKind::InvalidGenericsCount {
-                            expected: user_type_info.generics.len(),
-                            found: generics.len(),
-                            defined: Moduled::new(
-                                (),
-                                user_type_info.module_path.clone(),
-                                user_type_info.span.clone(),
-                            ),
-                        },
-                        span: check_type.span.clone(),
-                        module_path: check_type.module_path.clone(),
-                    };
-                    errors.push(error);
-                }
-            }
-        }
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -401,10 +377,33 @@ pub struct UserTypeInfo {
     pub span: Range<usize>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct WhereClauseInfo {
     pub target: Spanned<Type>,
     pub bounds: Vec<Spanned<Type>>,
+}
+
+impl WhereClauseInfo {
+    pub fn replace_generics(
+        &self,
+        replace_before: &[Arc<GenericType>],
+        replace_after: &[Type],
+    ) -> Self {
+        Self {
+            target: self
+                .target
+                .clone()
+                .map(|ty| ty.replace_generics(replace_before, replace_after)),
+            bounds: self
+                .bounds
+                .iter()
+                .map(|ty| {
+                    ty.clone()
+                        .map(|ty| ty.replace_generics(replace_before, replace_after))
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -412,8 +411,10 @@ pub struct FunctionTypeInfo {
     pub module_path: ModulePath,
     pub name: Option<Spanned<String>>,
     pub generics: Vec<Arc<GenericType>>,
-    pub arguments: Vec<Type>,
-    pub return_type: Type,
+    pub arguments: Vec<Spanned<Type>>,
+    pub return_type: Spanned<Type>,
+    pub where_clause: Vec<WhereClauseInfo>,
+    pub span: Range<usize>,
 }
 
 #[derive(Derivative)]
@@ -424,7 +425,7 @@ pub struct GenericType {
     pub entity_id: EntityID,
     pub name: Spanned<String>,
     #[derivative(PartialEq = "ignore")]
-    pub bounds: RwLock<Vec<Type>>,
+    pub bounds: RwLock<Vec<Spanned<Type>>>,
 }
 
 #[derive(Debug)]
@@ -433,14 +434,21 @@ pub struct ImplementsInfoSet {
 }
 
 impl ImplementsInfoSet {
-    pub fn new() -> Self {
-        Self {
-            map: IndexMap::new(),
+    pub fn new(parent: Option<&ImplementsInfoSet>) -> Self {
+        let mut map = IndexMap::new();
+        if let Some(parent) = parent {
+            map.extend(parent.map.clone());
         }
+
+        Self { map }
     }
 
-    pub fn register(&mut self, entity_id: EntityID, info: ImplementsInfo) {
-        self.map.insert(entity_id, Arc::new(info));
+    pub fn register_implements_info(
+        &mut self,
+        entity_id: EntityID,
+        implements_info: ImplementsInfo,
+    ) {
+        self.map.insert(entity_id, Arc::new(implements_info));
     }
 
     pub fn find_implements_for(
@@ -481,7 +489,6 @@ impl ImplementsInfoSet {
         user_type_set: &GlobalUserTypeSet,
         type_environment: &mut TypeEnvironment,
     ) -> ImplementsCheckResult {
-        println!("1");
         for implements_info in self.map.values() {
             let result = implements_info.is_implements(
                 concrete.clone(),

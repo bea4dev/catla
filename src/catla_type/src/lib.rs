@@ -48,7 +48,7 @@ let c = b
 
         let mut module_element_entity_type_map = HashMap::new();
         let mut module_element_name_type_map = HashMap::new();
-        let mut implements_infos = ImplementsInfoSet::new();
+        let mut implements_infos = ImplementsInfoSet::new(None);
         let mut errors = Vec::new();
         let mut generics = HashMap::new();
         let import_map = HashMap::new();

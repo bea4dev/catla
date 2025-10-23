@@ -9,15 +9,30 @@ use std::{
 #[derive(Debug, Clone, Eq)]
 pub struct ModulePath {
     pub path: Arc<Vec<String>>,
+    pub path_name: Arc<String>,
     pub file_path: Arc<PathBuf>,
 }
 
 impl ModulePath {
     pub fn new<'a>(iter: impl Iterator<Item = &'a str>, file_path: &Path) -> Self {
+        let path = iter.map(|str| str.to_string()).collect::<Vec<_>>();
+        let path_name = path.join("::");
+
         Self {
-            path: Arc::new(iter.map(|str| str.to_string()).collect()),
+            path: Arc::new(path),
+            path_name: Arc::new(path_name),
             file_path: Arc::new(file_path.into()),
         }
+    }
+}
+
+pub trait ToModuled: Sized {
+    fn moduled(self, module_path: ModulePath, span: Range<usize>) -> Moduled<Self>;
+}
+
+impl<T> ToModuled for T {
+    fn moduled(self, module_path: ModulePath, span: Range<usize>) -> Moduled<Self> {
+        Moduled::new(self, module_path, span)
     }
 }
 

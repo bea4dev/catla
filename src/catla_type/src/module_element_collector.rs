@@ -1105,6 +1105,7 @@ fn get_base_type(
                                     user_type_info.module_path.clone(),
                                     bound.span.clone(),
                                 ),
+                                None,
                                 user_type_set,
                                 type_environment,
                             ) {

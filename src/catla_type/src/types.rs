@@ -7,7 +7,7 @@ use std::{
 };
 
 use catla_parser::ast::{EntityID, Spanned};
-use catla_util::module_path::{ModulePath, Moduled};
+use catla_util::module_path::{ModulePath, Moduled, ToModuled};
 use derivative::Derivative;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
@@ -454,6 +454,8 @@ impl ImplementsInfoSet {
     pub fn find_implements_for(
         &self,
         ty: Moduled<Type>,
+        function_name: &str,
+        arguments: &[Moduled<Type>],
         user_type_set: &GlobalUserTypeSet,
         type_environment: &mut TypeEnvironment,
     ) -> Vec<(Arc<ImplementsInfo>, ImplementsCheckResult)> {
@@ -463,6 +465,7 @@ impl ImplementsInfoSet {
             let result = implements_info.is_implements(
                 ty.clone(),
                 None,
+                Some((function_name, arguments)),
                 user_type_set,
                 type_environment,
                 self,
@@ -486,13 +489,17 @@ impl ImplementsInfoSet {
         &self,
         concrete: Moduled<Type>,
         interface: Moduled<Type>,
+        function_type_hints: Option<(&str, &[Moduled<Type>])>,
         user_type_set: &GlobalUserTypeSet,
         type_environment: &mut TypeEnvironment,
     ) -> ImplementsCheckResult {
+        let mut results = Vec::new();
+
         for implements_info in self.map.values() {
             let result = implements_info.is_implements(
                 concrete.clone(),
                 Some(interface.clone()),
+                function_type_hints,
                 user_type_set,
                 type_environment,
                 self,
@@ -500,16 +507,37 @@ impl ImplementsInfoSet {
 
             match &result {
                 ImplementsCheckResult::NoImplementsFound => continue,
-                ImplementsCheckResult::Conflicts { conflicts: _ }
-                | ImplementsCheckResult::Success {
+                ImplementsCheckResult::Conflicts { conflicts: _ } => return result,
+                ImplementsCheckResult::Success {
                     new_concrete: _,
                     new_interface: _,
                     new_generics: _,
-                } => return result,
+                } => {
+                    results.push(result);
+                }
             }
         }
 
-        ImplementsCheckResult::NoImplementsFound
+        match results.len() {
+            0 => ImplementsCheckResult::NoImplementsFound,
+            1 => results.pop().unwrap(),
+            _ => ImplementsCheckResult::Conflicts {
+                conflicts: results
+                    .into_iter()
+                    .map(|result| {
+                        let ImplementsCheckResult::Success {
+                            new_concrete,
+                            new_interface: _,
+                            new_generics: _,
+                        } = result
+                        else {
+                            unreachable!()
+                        };
+                        new_concrete
+                    })
+                    .collect(),
+            },
+        }
     }
 }
 
@@ -528,6 +556,7 @@ impl ImplementsInfo {
         &self,
         concrete: Moduled<Type>,
         interface: Option<Moduled<Type>>,
+        function_type_hints: Option<(&str, &[Moduled<Type>])>,
         user_type_set: &GlobalUserTypeSet,
         type_environment: &mut TypeEnvironment,
         all_implements_info_set: &ImplementsInfoSet,
@@ -564,6 +593,47 @@ impl ImplementsInfo {
             return ImplementsCheckResult::NoImplementsFound;
         }
 
+        if let Some((function_name, arguments)) = function_type_hints {
+            let retake_arguments = arguments
+                .iter()
+                .map(|ty| {
+                    ty.clone()
+                        .map(|ty| type_environment.retake_type_variable(&ty))
+                })
+                .collect::<Vec<_>>();
+
+            let Some(element_type) = self.element_type.get(function_name) else {
+                return ImplementsCheckResult::NoImplementsFound;
+            };
+
+            let new_element_type = element_type
+                .value
+                .replace_generics(&old_generics, &new_generics);
+
+            let Type::Function {
+                function_info,
+                generics: _,
+            } = new_element_type
+            else {
+                return ImplementsCheckResult::NoImplementsFound;
+            };
+
+            for (argument, retake_argument) in function_info
+                .arguments
+                .iter()
+                .zip(retake_arguments.into_iter())
+            {
+                type_environment.test_unify_type(
+                    argument
+                        .value
+                        .clone()
+                        .moduled(self.module_path.clone(), argument.span.clone()),
+                    retake_argument,
+                    user_type_set,
+                );
+            }
+        }
+
         if let Some(retake_interface) = &retake_interface {
             if !type_environment.test_unify_type(
                 Moduled::new(
@@ -598,6 +668,7 @@ impl ImplementsInfo {
                         self.module_path.clone(),
                         bound.span.clone(),
                     ),
+                    None,
                     user_type_set,
                     type_environment,
                 ) {

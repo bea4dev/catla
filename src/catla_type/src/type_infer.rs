@@ -593,6 +593,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         &mut self,
         type_variable_id: Spanned<TypeVariableID>,
         literal: &Literal,
+        function_type_hints: Option<(&str, &[Moduled<Type>])>,
         implements_infos: &ImplementsInfoSet,
         user_type_set: &GlobalUserTypeSet,
         errors: &mut std::vec::Vec<TypeError>,
@@ -628,69 +629,75 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
             }
         }
 
-        let results = implements_infos.find_implements_for(
-            Moduled::new(
-                Type::TypeVariable(type_variable_id.value),
-                self.module_path.clone(),
-                type_variable_id.span.clone(),
-            ),
-            user_type_set,
-            self,
-        );
-
         let mut concretes = Vec::new();
 
-        for (implements_info, result) in results {
-            match result {
-                ImplementsCheckResult::NoImplementsFound => unreachable!(),
-                ImplementsCheckResult::Conflicts { conflicts } => {
-                    let error = TypeError {
-                        kind: TypeErrorKind::ConflictedImplementInTypeInfer {
-                            conflicts: conflicts
-                                .into_iter()
-                                .map(|conflict| {
-                                    conflict
-                                        .map(|ty| ty.to_display_string(user_type_set, Some(self)))
-                                })
-                                .collect(),
-                        },
-                        span: literal.span.clone(),
-                        module_path: self.module_path.clone(),
-                    };
-                    errors.push(error);
-                }
-                ImplementsCheckResult::Success {
-                    new_concrete,
-                    new_interface: _,
-                    new_generics,
-                } => {
-                    let Some(element_type) = implements_info.element_type.get(literal.value) else {
-                        continue;
-                    };
+        if let Some((function_name, arguments)) = function_type_hints {
+            let results = implements_infos.find_implements_for(
+                Moduled::new(
+                    Type::TypeVariable(type_variable_id.value),
+                    self.module_path.clone(),
+                    type_variable_id.span.clone(),
+                ),
+                function_name,
+                arguments,
+                user_type_set,
+                self,
+            );
 
-                    self.test_unify_type(
-                        Moduled::new(
-                            Type::TypeVariable(type_variable_id.value),
+            for (implements_info, result) in results {
+                match result {
+                    ImplementsCheckResult::NoImplementsFound => unreachable!(),
+                    ImplementsCheckResult::Conflicts { conflicts } => {
+                        let error = TypeError {
+                            kind: TypeErrorKind::ConflictedImplementInTypeInfer {
+                                conflicts: conflicts
+                                    .into_iter()
+                                    .map(|conflict| {
+                                        conflict.map(|ty| {
+                                            ty.to_display_string(user_type_set, Some(self))
+                                        })
+                                    })
+                                    .collect(),
+                            },
+                            span: literal.span.clone(),
+                            module_path: self.module_path.clone(),
+                        };
+                        errors.push(error);
+                    }
+                    ImplementsCheckResult::Success {
+                        new_concrete,
+                        new_interface: _,
+                        new_generics,
+                    } => {
+                        let Some(element_type) = implements_info.element_type.get(literal.value)
+                        else {
+                            continue;
+                        };
+
+                        self.test_unify_type(
+                            Moduled::new(
+                                Type::TypeVariable(type_variable_id.value),
+                                self.module_path.clone(),
+                                type_variable_id.span.clone(),
+                            ),
+                            new_concrete.clone(),
+                            user_type_set,
+                        );
+
+                        concretes.push(new_concrete);
+
+                        let old_generics = &implements_info.generics_define;
+
+                        let element_type = element_type
+                            .value
+                            .replace_generics(&old_generics, &new_generics);
+
+                        canditates.push(Moduled::new(
+                            element_type,
                             self.module_path.clone(),
-                            type_variable_id.span.clone(),
-                        ),
-                        new_concrete.clone(),
-                        user_type_set,
-                    );
-
-                    concretes.push(new_concrete);
-
-                    let old_generics = &implements_info.generics_define;
-
-                    let element_type = element_type
-                        .value
-                        .replace_generics(&old_generics, &new_generics);
-
-                    canditates.push(Moduled::new(
-                        element_type,
-                        self.module_path.clone(),
-                        literal.span.clone(),
-                    ));
+                            literal.span.clone(),
+                        ));
+                    }
                 }
             }
         }
@@ -2604,9 +2611,49 @@ fn infer_type_for_primary(
         chain_start_position += 1;
 
         if let Some(second) = &chain.second {
+            let function_arguments = match &second.function_call {
+                Some(function_call) => {
+                    let mut function_arguments = Vec::new();
+
+                    for argument_expression in function_call.arguments.iter() {
+                        let expression_variable_id = infer_type_for_expression(
+                            argument_expression,
+                            as_expression,
+                            type_environment,
+                            return_type,
+                            this_type,
+                            generics,
+                            implements_infos,
+                            import_map,
+                            module_entity_type_map,
+                            moduled_name_type_map,
+                            name_resolved_map,
+                            user_type_set,
+                            module_path,
+                            package_resource_set,
+                            errors,
+                        );
+
+                        let expression_type = Type::TypeVariable(expression_variable_id)
+                            .moduled(module_path.clone(), argument_expression.span());
+
+                        function_arguments.push(expression_type);
+                    }
+
+                    function_arguments
+                }
+                None => Vec::new(),
+            };
+
+            let function_type_hints = match &second.function_call {
+                Some(_) => Some((second.literal.value, function_arguments.as_slice())),
+                None => None,
+            };
+
             let element_type = type_environment.get_user_type_element(
                 last_type_variable_id,
                 &second.literal,
+                function_type_hints,
                 implements_infos,
                 user_type_set,
                 errors,
@@ -2744,6 +2791,7 @@ fn infer_type_for_primary(
                                         user_type_info.module_path.clone(),
                                         bound.span.clone(),
                                     ),
+                                    None,
                                     user_type_set,
                                     type_environment,
                                 ) {
@@ -2861,6 +2909,7 @@ fn infer_type_for_primary(
                                         function_info.module_path.clone(),
                                         bound.span.clone(),
                                     ),
+                                    None,
                                     user_type_set,
                                     type_environment,
                                 ) {
@@ -2990,44 +3039,23 @@ fn infer_type_for_primary(
                                 errors.push(error);
                             }
 
-                            for (origin_argument_type, argument_expression) in function_info
+                            for (origin_argument_type, argument_type_variable) in function_info
                                 .arguments
                                 .iter()
-                                .zip(function_call.arguments.iter())
+                                .zip(function_arguments)
                             {
                                 let argument_type = origin_argument_type
                                     .value
                                     .replace_generics(old_generics, new_generics);
-
-                                let expression_variable_id = infer_type_for_expression(
-                                    argument_expression,
-                                    as_expression,
-                                    type_environment,
-                                    return_type,
-                                    this_type,
-                                    generics,
-                                    implements_infos,
-                                    import_map,
-                                    module_entity_type_map,
-                                    moduled_name_type_map,
-                                    name_resolved_map,
-                                    user_type_set,
-                                    module_path,
-                                    package_resource_set,
-                                    errors,
-                                );
 
                                 let argument_type = argument_type.moduled(
                                     function_info.module_path.clone(),
                                     origin_argument_type.span.clone(),
                                 );
 
-                                let expression_type = Type::TypeVariable(expression_variable_id)
-                                    .moduled(module_path.clone(), argument_expression.span());
-
                                 type_environment.unify_type(
                                     argument_type,
-                                    expression_type,
+                                    argument_type_variable,
                                     user_type_set,
                                     errors,
                                 );

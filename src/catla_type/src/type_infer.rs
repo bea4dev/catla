@@ -189,65 +189,90 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
     ) {
         let allocator = *self.type_variable_set_components.allocator();
 
-        let left_set_id = *self.var_set_map.get(&left).unwrap();
-        let right_set_id = *self.var_set_map.get(&right).unwrap();
-
-        if left_set_id == right_set_id {
-            return;
-        }
-
-        let right_set = &mut self.type_variable_set_components[right_set_id.0];
-
-        let mut right_members = HashSet::new_in(allocator);
-        swap(&mut right_members, &mut right_set.members);
-
-        let mut right_type = None;
-        swap(&mut right_type, &mut right_set.ty);
-
-        for right_member in right_members.iter() {
-            self.var_set_map.insert(*right_member, left_set_id);
-        }
-
-        let left_set = &mut self.type_variable_set_components[left_set_id.0];
-
-        let mut left_type = None;
-        swap(&mut left_type, &mut left_set.ty);
-
-        left_set.members.extend(right_members);
+        let left_type = self.borrow_type_variable_set(left).ty.as_ref().cloned();
+        let right_type = self.borrow_type_variable_set(right).ty.as_ref().cloned();
 
         match (left_type, right_type) {
-            (None, None) => {}
+            (None, None) => {
+                let right_set = self.borrow_mut_type_variable_set(right);
+
+                let mut members = HashSet::new_in(allocator);
+                swap(&mut right_set.members, &mut members);
+
+                let left_set_id = *self.var_set_map.get(&left).unwrap();
+
+                for member in members.iter().cloned() {
+                    self.var_set_map.insert(member, left_set_id);
+                }
+
+                self.borrow_mut_type_variable_set(left)
+                    .members
+                    .extend(members);
+            }
             (None, Some(ty)) | (Some(ty), None) => {
+                let right_set = self.borrow_mut_type_variable_set(right);
+
+                let mut members = HashSet::new_in(allocator);
+                swap(&mut right_set.members, &mut members);
+
+                let left_set_id = *self.var_set_map.get(&left).unwrap();
+
+                for member in members.iter().cloned() {
+                    self.var_set_map.insert(member, left_set_id);
+                }
+
+                let left_set = self.borrow_mut_type_variable_set(left);
+
+                left_set.members.extend(members);
                 left_set.ty = Some(ty);
             }
             (Some(left_type), Some(right_type)) => {
                 // numeric type inference
+                let left_set = self.borrow_mut_type_variable_set(left);
+                let mut merged = false;
                 if let Type::IntegerLiteral = &left_type.value {
                     if right_type.value.is_integer() {
-                        left_set.ty = Some(right_type);
-                        return;
+                        left_set.ty = Some(right_type.clone());
+                        merged = true;
                     }
                 }
                 if let Type::IntegerLiteral = &right_type.value {
                     if left_type.value.is_integer() {
-                        left_set.ty = Some(left_type);
-                        return;
+                        left_set.ty = Some(left_type.clone());
+                        merged = true;
                     }
                 }
                 if let Type::FloatLiteral = &left_type.value {
                     if right_type.value.is_float() {
-                        left_set.ty = Some(right_type);
-                        return;
+                        left_set.ty = Some(right_type.clone());
+                        merged = true;
                     }
                 }
                 if let Type::FloatLiteral = &right_type.value {
                     if left_type.value.is_float() {
-                        left_set.ty = Some(left_type);
-                        return;
+                        left_set.ty = Some(left_type.clone());
+                        merged = true;
                     }
                 }
 
-                self.unify_type(left_type, right_type, user_type_set, errors);
+                if merged {
+                    let right_set = self.borrow_mut_type_variable_set(right);
+
+                    let mut members = HashSet::new_in(allocator);
+                    swap(&mut right_set.members, &mut members);
+
+                    let left_set_id = *self.var_set_map.get(&left).unwrap();
+
+                    for member in members.iter().cloned() {
+                        self.var_set_map.insert(member, left_set_id);
+                    }
+
+                    self.borrow_mut_type_variable_set(left)
+                        .members
+                        .extend(members);
+                } else {
+                    self.unify_type(left_type.clone(), right_type.clone(), user_type_set, errors);
+                }
             }
         }
     }

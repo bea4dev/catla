@@ -32,14 +32,15 @@ struct Succ<N: Nat> {
 implements<N: Nat> Nat for Succ<N> {}
 
 interface Add<R: Nat, Answer: Nat> {
-    function add(r: R) -> Answer {}
-}
-implements<N: Nat> Add<N, N> for Zero {
-    function add(r: N) -> N {}
+    function add(r: R) -> Answer;
 }
 implements<N: Nat, M: Nat, Sum: Nat> Add<N, Succ<Sum>> for Succ<M> where N: Add<M, Sum> {
     function add(r: N) -> Succ<Sum> {}
 }
+implements<N: Nat> Add<N, N> for Zero {
+    function add(r: N) -> N {}
+}
+
 
 type One = Succ<Zero>
 type Two = Succ<One>
@@ -51,7 +52,7 @@ let one = new One { n: zero }
 let two = new Two { n: one }
 let three = new Three { n: two }
 
-let test = one.add
+let test = one.add(three)
         ";
         let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
 

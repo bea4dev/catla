@@ -116,7 +116,7 @@ impl Type {
             }
             Type::Function {
                 function_info,
-                generics,
+                generics: _,
             } => {
                 let arguments = function_info
                     .arguments
@@ -134,20 +134,7 @@ impl Type {
                     .value
                     .to_display_string(user_type_set, type_environment);
 
-                match generics.is_empty() {
-                    true => format!("function ({}) -> {}", arguments, return_type),
-                    false => format!(
-                        "function <{}>({}) -> {}",
-                        generics
-                            .iter()
-                            .map(|generic| generic
-                                .to_display_string(user_type_set, type_environment))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        arguments,
-                        return_type
-                    ),
-                }
+                format!("function ({}) -> {}", arguments, return_type)
             }
             Type::Generic(generic_type) => generic_type.name.value.clone(),
             Type::TypeVariable(type_variable_id) => match type_environment {

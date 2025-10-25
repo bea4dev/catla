@@ -21,40 +21,17 @@ mod test {
     #[test]
     fn infer_type_test() {
         let source = r"
-interface Nat {}
+interface I1<T> {}
 
-struct Zero {}
-implements Nat for Zero {}
+implements I1<int> for int {}
 
-struct Succ<N: Nat> {
-    let n: N
-}
-implements<N: Nat> Nat for Succ<N> {}
+function <T, I: I1<T>> dddd(i: I) -> T {}
 
-interface Add<R: Nat, Answer: Nat> {
-    function add(let this, r: R) -> Answer;
-}
-implements<N: Nat> Add<N, N> for Zero {
-    function add(let this, r: N) -> N {}
-}
-implements<N: Nat, M: Nat, Sum: Nat> Add<N, Succ<Sum>> for Succ<M> where N: Add<M, Sum> {
-    function add(let this, r: N) -> Succ<Sum> {}
-}
-
-type One = Succ<Zero>
-type Two = Succ<One>
-type Three = Succ<Two>
-type Four = Succ<Three>
-
-let zero = new Zero {}
-let one = new One { n: zero }
-let two = new Two { n: one }
-let three = new Three { n: two }
-
-let three = one.add(two)
-let five = two.add(three)
+let test = dddd(100)
         ";
         let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
+
+        dbg!(&ast.errors);
 
         let (name_resolved_map, errors) = resolve_name(ast.ast(), &Vec::new(), &HashMap::new());
         dbg!(errors);

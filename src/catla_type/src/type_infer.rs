@@ -385,6 +385,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                                 let variable_set =
                                     &mut self.type_variable_set_components[variable_set_id.0];
                                 variable_set.ty = Some(left.clone());
+                                return;
                             }
                         }
                         if let Type::FloatLiteral = &right_type.value {
@@ -394,6 +395,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                                 let variable_set =
                                     &mut self.type_variable_set_components[variable_set_id.0];
                                 variable_set.ty = Some(left.clone());
+                                return;
                             }
                         }
 
@@ -746,19 +748,22 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         }
     }
 
-    pub fn create_instance(&mut self, ty: &Type) -> Type {
+    pub fn create_instance(&mut self, ty: &Type, user_type_set: &GlobalUserTypeSet) -> Type {
         match ty {
             Type::UserType {
-                user_type_info,
+                user_type_info: user_type_id,
                 generics,
             } => {
+                let user_type_info = user_type_set.get(*user_type_id);
+                let user_type_info = user_type_info.read().unwrap();
+
                 let mut new_generics = std::vec::Vec::with_capacity(generics.len());
-                for _ in generics.iter() {
+                for _ in user_type_info.generics.iter() {
                     new_generics.push(Type::TypeVariable(self.create_type_variable_id_with_set()));
                 }
 
                 Type::UserType {
-                    user_type_info: *user_type_info,
+                    user_type_info: *user_type_id,
                     generics: Arc::new(new_generics),
                 }
             }
@@ -767,14 +772,20 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                 generics,
             } => {
                 let mut new_generics = std::vec::Vec::with_capacity(generics.len());
-                for _ in generics.iter() {
+                for _ in function_info.generics.iter() {
                     new_generics.push(Type::TypeVariable(self.create_type_variable_id_with_set()));
                 }
 
-                Type::Function {
+                let new_generics = Arc::new(new_generics.clone());
+
+                let ty = Type::Function {
                     function_info: function_info.clone(),
-                    generics: Arc::new(new_generics),
-                }
+                    generics: new_generics.clone(),
+                };
+
+                let old_generics = &function_info.generics;
+
+                ty.replace_generics(old_generics, &new_generics)
             }
             _ => ty.clone(),
         }
@@ -2035,127 +2046,381 @@ fn infer_type_for_primary(
     let first_type_variable_id = match &ast.left.first {
         PrimaryLeftExpr::Simple {
             left,
-            generics,
+            generics: generics_info,
             function_call,
             span,
-        } => match left {
-            SimplePrimary::Tuple { expressions, span } => todo!(),
-            SimplePrimary::Literal(literal) => {
-                match name_resolved_map.get(&EntityID::from(literal)) {
-                    Some(resolved) => match resolved.define.kind {
-                        DefineKind::Import => {
-                            match import_map.get(&resolved.define.entity_id).unwrap() {
-                                ImportElement::ModuleAlias { path } => {
-                                    let path_name =
-                                        path.iter().cloned().collect::<Vec<_>>().join("::");
+        } => {
+            let mut last_type_variable_id = match left {
+                SimplePrimary::Tuple { expressions, span } => todo!(),
+                SimplePrimary::Literal(literal) => {
+                    match name_resolved_map.get(&EntityID::from(literal)) {
+                        Some(resolved) => match resolved.define.kind {
+                            DefineKind::Import => {
+                                match import_map.get(&resolved.define.entity_id).unwrap() {
+                                    ImportElement::ModuleAlias { path } => {
+                                        let path_name =
+                                            path.iter().cloned().collect::<Vec<_>>().join("::");
 
-                                    get_module_import_type(
-                                        ast,
-                                        literal,
-                                        path_name,
-                                        &mut chain_start_position,
-                                        type_environment,
-                                        moduled_name_type_map,
-                                        package_resource_set,
-                                        module_path,
-                                        errors,
-                                    )
-                                }
-                                ImportElement::ModuleElement { path, element } => {
-                                    let module_name =
-                                        path.iter().cloned().collect::<Vec<_>>().join("::");
-                                    let module_type = moduled_name_type_map
-                                        .get(&module_name)
-                                        .unwrap()
-                                        .get(element)
-                                        .unwrap();
+                                        get_module_import_type(
+                                            ast,
+                                            literal,
+                                            path_name,
+                                            &mut chain_start_position,
+                                            type_environment,
+                                            moduled_name_type_map,
+                                            package_resource_set,
+                                            module_path,
+                                            errors,
+                                        )
+                                    }
+                                    ImportElement::ModuleElement { path, element } => {
+                                        let module_name =
+                                            path.iter().cloned().collect::<Vec<_>>().join("::");
+                                        let module_type = moduled_name_type_map
+                                            .get(&module_name)
+                                            .unwrap()
+                                            .get(element)
+                                            .unwrap();
 
-                                    let instance = type_environment.create_instance(module_type);
+                                        let instance = type_environment
+                                            .create_instance(module_type, user_type_set);
 
-                                    Spanned::new(
+                                        Spanned::new(
+                                            type_environment.create_and_set_entity_type(
+                                                literal.into(),
+                                                Moduled::new(
+                                                    instance,
+                                                    module_path.clone(),
+                                                    literal.span.clone(),
+                                                ),
+                                            ),
+                                            literal.span.clone(),
+                                        )
+                                    }
+                                    ImportElement::Unknown => Spanned::new(
                                         type_environment.create_and_set_entity_type(
                                             literal.into(),
                                             Moduled::new(
-                                                instance,
+                                                Type::Unknown,
                                                 module_path.clone(),
                                                 literal.span.clone(),
                                             ),
                                         ),
                                         literal.span.clone(),
-                                    )
-                                }
-                                ImportElement::Unknown => Spanned::new(
-                                    type_environment.create_and_set_entity_type(
-                                        literal.into(),
-                                        Moduled::new(
-                                            Type::Unknown,
-                                            module_path.clone(),
-                                            literal.span.clone(),
-                                        ),
                                     ),
-                                    literal.span.clone(),
-                                ),
+                                }
                             }
-                        }
-                        DefineKind::Function => {
-                            let function_type = module_entity_type_map
-                                .get(&resolved.define.entity_id)
-                                .unwrap();
+                            DefineKind::Function => {
+                                let function_type = module_entity_type_map
+                                    .get(&resolved.define.entity_id)
+                                    .unwrap();
 
-                            let function_type = type_environment.create_instance(function_type);
+                                let function_type =
+                                    type_environment.create_instance(function_type, user_type_set);
 
-                            type_environment
-                                .create_type_variable_id_with_type(
-                                    function_type
-                                        .moduled(module_path.clone(), literal.span.clone()),
-                                )
-                                .with_span(literal.span.clone())
-                        }
-                        DefineKind::Variable => Spanned::new(
-                            type_environment
-                                .get_or_allocate_variable_for_entity(resolved.define.entity_id),
+                                type_environment
+                                    .create_type_variable_id_with_type(
+                                        function_type
+                                            .moduled(module_path.clone(), literal.span.clone()),
+                                    )
+                                    .with_span(literal.span.clone())
+                            }
+                            DefineKind::Variable => Spanned::new(
+                                type_environment
+                                    .get_or_allocate_variable_for_entity(resolved.define.entity_id),
+                                literal.span.clone(),
+                            ),
+                            DefineKind::UserType => todo!(),
+                            DefineKind::Generics => todo!(),
+                        },
+                        None => match package_resource_set.get(literal.value) {
+                            Some(_) => get_module_import_type(
+                                ast,
+                                literal,
+                                literal.value.to_string(),
+                                &mut chain_start_position,
+                                type_environment,
+                                moduled_name_type_map,
+                                package_resource_set,
+                                module_path,
+                                errors,
+                            ),
+                            None => Spanned::new(
+                                type_environment.create_type_variable_id_with_set(),
+                                literal.span.clone(),
+                            ),
+                        },
+                    }
+                }
+                SimplePrimary::StringLiteral(literal) => todo!(),
+                SimplePrimary::NumericLiteral(literal) => Spanned::new(
+                    type_environment.create_and_set_entity_type(
+                        EntityID::from(literal),
+                        Moduled::new(
+                            Type::IntegerLiteral,
+                            module_path.clone(),
                             literal.span.clone(),
                         ),
-                        DefineKind::UserType => todo!(),
-                        DefineKind::Generics => todo!(),
-                    },
-                    None => match package_resource_set.get(literal.value) {
-                        Some(_) => get_module_import_type(
-                            ast,
-                            literal,
-                            literal.value.to_string(),
-                            &mut chain_start_position,
+                    ),
+                    literal.span.clone(),
+                ),
+                SimplePrimary::Null(range) => todo!(),
+                SimplePrimary::True(range) => todo!(),
+                SimplePrimary::False(range) => todo!(),
+                SimplePrimary::This(range) => todo!(),
+                SimplePrimary::LargeThis(range) => todo!(),
+            };
+
+            if let Some(function_call) = function_call {
+                let mut arguments = function_call
+                    .arguments
+                    .iter()
+                    .map(|expression| {
+                        infer_type_for_expression(
+                            expression,
+                            as_expression,
                             type_environment,
+                            return_type,
+                            this_type,
+                            generics,
+                            implements_infos,
+                            import_map,
+                            module_entity_type_map,
                             moduled_name_type_map,
-                            package_resource_set,
+                            name_resolved_map,
+                            user_type_set,
                             module_path,
+                            package_resource_set,
                             errors,
-                        ),
-                        None => Spanned::new(
-                            type_environment.create_type_variable_id_with_set(),
-                            literal.span.clone(),
-                        ),
+                        )
+                        .with_span(expression.span())
+                    })
+                    .collect::<Vec<_>>();
+
+                let last_type =
+                    type_environment.get_type_variable_type(last_type_variable_id.value);
+
+                match last_type {
+                    Some(last_type) => match &last_type.value {
+                        Type::Function {
+                            function_info,
+                            generics,
+                        } => {
+                            if function_info.arguments.len() != arguments.len() {
+                                let function_arguments_span_start = function_info
+                                    .arguments
+                                    .first()
+                                    .map(|argument| argument.span.start)
+                                    .unwrap_or(function_info.span.start);
+                                let function_arguments_span_end = function_info
+                                    .arguments
+                                    .last()
+                                    .map(|argument| argument.span.end)
+                                    .unwrap_or(function_info.span.end);
+
+                                let error = TypeError {
+                                    kind: TypeErrorKind::FunctionArgumentCountMismatch {
+                                        expected: function_info.arguments.len().moduled(
+                                            function_info.module_path.clone(),
+                                            function_arguments_span_start
+                                                ..function_arguments_span_end,
+                                        ),
+                                        found: arguments.len().moduled(
+                                            module_path.clone(),
+                                            function_call.span.clone(),
+                                        ),
+                                    },
+                                    span: function_call.span.clone(),
+                                    module_path: module_path.clone(),
+                                };
+                                errors.push(error);
+                            }
+
+                            for (origin_argument, argument) in
+                                function_info.arguments.iter().zip(arguments.into_iter())
+                            {
+                                type_environment.unify_type(
+                                    origin_argument.value.clone().moduled(
+                                        function_info.module_path.clone(),
+                                        origin_argument.span.clone(),
+                                    ),
+                                    Type::TypeVariable(argument.value)
+                                        .moduled(module_path.clone(), argument.span),
+                                    user_type_set,
+                                    errors,
+                                );
+                            }
+
+                            let mut where_bounds = Vec::new();
+
+                            for generic in function_info.generics.iter() {
+                                where_bounds.push(WhereClauseInfo {
+                                    target: Type::Generic(generic.clone())
+                                        .with_span(generic.name.span.clone()),
+                                    bounds: generic.bounds.read().unwrap().clone(),
+                                });
+                            }
+                            where_bounds.extend(function_info.where_clause.clone());
+
+                            let old_generics = &function_info.generics;
+                            let new_generics = generics;
+
+                            for where_bound in where_bounds.iter() {
+                                let target_type = where_bound
+                                    .target
+                                    .value
+                                    .replace_generics(old_generics, new_generics)
+                                    .moduled(
+                                        function_info.module_path.clone(),
+                                        where_bound.target.span.clone(),
+                                    );
+
+                                for bound in where_bound.bounds.iter() {
+                                    let bound_type = bound
+                                        .value
+                                        .replace_generics(old_generics, new_generics)
+                                        .moduled(
+                                            function_info.module_path.clone(),
+                                            bound.span.clone(),
+                                        );
+
+                                    match implements_infos.is_implements(
+                                        target_type.clone(),
+                                        bound_type.clone(),
+                                        None,
+                                        user_type_set,
+                                        type_environment,
+                                    ) {
+                                        ImplementsCheckResult::NoImplementsFound => {
+                                            let error = TypeError {
+                                                kind: TypeErrorKind::NotSatisfied {
+                                                    target: target_type.clone().map(|ty| {
+                                                        ty.to_display_string(
+                                                            user_type_set,
+                                                            Some(type_environment),
+                                                        )
+                                                    }),
+                                                    origin_target: target_type.clone().map(|ty| {
+                                                        ty.to_display_string(
+                                                            user_type_set,
+                                                            Some(type_environment),
+                                                        )
+                                                    }),
+                                                    origin_bound: bound_type.clone().map(|ty| {
+                                                        ty.to_display_string(
+                                                            user_type_set,
+                                                            Some(type_environment),
+                                                        )
+                                                    }),
+                                                },
+                                                span: function_call.span.clone(),
+                                                module_path: module_path.clone(),
+                                            };
+                                            errors.push(error);
+                                        }
+                                        ImplementsCheckResult::Conflicts { conflicts } => {
+                                            let error = TypeError {
+                                                kind:
+                                                    TypeErrorKind::ConflictedImplementInTypeInfer {
+                                                        conflicts: conflicts
+                                                            .into_iter()
+                                                            .map(|ty| {
+                                                                ty.map(|ty| {
+                                                                    ty.to_display_string(
+                                                                        user_type_set,
+                                                                        Some(type_environment),
+                                                                    )
+                                                                })
+                                                            })
+                                                            .collect(),
+                                                    },
+                                                span: function_call.span.clone(),
+                                                module_path: module_path.clone(),
+                                            };
+                                            errors.push(error);
+                                        }
+                                        ImplementsCheckResult::Success {
+                                            new_concrete,
+                                            new_interface,
+                                            new_generics: _,
+                                        } => {
+                                            if !type_environment.test_unify_type(
+                                                target_type.clone(),
+                                                new_concrete,
+                                                user_type_set,
+                                            ) {
+                                                unreachable!(
+                                                    "function call bounds unify(concrete) must not fail!"
+                                                );
+                                            }
+                                            if !type_environment.test_unify_type(
+                                                new_interface.unwrap(),
+                                                bound_type,
+                                                user_type_set,
+                                            ) {
+                                                unreachable!(
+                                                    "function call bounds unify(interface) must not fail!"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            last_type_variable_id = type_environment
+                                .create_type_variable_id_with_type(
+                                    function_info
+                                        .return_type
+                                        .value
+                                        .clone()
+                                        .moduled(module_path.clone(), function_call.span.clone()),
+                                )
+                                .with_span(function_call.span.clone())
+                        }
+                        _ => {
+                            let error = TypeError {
+                                kind: TypeErrorKind::NotFunctionType {
+                                    not_function_type_from: Type::Unknown
+                                        .to_display_string(user_type_set, Some(type_environment))
+                                        .with_span(last_type_variable_id.span.clone()),
+                                },
+                                span: function_call.span.clone(),
+                                module_path: module_path.clone(),
+                            };
+                            errors.push(error);
+
+                            last_type_variable_id = type_environment
+                                .create_type_variable_id_with_type(
+                                    Type::Unknown
+                                        .moduled(module_path.clone(), function_call.span.clone()),
+                                )
+                                .with_span(function_call.span.clone())
+                        }
                     },
+                    None => {
+                        let error = TypeError {
+                            kind: TypeErrorKind::NotFunctionType {
+                                not_function_type_from: Type::Unknown
+                                    .to_display_string(user_type_set, Some(type_environment))
+                                    .with_span(last_type_variable_id.span.clone()),
+                            },
+                            span: function_call.span.clone(),
+                            module_path: module_path.clone(),
+                        };
+                        errors.push(error);
+
+                        last_type_variable_id = type_environment
+                            .create_type_variable_id_with_type(
+                                Type::Unknown
+                                    .moduled(module_path.clone(), function_call.span.clone()),
+                            )
+                            .with_span(function_call.span.clone());
+                    }
                 }
             }
-            SimplePrimary::StringLiteral(literal) => todo!(),
-            SimplePrimary::NumericLiteral(literal) => Spanned::new(
-                type_environment.create_and_set_entity_type(
-                    EntityID::from(literal),
-                    Moduled::new(
-                        Type::IntegerLiteral,
-                        module_path.clone(),
-                        literal.span.clone(),
-                    ),
-                ),
-                literal.span.clone(),
-            ),
-            SimplePrimary::Null(range) => todo!(),
-            SimplePrimary::True(range) => todo!(),
-            SimplePrimary::False(range) => todo!(),
-            SimplePrimary::This(range) => todo!(),
-            SimplePrimary::LargeThis(range) => todo!(),
-        },
+
+            last_type_variable_id
+        }
         PrimaryLeftExpr::NewObject { new_object } => {
             fn infer_type_for_new_object_expression(
                 ast: &NewObjectExpression,
@@ -3039,10 +3304,8 @@ fn infer_type_for_primary(
                                 errors.push(error);
                             }
 
-                            for (origin_argument_type, argument_type_variable) in function_info
-                                .arguments
-                                .iter()
-                                .zip(function_arguments)
+                            for (origin_argument_type, argument_type_variable) in
+                                function_info.arguments.iter().zip(function_arguments)
                             {
                                 let argument_type = origin_argument_type
                                     .value

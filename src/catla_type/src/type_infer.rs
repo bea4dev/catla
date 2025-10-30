@@ -6,7 +6,7 @@ use catla_parser::ast::{
     AddOrSubExpression, AndExpression, Define, EntityID, EqualsExpression, Expression, Factor,
     GenericsDefine, LessOrGreaterExpression, Literal, MulOrDivExpression, NewObjectExpression,
     OrExpression, Primary, PrimaryLeftExpr, PrimarySeparator, Program, SimplePrimary, Spanned,
-    Statement, StatementAttribute, VariableBinding, WhereClause, WithSpan,
+    Statement, StatementAttribute, UserTypeKind, VariableBinding, WhereClause, WithSpan,
 };
 use catla_util::module_path::{ModulePath, Moduled, ToModuled};
 use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
@@ -16,8 +16,8 @@ use crate::{
     error::{TypeError, TypeErrorKind},
     module_element_collector::get_type,
     types::{
-        FunctionTypeInfo, GenericType, GlobalUserTypeSet, ImplementsCheckResult, ImplementsInfo,
-        ImplementsInfoSet, Type, WhereClauseInfo,
+        FunctionTypeInfo, GenericType, GlobalUserTypeSet, ImplementsCheckResult,
+        ImplementsElementChecker, ImplementsInfo, ImplementsInfoSet, Type, WhereClauseInfo,
     },
 };
 
@@ -1056,6 +1056,7 @@ impl Drop for TypeVariableSet<'_> {
 
 pub fn infer_type(
     ast: &Program,
+    implements_element_checker: &ImplementsElementChecker,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
     import_map: &HashMap<EntityID, ImportElement>,
@@ -1075,6 +1076,8 @@ pub fn infer_type(
         false,
         false,
         &mut type_environment,
+        implements_element_checker,
+        &Vec::new(),
         &Moduled::new(Type::Unit, module_path.clone(), ast.span.clone()),
         &None,
         generics,
@@ -1097,6 +1100,8 @@ fn infer_type_for_program(
     as_expression: bool,
     in_user_type_define: bool,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
+    super_types: &Vec<Type>,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -1117,6 +1122,7 @@ fn infer_type_for_program(
                     &assignment.left,
                     as_expression,
                     type_environment,
+                    implements_element_checker,
                     return_type,
                     this_type,
                     generics,
@@ -1135,6 +1141,7 @@ fn infer_type_for_program(
                         right,
                         as_expression,
                         type_environment,
+                        implements_element_checker,
                         return_type,
                         this_type,
                         generics,
@@ -1180,13 +1187,31 @@ fn infer_type_for_program(
                                 errors,
                                 &mut implements_infos,
                                 type_environment,
+                                implements_element_checker,
                             );
+
+                            let function_type = module_entity_type_map
+                                .get(&EntityID::from(function_define))
+                                .unwrap();
+                            if !super_types.is_empty() {
+                                if let Some(concrete_type) = this_type {
+                                    implements_element_checker.register_element(
+                                        concrete_type,
+                                        super_types,
+                                        function_type.clone().moduled(
+                                            module_path.clone(),
+                                            function_define.span.clone(),
+                                        ),
+                                    );
+                                }
+                            }
 
                             if let Ok(arguments) = &function_define.arguments {
                                 for argument in arguments.arguments.iter() {
                                     let binding_type_id = infer_type_for_variable_binding(
                                         &argument.binding,
                                         type_environment,
+                                        implements_element_checker,
                                         module_path,
                                     );
 
@@ -1265,6 +1290,8 @@ fn infer_type_for_program(
                                     as_expression,
                                     in_user_type_define,
                                     type_environment,
+                                    implements_element_checker,
+                                    &Vec::new(),
                                     &return_type,
                                     this_type,
                                     generics,
@@ -1298,31 +1325,45 @@ fn infer_type_for_program(
                                 errors,
                                 &mut implements_infos,
                                 type_environment,
+                                implements_element_checker,
                             );
-
-                            if let Some(super_type_info) = &user_type_define.super_type {
-                                // generics bounds check
-                                for super_type in super_type_info.types.iter() {
-                                    get_type(
-                                        super_type,
-                                        this_type,
-                                        generics,
-                                        import_map,
-                                        module_entity_type_map,
-                                        moduled_name_type_map,
-                                        name_resolved_map,
-                                        user_type_set,
-                                        module_path,
-                                        errors,
-                                        &mut Some((&implements_infos, type_environment)),
-                                    );
-                                }
-                            }
 
                             let user_type = module_entity_type_map
                                 .get(&EntityID::from(user_type_define))
                                 .unwrap()
                                 .clone();
+
+                            if user_type_define.kind.value == UserTypeKind::Interface {
+                                implements_element_checker
+                                    .register_interface(&user_type, &implements_infos);
+                            }
+
+                            let super_types = match &user_type_define.super_type {
+                                Some(super_type_info) => {
+                                    let mut super_types =
+                                        Vec::with_capacity(super_type_info.types.len());
+                                    // generics bounds check
+                                    for super_type in super_type_info.types.iter() {
+                                        let super_type = get_type(
+                                            super_type,
+                                            this_type,
+                                            generics,
+                                            import_map,
+                                            module_entity_type_map,
+                                            moduled_name_type_map,
+                                            name_resolved_map,
+                                            user_type_set,
+                                            module_path,
+                                            errors,
+                                            &mut Some((&implements_infos, type_environment)),
+                                        );
+                                        super_types.push(super_type);
+                                    }
+
+                                    super_types
+                                }
+                                None => Vec::new(),
+                            };
 
                             if let Ok(block) = &user_type_define.block {
                                 infer_type_for_program(
@@ -1330,6 +1371,8 @@ fn infer_type_for_program(
                                     false,
                                     true,
                                     type_environment,
+                                    implements_element_checker,
+                                    &super_types,
                                     return_type,
                                     &Some(user_type),
                                     generics,
@@ -1357,6 +1400,7 @@ fn infer_type_for_program(
                                     Ok(binding) => infer_type_for_variable_binding(
                                         binding,
                                         type_environment,
+                                        implements_element_checker,
                                         module_path,
                                     ),
                                     Err(_) => type_environment.create_type_variable_id_with_set(),
@@ -1367,6 +1411,7 @@ fn infer_type_for_program(
                                         expression,
                                         as_expression,
                                         type_environment,
+                                        implements_element_checker,
                                         return_type,
                                         this_type,
                                         generics,
@@ -1401,6 +1446,7 @@ fn infer_type_for_program(
                     expression,
                     as_expression,
                     type_environment,
+                    implements_element_checker,
                     return_type,
                     this_type,
                     generics,
@@ -1432,6 +1478,7 @@ fn infer_type_for_program(
                     errors,
                     &mut implements_infos,
                     type_environment,
+                    implements_element_checker,
                 );
 
                 let this_type = match &implements.concrete {
@@ -1451,12 +1498,34 @@ fn infer_type_for_program(
                     Err(_) => Type::Unknown,
                 };
 
+                let interface = match &implements.interface {
+                    Ok(interface) => get_type(
+                        interface,
+                        &Some(this_type.clone()),
+                        generics,
+                        import_map,
+                        module_entity_type_map,
+                        moduled_name_type_map,
+                        name_resolved_map,
+                        user_type_set,
+                        module_path,
+                        errors,
+                        &mut Some((&implements_infos, type_environment)),
+                    ),
+                    Err(_) => Type::Unknown,
+                };
+
+                let mut super_types = Vec::with_capacity(1);
+                super_types.push(interface);
+
                 if let Ok(block) = &implements.block {
                     infer_type_for_program(
                         block.program,
                         as_expression,
                         in_user_type_define,
                         type_environment,
+                        implements_element_checker,
+                        &super_types,
                         return_type,
                         &Some(this_type),
                         generics,
@@ -1490,6 +1559,7 @@ fn generics_define_register_and_bounds_check(
     errors: &mut std::vec::Vec<TypeError>,
     implements_infos: &mut ImplementsInfoSet,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
 ) {
     if let Some(generics_define) = generics_ast {
         for generic in generics_define.elements.iter() {
@@ -1635,6 +1705,7 @@ fn generics_define_register_and_bounds_check(
 fn infer_type_for_variable_binding(
     ast: &VariableBinding,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     module_path: &ModulePath,
 ) -> TypeVariableID {
     match ast {
@@ -1645,7 +1716,12 @@ fn infer_type_for_variable_binding(
             let tuple_items = bindings
                 .iter()
                 .map(|binding| {
-                    infer_type_for_variable_binding(binding, type_environment, module_path)
+                    infer_type_for_variable_binding(
+                        binding,
+                        type_environment,
+                        implements_element_checker,
+                        module_path,
+                    )
                 })
                 .map(|id| Type::TypeVariable(id))
                 .collect();
@@ -1663,6 +1739,7 @@ fn infer_type_for_expression(
     ast: &Expression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -1683,6 +1760,7 @@ fn infer_type_for_expression(
                     expression,
                     as_expression,
                     type_environment,
+                    implements_element_checker,
                     return_type,
                     this_type,
                     generics,
@@ -1726,6 +1804,7 @@ fn infer_type_for_expression(
             or_expression,
             as_expression,
             type_environment,
+            implements_element_checker,
             return_type,
             this_type,
             generics,
@@ -1746,6 +1825,7 @@ fn infer_type_for_or_expression(
     ast: &OrExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -1764,6 +1844,7 @@ fn infer_type_for_or_expression(
             &ast.left,
             as_expression,
             type_environment,
+            implements_element_checker,
             return_type,
             this_type,
             generics,
@@ -1786,6 +1867,7 @@ fn infer_type_for_and_expression(
     ast: &AndExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -1804,6 +1886,7 @@ fn infer_type_for_and_expression(
             &ast.left,
             as_expression,
             type_environment,
+            implements_element_checker,
             return_type,
             this_type,
             generics,
@@ -1826,6 +1909,7 @@ fn infer_type_for_equals_expression(
     ast: &EqualsExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -1844,6 +1928,7 @@ fn infer_type_for_equals_expression(
             &ast.left,
             as_expression,
             type_environment,
+            implements_element_checker,
             return_type,
             this_type,
             generics,
@@ -1866,6 +1951,7 @@ fn infer_type_for_less_or_greater_expression(
     ast: &LessOrGreaterExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -1884,6 +1970,7 @@ fn infer_type_for_less_or_greater_expression(
             &ast.left,
             as_expression,
             type_environment,
+            implements_element_checker,
             return_type,
             this_type,
             generics,
@@ -1906,6 +1993,7 @@ fn infer_type_for_add_or_sub_expression(
     ast: &AddOrSubExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -1924,6 +2012,7 @@ fn infer_type_for_add_or_sub_expression(
             &ast.left,
             as_expression,
             type_environment,
+            implements_element_checker,
             return_type,
             this_type,
             generics,
@@ -1946,6 +2035,7 @@ fn infer_type_for_mul_or_div_expression(
     ast: &MulOrDivExpression,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -1964,6 +2054,7 @@ fn infer_type_for_mul_or_div_expression(
             &ast.left,
             as_expression,
             type_environment,
+            implements_element_checker,
             return_type,
             this_type,
             generics,
@@ -1986,6 +2077,7 @@ fn infer_type_for_factor(
     ast: &Factor,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -2006,6 +2098,7 @@ fn infer_type_for_factor(
                 primary,
                 as_expression,
                 type_environment,
+                implements_element_checker,
                 return_type,
                 this_type,
                 generics,
@@ -2028,6 +2121,7 @@ fn infer_type_for_primary(
     ast: &Primary,
     as_expression: bool,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -2067,6 +2161,7 @@ fn infer_type_for_primary(
                                             path_name,
                                             &mut chain_start_position,
                                             type_environment,
+                                            implements_element_checker,
                                             moduled_name_type_map,
                                             package_resource_set,
                                             module_path,
@@ -2140,6 +2235,7 @@ fn infer_type_for_primary(
                                 literal.value.to_string(),
                                 &mut chain_start_position,
                                 type_environment,
+                                implements_element_checker,
                                 moduled_name_type_map,
                                 package_resource_set,
                                 module_path,
@@ -2180,6 +2276,7 @@ fn infer_type_for_primary(
                             expression,
                             as_expression,
                             type_environment,
+                            implements_element_checker,
                             return_type,
                             this_type,
                             generics,
@@ -2426,6 +2523,7 @@ fn infer_type_for_primary(
                 ast: &NewObjectExpression,
                 object_type: Spanned<Type>,
                 type_environment: &mut TypeEnvironment,
+                implements_element_checker: &ImplementsElementChecker,
                 return_type: &Moduled<Type>,
                 this_type: &Option<Type>,
                 generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -2499,6 +2597,7 @@ fn infer_type_for_primary(
                                 &field_assign.expression,
                                 true,
                                 type_environment,
+                                implements_element_checker,
                                 return_type,
                                 this_type,
                                 generics,
@@ -2571,6 +2670,7 @@ fn infer_type_for_primary(
                                             new_object,
                                             Spanned::new(ty.clone(), literal.span.clone()),
                                             type_environment,
+                                            implements_element_checker,
                                             return_type,
                                             this_type,
                                             generics,
@@ -2637,6 +2737,7 @@ fn infer_type_for_primary(
                                                                         .clone(),
                                                                 ),
                                                                 type_environment,
+                                                                implements_element_checker,
                                                                 return_type,
                                                                 this_type,
                                                                 generics,
@@ -2729,6 +2830,7 @@ fn infer_type_for_primary(
                                         new_object.path.first().unwrap().span.clone(),
                                     ),
                                     type_environment,
+                                    implements_element_checker,
                                     return_type,
                                     this_type,
                                     generics,
@@ -2805,6 +2907,7 @@ fn infer_type_for_primary(
                                         new_object,
                                         Spanned::new(ty.clone(), type_literal.span.clone()),
                                         type_environment,
+                                        implements_element_checker,
                                         return_type,
                                         this_type,
                                         generics,
@@ -2885,6 +2988,7 @@ fn infer_type_for_primary(
                             argument_expression,
                             as_expression,
                             type_environment,
+                            implements_element_checker,
                             return_type,
                             this_type,
                             generics,
@@ -3380,6 +3484,7 @@ fn get_module_import_type(
     mut path_name: String,
     chain_start_position: &mut usize,
     type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     package_resource_set: &PackageResourceSet,
     module_path: &ModulePath,

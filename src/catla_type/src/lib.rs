@@ -17,7 +17,7 @@ mod test {
     use crate::{
         module_element_collector::collect_module_element_type_for_program,
         type_infer::infer_type,
-        types::{GlobalUserTypeSet, ImplementsInfoSet, Type},
+        types::{GlobalUserTypeSet, ImplementsElementChecker, ImplementsInfoSet, Type},
         user_type_collector::collect_user_type_for_program,
     };
 
@@ -86,8 +86,10 @@ let c = b
 
         let moduled_name_type_map = HashMap::new();
         let package_resource_set = PackageResourceSet::new();
+        let implements_element_checker = ImplementsElementChecker::new();
         let result = infer_type(
             ast.ast(),
+            &implements_element_checker,
             &mut generics,
             &implements_infos,
             &import_map,

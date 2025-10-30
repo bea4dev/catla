@@ -12,9 +12,12 @@ use derivative::Derivative;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
 
-use crate::type_infer::{TypeEnvironment, TypeVariableID};
+use crate::{
+    error::TypeError,
+    type_infer::{TypeEnvironment, TypeVariableID},
+};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Int8,
     Int16,
@@ -364,7 +367,7 @@ pub struct UserTypeInfo {
     pub span: Range<usize>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct WhereClauseInfo {
     pub target: Spanned<Type>,
     pub bounds: Vec<Spanned<Type>>,
@@ -393,7 +396,7 @@ impl WhereClauseInfo {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct FunctionTypeInfo {
     pub module_path: ModulePath,
     pub name: Option<Spanned<String>>,
@@ -405,29 +408,97 @@ pub struct FunctionTypeInfo {
 }
 
 #[derive(Derivative)]
-#[derivative(PartialEq, Eq)]
+#[derivative(PartialEq, Eq, Hash)]
 #[derive(Debug)]
 pub struct GenericType {
     pub module_path: ModulePath,
     pub entity_id: EntityID,
     pub name: Spanned<String>,
-    #[derivative(PartialEq = "ignore")]
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub bounds: RwLock<Vec<Spanned<Type>>>,
 }
 
 #[derive(Debug)]
+pub struct ImplementsElementChecker {
+    interfaces: Arc<RwLock<HashMap<GlobalUserTypeID, ImplementsInterface>>>,
+    elements: Arc<RwLock<Vec<ImplementsElement>>>,
+}
+
+impl ImplementsElementChecker {
+    pub fn new() -> Self {
+        Self {
+            interfaces: Arc::new(RwLock::new(HashMap::new())),
+            elements: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    pub fn register_interface(&self, interface: &Type, implements_infos: &ImplementsInfoSet) {
+        let mut interfaces = self.interfaces.write().unwrap();
+        if let Type::UserType {
+            user_type_info,
+            generics: _,
+        } = interface
+        {
+            interfaces.insert(*user_type_info, ImplementsInterface::new(implements_infos));
+        }
+    }
+
+    pub fn register_element(
+        &self,
+        concrete_type: &Type,
+        super_types: &[Type],
+        element_type: Moduled<Type>,
+    ) {
+        let mut elements = self.elements.write().unwrap();
+        elements.push(ImplementsElement {
+            concrete_type: concrete_type.clone(),
+            super_types: super_types.iter().cloned().collect(),
+            element_type: element_type,
+        });
+    }
+
+    pub fn check(&self, errors: &mut Vec<TypeError>) {
+        
+    }
+}
+
+#[derive(Debug)]
+pub struct ImplementsInterface {
+    implements_infos: ImplementsInfoSet,
+    found_elements: HashMap<String, EntityID>,
+}
+
+impl ImplementsInterface {
+    pub fn new(implements_infos: &ImplementsInfoSet) -> Self {
+        Self {
+            implements_infos: implements_infos.clone(),
+            found_elements: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ImplementsElement {
+    concrete_type: Type,
+    super_types: Vec<Type>,
+    element_type: Moduled<Type>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ImplementsInfoSet {
-    map: IndexMap<EntityID, Arc<ImplementsInfo>>,
+    map: Arc<RwLock<IndexMap<EntityID, Arc<ImplementsInfo>>>>,
 }
 
 impl ImplementsInfoSet {
     pub fn new(parent: Option<&ImplementsInfoSet>) -> Self {
         let mut map = IndexMap::new();
         if let Some(parent) = parent {
-            map.extend(parent.map.clone());
+            map.extend(parent.map.read().unwrap().clone());
         }
 
-        Self { map }
+        Self {
+            map: Arc::new(RwLock::new(map)),
+        }
     }
 
     pub fn register_implements_info(
@@ -435,7 +506,10 @@ impl ImplementsInfoSet {
         entity_id: EntityID,
         implements_info: ImplementsInfo,
     ) {
-        self.map.insert(entity_id, Arc::new(implements_info));
+        self.map
+            .write()
+            .unwrap()
+            .insert(entity_id, Arc::new(implements_info));
     }
 
     pub fn find_implements_for(
@@ -448,7 +522,7 @@ impl ImplementsInfoSet {
     ) -> Vec<(Arc<ImplementsInfo>, ImplementsCheckResult)> {
         let mut results = Vec::new();
 
-        for implements_info in self.map.values() {
+        for implements_info in self.map.read().unwrap().values() {
             let result = implements_info.is_implements(
                 ty.clone(),
                 None,
@@ -482,7 +556,7 @@ impl ImplementsInfoSet {
     ) -> ImplementsCheckResult {
         let mut results = Vec::new();
 
-        for implements_info in self.map.values() {
+        for implements_info in self.map.read().unwrap().values() {
             let result = implements_info.is_implements(
                 concrete.clone(),
                 Some(interface.clone()),

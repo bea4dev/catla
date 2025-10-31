@@ -269,20 +269,18 @@ pub fn collect_module_element_type_for_program(
                                         &mut None,
                                     );
 
-                                    implements_infos.register_implements_info(
-                                        EntityID::from(super_type_info),
-                                        ImplementsInfo {
-                                            generics_define: std::vec::Vec::new(),
-                                            interface: super_type
-                                                .with_span(super_type_info.span.clone()),
-                                            concrete: user_type
-                                                .clone()
-                                                .with_span(user_type_define.span.clone()),
-                                            where_clause: std::vec::Vec::new(),
-                                            element_type: HashMap::new(),
-                                            module_path: module_path.clone(),
-                                        },
-                                    );
+                                    implements_infos.register_implements_info(ImplementsInfo {
+                                        generics_define: std::vec::Vec::new(),
+                                        interface: super_type
+                                            .with_span(super_type_info.span.clone()),
+                                        concrete: user_type
+                                            .clone()
+                                            .with_span(user_type_define.span.clone()),
+                                        where_clause: std::vec::Vec::new(),
+                                        element_type: HashMap::new(),
+                                        module_path: module_path.clone(),
+                                        is_instant: true,
+                                    });
                                 }
                             }
 
@@ -569,17 +567,15 @@ pub fn collect_module_element_type_for_program(
                     );
                 }
 
-                implements_infos.register_implements_info(
-                    implements.into(),
-                    ImplementsInfo {
-                        generics_define,
-                        interface,
-                        concrete,
-                        where_clause,
-                        element_type,
-                        module_path: module_path.clone(),
-                    },
-                );
+                implements_infos.register_implements_info(ImplementsInfo {
+                    generics_define,
+                    interface,
+                    concrete,
+                    where_clause,
+                    element_type,
+                    module_path: module_path.clone(),
+                    is_instant: false,
+                });
             }
         }
     }

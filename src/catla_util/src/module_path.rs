@@ -24,6 +24,14 @@ impl ModulePath {
             file_path: Arc::new(file_path.into()),
         }
     }
+
+    pub fn dummy() -> Self {
+        Self {
+            path: Arc::new(vec!["dummy".to_string()]),
+            path_name: Arc::new("dummy".to_string()),
+            file_path: Arc::new(PathBuf::new()),
+        }
+    }
 }
 
 pub trait ToModuled: Sized {

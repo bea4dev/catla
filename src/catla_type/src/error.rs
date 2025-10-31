@@ -53,4 +53,24 @@ pub enum TypeErrorKind {
         expected: Moduled<usize>,
         found: Moduled<usize>,
     },
+    FunctionArgumentCountMismatchInInfer {
+        expected: Moduled<usize>,
+        found: Moduled<usize>,
+    },
+    NotInterfaceInImplements,
+    NoElementFoundInImplements {
+        element: Moduled<String>,
+    },
+    TypeMismatchInImplements {
+        origin: Moduled<String>,
+        impls: Moduled<String>,
+    },
+    ExtraBoundsInImplements {
+        origin: Moduled<()>,
+        impls: Moduled<()>,
+    },
+    UnknownImplementsElement {
+        interface: Moduled<String>,
+        impl_element: Moduled<String>,
+    },
 }

@@ -6,7 +6,7 @@ use catla_parser::ast::{
     AddOrSubExpression, AndExpression, Define, EntityID, EqualsExpression, Expression, Factor,
     GenericsDefine, LessOrGreaterExpression, Literal, MulOrDivExpression, NewObjectExpression,
     OrExpression, Primary, PrimaryLeftExpr, PrimarySeparator, Program, SimplePrimary, Spanned,
-    Statement, StatementAttribute, UserTypeKind, VariableBinding, WhereClause, WithSpan,
+    Statement, StatementAttribute, VariableBinding, WhereClause, WithSpan,
 };
 use catla_util::module_path::{ModulePath, Moduled, ToModuled};
 use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
@@ -464,31 +464,99 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                     function_info: right_function_info,
                     generics: right_generics,
                 } => {
-                    if left_function_info == right_function_info {
-                        if left_generics.len() == right_generics.len() {
-                            for (left_generic, right_generic) in
-                                left_generics.iter().zip(right_generics.iter())
-                            {
-                                self.unify_type(
-                                    Moduled::new(
-                                        left_generic.clone(),
-                                        left.module_path.clone(),
-                                        left.span.clone(),
-                                    ),
-                                    Moduled::new(
-                                        right_generic.clone(),
-                                        right.module_path.clone(),
-                                        right.span.clone(),
-                                    ),
-                                    user_type_set,
-                                    errors,
-                                );
-                            }
+                    if left_function_info.arguments.len() != right_function_info.arguments.len() {
+                        let left_arguments_span_start = left_function_info
+                            .arguments
+                            .first()
+                            .map(|argument| argument.span.start)
+                            .unwrap_or(left_function_info.span.start);
+                        let left_arguments_span_end = left_function_info
+                            .arguments
+                            .last()
+                            .map(|argument| argument.span.end)
+                            .unwrap_or(left_function_info.span.end);
+                        let right_arguemnts_span_start = right_function_info
+                            .arguments
+                            .first()
+                            .map(|argument| argument.span.start)
+                            .unwrap_or(right_function_info.span.start);
+                        let right_arguemnts_span_end = right_function_info
+                            .arguments
+                            .last()
+                            .map(|argument| argument.span.end)
+                            .unwrap_or(right_function_info.span.end);
 
-                            true
-                        } else {
-                            false
+                        let error = TypeError {
+                            kind: TypeErrorKind::FunctionArgumentCountMismatchInInfer {
+                                expected: left_function_info.arguments.len().moduled(
+                                    left_function_info.module_path.clone(),
+                                    left_arguments_span_start..left_arguments_span_end,
+                                ),
+                                found: right_function_info.arguments.len().moduled(
+                                    right_function_info.module_path.clone(),
+                                    right_arguemnts_span_start..right_arguemnts_span_end,
+                                ),
+                            },
+                            span: left.span.clone(),
+                            module_path: left.module_path.clone(),
+                        };
+                        errors.push(error);
+                        return;
+                    }
+
+                    for (left_argument, right_argument) in left_function_info
+                        .arguments
+                        .iter()
+                        .zip(right_function_info.arguments.iter())
+                    {
+                        self.unify_type(
+                            left_argument.value.clone().moduled(
+                                left_function_info.module_path.clone(),
+                                left_argument.span.clone(),
+                            ),
+                            right_argument.value.clone().moduled(
+                                right_function_info.module_path.clone(),
+                                right_argument.span.clone(),
+                            ),
+                            user_type_set,
+                            errors,
+                        );
+                    }
+
+                    self.unify_type(
+                        left_function_info.return_type.value.clone().moduled(
+                            left_function_info.module_path.clone(),
+                            left_function_info.return_type.span.clone(),
+                        ),
+                        right_function_info.return_type.value.clone().moduled(
+                            right_function_info.module_path.clone(),
+                            right_function_info.return_type.span.clone(),
+                        ),
+                        user_type_set,
+                        errors,
+                    );
+
+                    if left_generics.len() == right_generics.len() {
+                        for (left_generic, right_generic) in
+                            left_generics.iter().zip(right_generics.iter())
+                        {
+                            self.unify_type(
+                                Moduled::new(
+                                    left_generic.clone(),
+                                    left.module_path.clone(),
+                                    left.span.clone(),
+                                ),
+                                Moduled::new(
+                                    right_generic.clone(),
+                                    right.module_path.clone(),
+                                    right.span.clone(),
+                                ),
+                                user_type_set,
+                                errors,
+                            );
                         }
+
+                        true
                     } else {
                         false
                     }
@@ -1077,7 +1145,6 @@ pub fn infer_type(
         false,
         &mut type_environment,
         implements_element_checker,
-        &Vec::new(),
         &Moduled::new(Type::Unit, module_path.clone(), ast.span.clone()),
         &None,
         generics,
@@ -1101,7 +1168,6 @@ fn infer_type_for_program(
     in_user_type_define: bool,
     type_environment: &mut TypeEnvironment,
     implements_element_checker: &ImplementsElementChecker,
-    super_types: &Vec<Type>,
     return_type: &Moduled<Type>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
@@ -1187,24 +1253,7 @@ fn infer_type_for_program(
                                 errors,
                                 &mut implements_infos,
                                 type_environment,
-                                implements_element_checker,
                             );
-
-                            let function_type = module_entity_type_map
-                                .get(&EntityID::from(function_define))
-                                .unwrap();
-                            if !super_types.is_empty() {
-                                if let Some(concrete_type) = this_type {
-                                    implements_element_checker.register_element(
-                                        concrete_type,
-                                        super_types,
-                                        function_type.clone().moduled(
-                                            module_path.clone(),
-                                            function_define.span.clone(),
-                                        ),
-                                    );
-                                }
-                            }
 
                             if let Ok(arguments) = &function_define.arguments {
                                 for argument in arguments.arguments.iter() {
@@ -1291,7 +1340,6 @@ fn infer_type_for_program(
                                     in_user_type_define,
                                     type_environment,
                                     implements_element_checker,
-                                    &Vec::new(),
                                     &return_type,
                                     this_type,
                                     generics,
@@ -1325,7 +1373,6 @@ fn infer_type_for_program(
                                 errors,
                                 &mut implements_infos,
                                 type_environment,
-                                implements_element_checker,
                             );
 
                             let user_type = module_entity_type_map
@@ -1333,37 +1380,23 @@ fn infer_type_for_program(
                                 .unwrap()
                                 .clone();
 
-                            if user_type_define.kind.value == UserTypeKind::Interface {
-                                implements_element_checker
-                                    .register_interface(&user_type, &implements_infos);
-                            }
-
-                            let super_types = match &user_type_define.super_type {
-                                Some(super_type_info) => {
-                                    let mut super_types =
-                                        Vec::with_capacity(super_type_info.types.len());
-                                    // generics bounds check
-                                    for super_type in super_type_info.types.iter() {
-                                        let super_type = get_type(
-                                            super_type,
-                                            this_type,
-                                            generics,
-                                            import_map,
-                                            module_entity_type_map,
-                                            moduled_name_type_map,
-                                            name_resolved_map,
-                                            user_type_set,
-                                            module_path,
-                                            errors,
-                                            &mut Some((&implements_infos, type_environment)),
-                                        );
-                                        super_types.push(super_type);
-                                    }
-
-                                    super_types
+                            if let Some(super_type_info) = &user_type_define.super_type {
+                                for super_type in super_type_info.types.iter() {
+                                    get_type(
+                                        super_type,
+                                        this_type,
+                                        generics,
+                                        import_map,
+                                        module_entity_type_map,
+                                        moduled_name_type_map,
+                                        name_resolved_map,
+                                        user_type_set,
+                                        module_path,
+                                        errors,
+                                        &mut Some((&implements_infos, type_environment)),
+                                    );
                                 }
-                                None => Vec::new(),
-                            };
+                            }
 
                             if let Ok(block) = &user_type_define.block {
                                 infer_type_for_program(
@@ -1372,7 +1405,6 @@ fn infer_type_for_program(
                                     true,
                                     type_environment,
                                     implements_element_checker,
-                                    &super_types,
                                     return_type,
                                     &Some(user_type),
                                     generics,
@@ -1478,7 +1510,6 @@ fn infer_type_for_program(
                     errors,
                     &mut implements_infos,
                     type_environment,
-                    implements_element_checker,
                 );
 
                 let this_type = match &implements.concrete {
@@ -1515,9 +1546,6 @@ fn infer_type_for_program(
                     Err(_) => Type::Unknown,
                 };
 
-                let mut super_types = Vec::with_capacity(1);
-                super_types.push(interface);
-
                 if let Ok(block) = &implements.block {
                     infer_type_for_program(
                         block.program,
@@ -1525,7 +1553,6 @@ fn infer_type_for_program(
                         in_user_type_define,
                         type_environment,
                         implements_element_checker,
-                        &super_types,
                         return_type,
                         &Some(this_type),
                         generics,
@@ -1559,7 +1586,6 @@ fn generics_define_register_and_bounds_check(
     errors: &mut std::vec::Vec<TypeError>,
     implements_infos: &mut ImplementsInfoSet,
     type_environment: &mut TypeEnvironment,
-    implements_element_checker: &ImplementsElementChecker,
 ) {
     if let Some(generics_define) = generics_ast {
         for generic in generics_define.elements.iter() {
@@ -1580,18 +1606,16 @@ fn generics_define_register_and_bounds_check(
                     &mut None,
                 );
 
-                implements_infos.register_implements_info(
-                    bound.into(),
-                    ImplementsInfo {
-                        generics_define: std::vec::Vec::new(),
-                        interface: bound_type.with_span(bound.span.clone()),
-                        concrete: Type::Generic(generic_type.clone())
-                            .with_span(generic.name.span.clone()),
-                        where_clause: std::vec::Vec::new(),
-                        element_type: HashMap::new(),
-                        module_path: module_path.clone(),
-                    },
-                );
+                implements_infos.register_implements_info(ImplementsInfo {
+                    generics_define: std::vec::Vec::new(),
+                    interface: bound_type.with_span(bound.span.clone()),
+                    concrete: Type::Generic(generic_type.clone())
+                        .with_span(generic.name.span.clone()),
+                    where_clause: std::vec::Vec::new(),
+                    element_type: HashMap::new(),
+                    module_path: module_path.clone(),
+                    is_instant: true,
+                });
             }
         }
     }
@@ -1627,19 +1651,17 @@ fn generics_define_register_and_bounds_check(
                     &mut None,
                 );
 
-                implements_infos.register_implements_info(
-                    bound.into(),
-                    ImplementsInfo {
-                        generics_define: std::vec::Vec::new(),
-                        interface: bound_type.with_span(bound.span.clone()),
-                        concrete: target_type
-                            .clone()
-                            .with_span(where_element.target_type.span.clone()),
-                        where_clause: std::vec::Vec::new(),
-                        element_type: HashMap::new(),
-                        module_path: module_path.clone(),
-                    },
-                );
+                implements_infos.register_implements_info(ImplementsInfo {
+                    generics_define: std::vec::Vec::new(),
+                    interface: bound_type.with_span(bound.span.clone()),
+                    concrete: target_type
+                        .clone()
+                        .with_span(where_element.target_type.span.clone()),
+                    where_clause: std::vec::Vec::new(),
+                    element_type: HashMap::new(),
+                    module_path: module_path.clone(),
+                    is_instant: true,
+                });
             }
         }
     }

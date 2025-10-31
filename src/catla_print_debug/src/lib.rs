@@ -21,13 +21,13 @@ mod test {
     #[test]
     fn infer_type_test() {
         let source = r"
-interface I1<T> {}
+interface TestInterface {
+    function <T> test();
+}
 
-implements I1<int> for int {}
-
-function <T, I: I1<T>> dddd(i: I) -> T {}
-
-let test = dddd(100)
+implements TestInterface for int {
+    function <T: TestInterface> test() {}
+}
         ";
         let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
 
@@ -125,6 +125,10 @@ let test = dddd(100)
             &package_resource_set,
             &mut errors,
         );
+
+        implements_element_checker.register_implements(&implements_infos);
+        implements_element_checker.check(&user_type_set, &implements_infos, &mut errors);
+
         dbg!(errors);
 
         print_type_infer_result(&ast, &result, &user_type_set);

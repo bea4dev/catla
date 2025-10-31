@@ -6,14 +6,15 @@ use std::{
     },
 };
 
-use catla_parser::ast::{EntityID, Spanned};
+use bumpalo::Bump;
+use catla_parser::ast::{EntityID, Spanned, UserTypeKind, WithSpan};
 use catla_util::module_path::{ModulePath, Moduled, ToModuled};
 use derivative::Derivative;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
 
 use crate::{
-    error::TypeError,
+    error::{TypeError, TypeErrorKind},
     type_infer::{TypeEnvironment, TypeVariableID},
 };
 
@@ -358,6 +359,7 @@ impl GlobalUserTypeSet {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct UserTypeInfo {
+    pub kind: Option<Spanned<UserTypeKind>>,
     pub module_path: ModulePath,
     pub name: Spanned<String>,
     pub is_alias: bool,
@@ -420,59 +422,376 @@ pub struct GenericType {
 
 #[derive(Debug)]
 pub struct ImplementsElementChecker {
-    interfaces: Arc<RwLock<HashMap<GlobalUserTypeID, ImplementsInterface>>>,
-    elements: Arc<RwLock<Vec<ImplementsElement>>>,
+    implements: Arc<RwLock<Vec<Arc<ImplementsInfo>>>>,
 }
 
 impl ImplementsElementChecker {
     pub fn new() -> Self {
         Self {
-            interfaces: Arc::new(RwLock::new(HashMap::new())),
-            elements: Arc::new(RwLock::new(Vec::new())),
+            implements: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
-    pub fn register_interface(&self, interface: &Type, implements_infos: &ImplementsInfoSet) {
-        let mut interfaces = self.interfaces.write().unwrap();
-        if let Type::UserType {
-            user_type_info,
-            generics: _,
-        } = interface
-        {
-            interfaces.insert(*user_type_info, ImplementsInterface::new(implements_infos));
+    pub fn register_implements(&self, implements_infos: &ImplementsInfoSet) {
+        let mut implements = self.implements.write().unwrap();
+
+        for implements_info in implements_infos.infos.read().unwrap().iter() {
+            if !implements_info.is_instant {
+                implements.push(implements_info.clone());
+            }
         }
     }
 
-    pub fn register_element(
+    pub fn check(
         &self,
-        concrete_type: &Type,
-        super_types: &[Type],
-        element_type: Moduled<Type>,
+        user_type_set: &GlobalUserTypeSet,
+        global_implements_infos: &ImplementsInfoSet,
+        errors: &mut Vec<TypeError>,
     ) {
-        let mut elements = self.elements.write().unwrap();
-        elements.push(ImplementsElement {
-            concrete_type: concrete_type.clone(),
-            super_types: super_types.iter().cloned().collect(),
-            element_type: element_type,
-        });
-    }
+        let implements = self.implements.read().unwrap();
 
-    pub fn check(&self, errors: &mut Vec<TypeError>) {
-        
-    }
-}
+        let temp_allocator = Bump::new();
+        let mut temp_type_environment = TypeEnvironment::new(&ModulePath::dummy(), &temp_allocator);
 
-#[derive(Debug)]
-pub struct ImplementsInterface {
-    implements_infos: ImplementsInfoSet,
-    found_elements: HashMap<String, EntityID>,
-}
+        let implements_infos = ImplementsInfoSet::new(Some(global_implements_infos));
 
-impl ImplementsInterface {
-    pub fn new(implements_infos: &ImplementsInfoSet) -> Self {
-        Self {
-            implements_infos: implements_infos.clone(),
-            found_elements: HashMap::new(),
+        for implements in implements.iter() {
+            let implements_infos = ImplementsInfoSet::new(Some(&implements_infos));
+            for generic in implements.generics_define.iter() {
+                for bound in generic.bounds.read().unwrap().iter() {
+                    implements_infos.register_implements_info(ImplementsInfo {
+                        generics_define: Vec::new(),
+                        interface: bound.clone(),
+                        concrete: Type::Generic(generic.clone())
+                            .with_span(generic.name.span.clone()),
+                        where_clause: Vec::new(),
+                        element_type: HashMap::new(),
+                        module_path: generic.module_path.clone(),
+                        is_instant: true,
+                    });
+                }
+            }
+
+            for where_bound in implements.where_clause.iter() {
+                let target_type = where_bound.target.clone();
+
+                for bound in where_bound.bounds.iter() {
+                    implements_infos.register_implements_info(ImplementsInfo {
+                        generics_define: Vec::new(),
+                        interface: bound.clone(),
+                        concrete: target_type.clone(),
+                        where_clause: Vec::new(),
+                        element_type: HashMap::new(),
+                        module_path: implements.module_path.clone(),
+                        is_instant: true,
+                    });
+                }
+            }
+
+            let interface_type_id = match &implements.interface.value {
+                Type::UserType {
+                    user_type_info,
+                    generics: _,
+                } => *user_type_info,
+                _ => {
+                    let error = TypeError {
+                        kind: TypeErrorKind::NotInterfaceInImplements,
+                        span: implements.interface.span.clone(),
+                        module_path: implements.module_path.clone(),
+                    };
+                    errors.push(error);
+                    continue;
+                }
+            };
+
+            let interface_info = user_type_set.get(interface_type_id);
+            let interface_info = interface_info.read().unwrap();
+
+            if interface_info
+                .kind
+                .as_ref()
+                .expect("Unresolved type alias")
+                .value
+                != UserTypeKind::Interface
+            {
+                let error = TypeError {
+                    kind: TypeErrorKind::NotInterfaceInImplements,
+                    span: implements.interface.span.clone(),
+                    module_path: implements.module_path.clone(),
+                };
+                errors.push(error);
+                continue;
+            }
+
+            let Type::UserType {
+                user_type_info: interface_type_info,
+                generics: interface_generics,
+            } = &implements.interface.value
+            else {
+                continue;
+            };
+
+            let interface_type_info = user_type_set.get(*interface_type_info);
+            let interface_type_info = interface_type_info.read().unwrap();
+
+            for generic in interface_type_info.generics.iter() {
+                for bound in generic.bounds.read().unwrap().iter() {
+                    implements_infos.register_implements_info(ImplementsInfo {
+                        generics_define: Vec::new(),
+                        interface: bound.clone(),
+                        concrete: Type::Generic(generic.clone())
+                            .with_span(generic.name.span.clone()),
+                        where_clause: Vec::new(),
+                        element_type: HashMap::new(),
+                        module_path: generic.module_path.clone(),
+                        is_instant: true,
+                    });
+                }
+            }
+
+            for where_bound in interface_type_info.where_clause.iter() {
+                let target_type = where_bound.target.clone();
+
+                for bound in where_bound.bounds.iter() {
+                    implements_infos.register_implements_info(ImplementsInfo {
+                        generics_define: Vec::new(),
+                        interface: bound.clone(),
+                        concrete: target_type.clone(),
+                        where_clause: Vec::new(),
+                        element_type: HashMap::new(),
+                        module_path: interface_type_info.module_path.clone(),
+                        is_instant: true,
+                    });
+                }
+            }
+
+            let interface_old_generics = &interface_type_info.generics;
+            let interface_new_generics = interface_generics;
+
+            for (origin_element_name, origin_element) in interface_info.element_types.iter() {
+                let Some(impl_element) = implements.element_type.get(origin_element_name) else {
+                    let error = TypeError {
+                        kind: TypeErrorKind::NoElementFoundInImplements {
+                            element: origin_element_name.to_string().moduled(
+                                interface_info.module_path.clone(),
+                                origin_element.span.clone(),
+                            ),
+                        },
+                        span: implements.concrete.span.clone(),
+                        module_path: implements.module_path.clone(),
+                    };
+                    errors.push(error);
+                    continue;
+                };
+
+                let Type::Function {
+                    function_info: origin_function_info,
+                    generics: _,
+                } = &origin_element.value
+                else {
+                    continue;
+                };
+
+                let Type::Function {
+                    function_info: impl_function_info,
+                    generics: _,
+                } = &impl_element.value
+                else {
+                    continue;
+                };
+
+                let old_generics = &origin_function_info.generics;
+                let new_generics = impl_function_info
+                    .generics
+                    .iter()
+                    .map(|generic| Type::Generic(generic.clone()))
+                    .collect::<Vec<_>>();
+
+                let replaced_origin_element = origin_element
+                    .value
+                    .replace_generics(interface_old_generics, interface_new_generics)
+                    .replace_generics(old_generics, &new_generics);
+
+                if !temp_type_environment.test_unify_type(
+                    impl_element
+                        .value
+                        .clone()
+                        .moduled(ModulePath::dummy(), 0..0),
+                    replaced_origin_element.moduled(ModulePath::dummy(), 0..0),
+                    user_type_set,
+                ) {
+                    let error = TypeError {
+                        kind: TypeErrorKind::TypeMismatchInImplements {
+                            origin: origin_element
+                                .value
+                                .to_display_string(user_type_set, None)
+                                .moduled(
+                                    origin_function_info.module_path.clone(),
+                                    origin_function_info.span.clone(),
+                                ),
+                            impls: impl_element
+                                .value
+                                .to_display_string(user_type_set, None)
+                                .moduled(
+                                    impl_function_info.module_path.clone(),
+                                    impl_function_info.span.clone(),
+                                ),
+                        },
+                        span: impl_function_info.span.clone(),
+                        module_path: impl_function_info.module_path.clone(),
+                    };
+                    errors.push(error);
+                    continue;
+                }
+
+                let old_generics = &impl_function_info.generics;
+                let new_generics = origin_function_info
+                    .generics
+                    .iter()
+                    .map(|generic| Type::Generic(generic.clone()))
+                    .collect::<Vec<_>>();
+
+                let replaced_impl_function = impl_element
+                    .value
+                    .replace_generics(old_generics, &new_generics);
+
+                let implements_infos = ImplementsInfoSet::new(Some(&implements_infos));
+
+                for generic in origin_function_info.generics.iter() {
+                    for bound in generic.bounds.read().unwrap().iter() {
+                        implements_infos.register_implements_info(ImplementsInfo {
+                            generics_define: Vec::new(),
+                            interface: bound.clone(),
+                            concrete: Type::Generic(generic.clone())
+                                .with_span(generic.name.span.clone()),
+                            where_clause: Vec::new(),
+                            element_type: HashMap::new(),
+                            module_path: generic.module_path.clone(),
+                            is_instant: true,
+                        });
+                    }
+                }
+
+                for where_bound in origin_function_info.where_clause.iter() {
+                    let target_type = where_bound.target.clone();
+
+                    for bound in where_bound.bounds.iter() {
+                        implements_infos.register_implements_info(ImplementsInfo {
+                            generics_define: Vec::new(),
+                            interface: bound.clone(),
+                            concrete: target_type.clone(),
+                            where_clause: Vec::new(),
+                            element_type: HashMap::new(),
+                            module_path: origin_function_info.module_path.clone(),
+                            is_instant: true,
+                        });
+                    }
+                }
+
+                let Type::Function {
+                    function_info: replaced_impl_function_info,
+                    generics: _,
+                } = replaced_impl_function
+                else {
+                    continue;
+                };
+
+                let mut has_extra_bounds = false;
+                for generic in replaced_impl_function_info.generics.iter() {
+                    for bound in generic.bounds.read().unwrap().iter() {
+                        match implements_infos.is_implements(
+                            Type::Generic(generic.clone()).moduled(ModulePath::dummy(), 0..0),
+                            bound.value.clone().moduled(ModulePath::dummy(), 0..0),
+                            None,
+                            user_type_set,
+                            &mut temp_type_environment,
+                        ) {
+                            ImplementsCheckResult::NoImplementsFound => {
+                                has_extra_bounds = true;
+                                break;
+                            }
+                            ImplementsCheckResult::Conflicts { conflicts: _ } => {
+                                unreachable!("conflict in extra bounds!")
+                            }
+                            ImplementsCheckResult::Success {
+                                new_concrete: _,
+                                new_interface: _,
+                                new_generics: _,
+                            } => continue,
+                        }
+                    }
+                }
+
+                if !has_extra_bounds {
+                    for where_bound in replaced_impl_function_info.where_clause.iter() {
+                        let target_type = where_bound
+                            .target
+                            .value
+                            .clone()
+                            .moduled(ModulePath::dummy(), 0..0);
+
+                        for bound in where_bound.bounds.iter() {
+                            match implements_infos.is_implements(
+                                target_type.clone(),
+                                bound.value.clone().moduled(ModulePath::dummy(), 0..0),
+                                None,
+                                user_type_set,
+                                &mut temp_type_environment,
+                            ) {
+                                ImplementsCheckResult::NoImplementsFound => {
+                                    has_extra_bounds = true;
+                                    break;
+                                }
+                                ImplementsCheckResult::Conflicts { conflicts: _ } => {
+                                    unreachable!("conflict in extra bounds!")
+                                }
+                                ImplementsCheckResult::Success {
+                                    new_concrete: _,
+                                    new_interface: _,
+                                    new_generics: _,
+                                } => continue,
+                            }
+                        }
+                    }
+                }
+
+                if has_extra_bounds {
+                    let error = TypeError {
+                        kind: TypeErrorKind::ExtraBoundsInImplements {
+                            origin: ().moduled(
+                                origin_function_info.module_path.clone(),
+                                origin_function_info.span.clone(),
+                            ),
+                            impls: ().moduled(
+                                impl_function_info.module_path.clone(),
+                                impl_function_info.span.clone(),
+                            ),
+                        },
+                        span: impl_function_info.span.clone(),
+                        module_path: impl_function_info.module_path.clone(),
+                    };
+                    errors.push(error);
+                }
+            }
+
+            for (impl_element_name, impl_element) in implements.element_type.iter() {
+                if !interface_info.element_types.contains_key(impl_element_name) {
+                    let error = TypeError {
+                        kind: TypeErrorKind::UnknownImplementsElement {
+                            interface: interface_info.name.value.to_string().moduled(
+                                interface_info.module_path.clone(),
+                                interface_info.span.clone(),
+                            ),
+                            impl_element: impl_element_name
+                                .to_string()
+                                .moduled(implements.module_path.clone(), impl_element.span.clone()),
+                        },
+                        span: impl_element.span.clone(),
+                        module_path: implements.module_path.clone(),
+                    };
+                    errors.push(error);
+                }
+            }
         }
     }
 }
@@ -480,36 +799,29 @@ impl ImplementsInterface {
 #[derive(Debug)]
 pub struct ImplementsElement {
     concrete_type: Type,
-    super_types: Vec<Type>,
+    super_type: Type,
     element_type: Moduled<Type>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ImplementsInfoSet {
-    map: Arc<RwLock<IndexMap<EntityID, Arc<ImplementsInfo>>>>,
+    infos: Arc<RwLock<Vec<Arc<ImplementsInfo>>>>,
 }
 
 impl ImplementsInfoSet {
     pub fn new(parent: Option<&ImplementsInfoSet>) -> Self {
-        let mut map = IndexMap::new();
+        let mut infos = Vec::new();
         if let Some(parent) = parent {
-            map.extend(parent.map.read().unwrap().clone());
+            infos.extend(parent.infos.read().unwrap().clone());
         }
 
         Self {
-            map: Arc::new(RwLock::new(map)),
+            infos: Arc::new(RwLock::new(infos)),
         }
     }
 
-    pub fn register_implements_info(
-        &mut self,
-        entity_id: EntityID,
-        implements_info: ImplementsInfo,
-    ) {
-        self.map
-            .write()
-            .unwrap()
-            .insert(entity_id, Arc::new(implements_info));
+    pub fn register_implements_info(&self, implements_info: ImplementsInfo) {
+        self.infos.write().unwrap().push(Arc::new(implements_info));
     }
 
     pub fn find_implements_for(
@@ -522,7 +834,7 @@ impl ImplementsInfoSet {
     ) -> Vec<(Arc<ImplementsInfo>, ImplementsCheckResult)> {
         let mut results = Vec::new();
 
-        for implements_info in self.map.read().unwrap().values() {
+        for implements_info in self.infos.read().unwrap().iter() {
             let result = implements_info.is_implements(
                 ty.clone(),
                 None,
@@ -556,7 +868,7 @@ impl ImplementsInfoSet {
     ) -> ImplementsCheckResult {
         let mut results = Vec::new();
 
-        for implements_info in self.map.read().unwrap().values() {
+        for implements_info in self.infos.read().unwrap().iter() {
             let result = implements_info.is_implements(
                 concrete.clone(),
                 Some(interface.clone()),
@@ -610,6 +922,7 @@ pub struct ImplementsInfo {
     pub where_clause: Vec<WhereClauseInfo>,
     pub element_type: HashMap<String, Spanned<Type>>,
     pub module_path: ModulePath,
+    pub is_instant: bool,
 }
 
 impl ImplementsInfo {

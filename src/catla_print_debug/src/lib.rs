@@ -22,11 +22,11 @@ mod test {
     fn infer_type_test() {
         let source = r"
 interface TestInterface {
-    function <T> test();
+    function <T> test() where T: TestInterface;
 }
 
 implements TestInterface for int {
-    function <T: TestInterface> test() {}
+    function <U: TestInterface> test() {}
 }
         ";
         let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());

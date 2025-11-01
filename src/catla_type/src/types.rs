@@ -11,7 +11,6 @@ use catla_parser::ast::{EntityID, Spanned, UserTypeKind, WithSpan};
 use catla_util::module_path::{ModulePath, Moduled, ToModuled};
 use derivative::Derivative;
 use hashbrown::HashMap;
-use indexmap::IndexMap;
 
 use crate::{
     error::{TypeError, TypeErrorKind},
@@ -279,7 +278,13 @@ impl Type {
                 let new_function_info = FunctionTypeInfo {
                     module_path: function_info.module_path.clone(),
                     name: function_info.name.as_ref().cloned(),
-                    generics: function_info.generics.clone(),
+                    generics: function_info
+                        .generics
+                        .iter()
+                        .map(|generic| {
+                            GenericType::replace_generics(generic, replace_before, replace_after)
+                        })
+                        .collect(),
                     arguments: new_arguments,
                     return_type: new_return_type,
                     where_clause: function_info
@@ -305,7 +310,23 @@ impl Type {
                         return after.clone();
                     }
                 }
-                return self.clone();
+                Type::Generic(Arc::new(GenericType {
+                    module_path: generic_type.module_path.clone(),
+                    entity_id: generic_type.entity_id,
+                    name: generic_type.name.clone(),
+                    bounds: RwLock::new(
+                        generic_type
+                            .bounds
+                            .read()
+                            .unwrap()
+                            .iter()
+                            .map(|ty| {
+                                ty.clone()
+                                    .map(|ty| ty.replace_generics(replace_before, replace_after))
+                            })
+                            .collect(),
+                    ),
+                }))
             }
             Type::Array(base_type) => Type::Array(Arc::new(
                 base_type.replace_generics(replace_before, replace_after),
@@ -418,6 +439,42 @@ pub struct GenericType {
     pub name: Spanned<String>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub bounds: RwLock<Vec<Spanned<Type>>>,
+}
+
+impl GenericType {
+    pub fn replace_generics(
+        generic_type: &Arc<GenericType>,
+        replace_before: &[Arc<GenericType>],
+        replace_after: &[Type],
+    ) -> Arc<GenericType> {
+        for (before, after) in replace_before.iter().zip(replace_after.iter()) {
+            if before.module_path == generic_type.module_path
+                && before.entity_id == generic_type.entity_id
+            {
+                // replace generic only for extra bounds check
+                if let Type::Generic(generic) = after {
+                    return generic.clone();
+                }
+            }
+        }
+        Arc::new(GenericType {
+            module_path: generic_type.module_path.clone(),
+            entity_id: generic_type.entity_id,
+            name: generic_type.name.clone(),
+            bounds: RwLock::new(
+                generic_type
+                    .bounds
+                    .read()
+                    .unwrap()
+                    .iter()
+                    .map(|ty| {
+                        ty.clone()
+                            .map(|ty| ty.replace_generics(replace_before, replace_after))
+                    })
+                    .collect(),
+            ),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -794,13 +851,6 @@ impl ImplementsElementChecker {
             }
         }
     }
-}
-
-#[derive(Debug)]
-pub struct ImplementsElement {
-    concrete_type: Type,
-    super_type: Type,
-    element_type: Moduled<Type>,
 }
 
 #[derive(Debug, Clone)]

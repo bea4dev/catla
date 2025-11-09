@@ -1026,13 +1026,37 @@ impl ImplementsInfo {
                 })
                 .collect::<Vec<_>>();
 
-            let Some(element_type) = self.element_type.get(function_name) else {
-                return ImplementsCheckResult::NoImplementsFound;
+            let element_type = match self.element_type.get(function_name) {
+                Some(element_type) => element_type.value.clone(),
+                None => {
+                    if !self.is_instant {
+                        return ImplementsCheckResult::NoImplementsFound;
+                    }
+
+                    let Type::UserType {
+                        user_type_info,
+                        generics: new_generics,
+                    } = &self.interface.value
+                    else {
+                        return ImplementsCheckResult::NoImplementsFound;
+                    };
+
+                    let user_type_info = user_type_set.get(*user_type_info);
+                    let user_type_info = user_type_info.read().unwrap();
+
+                    let old_generics = &user_type_info.generics;
+
+                    let Some(element_type) = user_type_info.element_types.get(function_name) else {
+                        return ImplementsCheckResult::NoImplementsFound;
+                    };
+
+                    element_type
+                        .value
+                        .replace_generics(old_generics, new_generics)
+                }
             };
 
-            let new_element_type = element_type
-                .value
-                .replace_generics(&old_generics, &new_generics);
+            let new_element_type = element_type.replace_generics(&old_generics, &new_generics);
 
             let Type::Function {
                 function_info,

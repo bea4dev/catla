@@ -646,7 +646,10 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         errors.is_empty()
     }
 
-    fn borrow_type_variable_set(&self, type_variable_id: TypeVariableID) -> &TypeVariableSet {
+    fn borrow_type_variable_set(
+        &self,
+        type_variable_id: TypeVariableID,
+    ) -> &TypeVariableSet<'type_env_alloc> {
         let type_variable_set_id = self.var_set_map.get(&type_variable_id).unwrap();
         &self.type_variable_set_components[type_variable_set_id.0]
     }
@@ -688,6 +691,16 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                 let new_generics = generics;
 
                 if let Some(element_type) = user_type_info.element_types.get(literal.value) {
+                    let element_type = match &element_type.value {
+                        Type::Function {
+                            function_info: _,
+                            generics: _,
+                        } => self
+                            .create_instance(&element_type.value, user_type_set)
+                            .with_span(element_type.span.clone()),
+                        _ => element_type.clone(),
+                    };
+
                     canditates.push(Moduled::new(
                         element_type
                             .value
@@ -739,9 +752,44 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                         new_interface: _,
                         new_generics,
                     } => {
-                        let Some(element_type) = implements_info.element_type.get(literal.value)
-                        else {
-                            continue;
+                        let element_type = match implements_info.element_type.get(literal.value) {
+                            Some(element_type) => element_type.value.clone(),
+                            None => {
+                                if !implements_info.is_instant {
+                                    continue;
+                                }
+
+                                let Type::UserType {
+                                    user_type_info,
+                                    generics: new_generics,
+                                } = &implements_info.interface.value
+                                else {
+                                    continue;
+                                };
+
+                                let user_type_info = user_type_set.get(*user_type_info);
+                                let user_type_info = user_type_info.read().unwrap();
+
+                                let old_generics = &user_type_info.generics;
+
+                                let Some(element_type) =
+                                    user_type_info.element_types.get(literal.value)
+                                else {
+                                    continue;
+                                };
+
+                                element_type
+                                    .value
+                                    .replace_generics(old_generics, new_generics)
+                            }
+                        };
+
+                        let element_type = match &element_type {
+                            Type::Function {
+                                function_info: _,
+                                generics: _,
+                            } => self.create_instance(&element_type, user_type_set),
+                            _ => element_type,
                         };
 
                         self.test_unify_type(
@@ -758,9 +806,8 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
 
                         let old_generics = &implements_info.generics_define;
 
-                        let element_type = element_type
-                            .value
-                            .replace_generics(&old_generics, &new_generics);
+                        let element_type =
+                            element_type.replace_generics(&old_generics, &new_generics);
 
                         canditates.push(Moduled::new(
                             element_type,

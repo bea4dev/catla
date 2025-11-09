@@ -21,13 +21,15 @@ mod test {
     #[test]
     fn infer_type_test() {
         let source = r"
-interface TestInterface {
-    function <T> test() where T: TestInterface;
+interface TestInterface<T> {
+    function <U> test() -> (T, U);
 }
 
-implements TestInterface for int {
-    function <U: TestInterface> test() {}
+implements <F, D> TestInterface<F> for D {
+    function <E> test() -> (F, E) {}
 }
+
+let a = 100.test()
         ";
         let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
 

@@ -1507,6 +1507,37 @@ fn infer_type_for_program(
                                     None => type_environment.create_type_variable_id_with_set(),
                                 };
 
+                                if let Some(type_tag) = &variable_define.type_tag {
+                                    if let Ok(type_info) = &type_tag.type_info {
+                                        let ty = get_type(
+                                            type_info,
+                                            this_type,
+                                            generics,
+                                            import_map,
+                                            module_entity_type_map,
+                                            moduled_name_type_map,
+                                            name_resolved_map,
+                                            user_type_set,
+                                            module_path,
+                                            errors,
+                                            &mut Some((implements_infos, type_environment)),
+                                        );
+
+                                        let ty_variable_id = type_environment
+                                            .create_type_variable_id_with_type(ty.moduled(
+                                                module_path.clone(),
+                                                type_info.span.clone(),
+                                            ));
+
+                                        type_environment.unify(
+                                            binding_id,
+                                            ty_variable_id,
+                                            user_type_set,
+                                            errors,
+                                        );
+                                    }
+                                }
+
                                 type_environment.unify(
                                     binding_id,
                                     expression_id,

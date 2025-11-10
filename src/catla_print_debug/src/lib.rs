@@ -29,7 +29,7 @@ implements <F, D> TestInterface<F> for D {
     function <E> test() -> (F, E) {}
 }
 
-let a = 100.test()
+let a: (int, bool) = 100.test()
         ";
         let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
 

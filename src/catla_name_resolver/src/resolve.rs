@@ -1,16 +1,19 @@
+use std::ops::Range;
+
 use catla_parser::ast::{
     AddOrSubExpression, AndExpression, ArrayTypeInfo, BaseTypeInfo, ClosureArgumentsOrLiteral,
     Define, ElementsOrWildCard, ElseChain, EntityID, EqualsExpression, Expression,
     ExpressionOrBlock, Factor, FunctionArgument, FunctionArgumentOrVariableBinding, GenericsDefine,
-    GenericsInfo, LessOrGreaterExpression, MappingOperator, MulOrDivExpression, OrExpression,
-    Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary, Statement,
-    StatementAttribute, TupleTypeInfo, TypeInfo, TypeInfoBase, VariableBinding, WhereClause,
+    GenericsInfo, LessOrGreaterExpression, Literal, MappingOperator, MulOrDivExpression,
+    OrExpression, Primary, PrimaryLeft, PrimaryLeftExpr, PrimaryRight, Program, SimplePrimary,
+    Statement, StatementAttribute, TupleTypeInfo, TypeInfo, TypeInfoBase, VariableBinding,
+    WhereClause,
 };
 use hashbrown::HashMap;
 
 use crate::{
     DefineInfo, DefineKind, EnvironmentSeparatorKind, NameEnvironmentID, NameEnvironmentSet,
-    NameResolveError, ResolvedInfo,
+    NameResolveError, NameResolveErrorKind, ResolvedInfo,
 };
 
 pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
@@ -20,6 +23,8 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
+    is_user_type_scope: bool,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     for statement in ast.statements.iter() {
@@ -33,13 +38,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                 span: element.span.clone(),
                                 kind: DefineKind::Import,
                             };
-                            components.define(
-                                environment,
-                                element.value.into(),
-                                element.span.clone(),
-                                define,
-                                errors,
-                            );
+                            components.define(environment, element.value.into(), define);
                         }
                     }
                     ElementsOrWildCard::WildCard(literal) => {
@@ -51,13 +50,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                 span: literal.span.clone(),
                                 kind: DefineKind::Import,
                             };
-                            components.define(
-                                environment,
-                                element.clone().into(),
-                                literal.span.clone(),
-                                define,
-                                errors,
-                            );
+                            components.define(environment, element.clone().into(), define);
                         }
                     }
                 },
@@ -68,18 +61,35 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                             span: last.span.clone(),
                             kind: DefineKind::Import,
                         };
-                        components.define(
-                            environment,
-                            last.value.into(),
-                            last.span.clone(),
-                            define,
-                            errors,
-                        );
+                        components.define(environment, last.value.into(), define);
                     }
                 }
             },
             Statement::DefineWithAttribute(define_with_attribute) => {
                 if let Ok(define) = &define_with_attribute.define {
+                    fn collect_module_element_name(
+                        name: &Literal,
+                        module_element_names: &mut HashMap<String, Range<usize>>,
+                        errors: &mut std::vec::Vec<NameResolveError>,
+                    ) {
+                        match module_element_names.get(name.value) {
+                            Some(exists) => {
+                                let error = NameResolveError {
+                                    name: name.value.to_string(),
+                                    kind: NameResolveErrorKind::DuplicatedName {
+                                        exists: exists.clone(),
+                                    },
+                                    span: name.span.clone(),
+                                };
+                                errors.push(error);
+                            }
+                            None => {
+                                module_element_names
+                                    .insert(name.value.to_string(), name.span.clone());
+                            }
+                        }
+                    }
+
                     match define {
                         Define::Function(function_define) => {
                             if let Ok(name) = &function_define.name {
@@ -88,13 +98,11 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     span: name.span.clone(),
                                     kind: DefineKind::Function,
                                 };
-                                components.define(
-                                    environment,
-                                    name.value.into(),
-                                    name.span.clone(),
-                                    define,
-                                    errors,
-                                );
+                                components.define(environment, name.value.into(), define);
+
+                                if !is_user_type_scope {
+                                    collect_module_element_name(name, module_element_names, errors);
+                                }
                             }
                         }
                         Define::UserType(user_type_define) => {
@@ -104,13 +112,9 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     span: name.span.clone(),
                                     kind: DefineKind::UserType,
                                 };
-                                components.define(
-                                    environment,
-                                    name.value.into(),
-                                    name.span.clone(),
-                                    define,
-                                    errors,
-                                );
+                                components.define(environment, name.value.into(), define);
+
+                                collect_module_element_name(name, module_element_names, errors);
                             }
                         }
                         Define::Variable(variable_define) => {
@@ -124,8 +128,17 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                         binding,
                                         environment,
                                         components,
+                                        module_element_names,
                                         errors,
                                     );
+
+                                    if let VariableBinding::Literal(name) = binding {
+                                        collect_module_element_name(
+                                            name,
+                                            module_element_names,
+                                            errors,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -136,13 +149,9 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     span: name.span.clone(),
                                     kind: DefineKind::UserType,
                                 };
-                                components.define(
-                                    environment,
-                                    name.value.into(),
-                                    name.span.clone(),
-                                    define,
-                                    errors,
-                                );
+                                components.define(environment, name.value.into(), define);
+
+                                collect_module_element_name(name, module_element_names, errors);
                             }
                         }
                     }
@@ -162,6 +171,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
 
@@ -173,6 +183,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                         resolved_map,
                         all_crates,
                         wild_card_imports,
+                        module_element_names,
                         errors,
                     );
                 }
@@ -185,6 +196,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
 
@@ -196,6 +208,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                         resolved_map,
                         all_crates,
                         wild_card_imports,
+                        module_element_names,
                         errors,
                     );
                 }
@@ -219,6 +232,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     resolved_map,
                                     all_crates,
                                     wild_card_imports,
+                                    module_element_names,
                                     errors,
                                 );
                             }
@@ -232,6 +246,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                         resolved_map,
                                         all_crates,
                                         wild_card_imports,
+                                        module_element_names,
                                         errors,
                                     );
                                 }
@@ -246,6 +261,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                         resolved_map,
                                         all_crates,
                                         wild_card_imports,
+                                        module_element_names,
                                         errors,
                                     );
                                 }
@@ -259,6 +275,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     resolved_map,
                                     all_crates,
                                     wild_card_imports,
+                                    module_element_names,
                                     errors,
                                 );
                             }
@@ -271,6 +288,8 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     resolved_map,
                                     all_crates,
                                     wild_card_imports,
+                                    module_element_names,
+                                    false,
                                     errors,
                                 );
                             }
@@ -287,26 +306,14 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                 span: user_type_define.span.clone(),
                                 kind: DefineKind::UserType,
                             };
-                            components.define(
-                                environment,
-                                "This".into(),
-                                user_type_define.span.clone(),
-                                define,
-                                errors,
-                            );
+                            components.define(environment, "This".into(), define);
 
                             let define = DefineInfo {
                                 entity_id: user_type_define.into(),
                                 span: user_type_define.span.clone(),
                                 kind: DefineKind::Variable,
                             };
-                            components.define(
-                                environment,
-                                "this".into(),
-                                user_type_define.span.clone(),
-                                define,
-                                errors,
-                            );
+                            components.define(environment, "this".into(), define);
 
                             if let Some(generics) = &user_type_define.generics {
                                 resolve_name_for_generics_define(
@@ -316,6 +323,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     resolved_map,
                                     all_crates,
                                     wild_card_imports,
+                                    module_element_names,
                                     errors,
                                 );
                             }
@@ -329,6 +337,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                         resolved_map,
                                         all_crates,
                                         wild_card_imports,
+                                        module_element_names,
                                         errors,
                                     );
                                 }
@@ -342,6 +351,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     resolved_map,
                                     all_crates,
                                     wild_card_imports,
+                                    module_element_names,
                                     errors,
                                 );
                             }
@@ -354,6 +364,8 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     resolved_map,
                                     all_crates,
                                     wild_card_imports,
+                                    module_element_names,
+                                    true,
                                     errors,
                                 );
                             }
@@ -369,6 +381,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                         binding,
                                         environment,
                                         components,
+                                        module_element_names,
                                         errors,
                                     );
                                 }
@@ -383,6 +396,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                         resolved_map,
                                         all_crates,
                                         wild_card_imports,
+                                        module_element_names,
                                         errors,
                                     );
                                 }
@@ -396,6 +410,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     resolved_map,
                                     all_crates,
                                     wild_card_imports,
+                                    module_element_names,
                                     errors,
                                 );
                             }
@@ -409,6 +424,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     resolved_map,
                                     all_crates,
                                     wild_card_imports,
+                                    module_element_names,
                                     errors,
                                 );
                             }
@@ -421,6 +437,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                     resolved_map,
                                     all_crates,
                                     wild_card_imports,
+                                    module_element_names,
                                     errors,
                                 );
                             }
@@ -437,6 +454,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                         resolved_map,
                         all_crates,
                         wild_card_imports,
+                        module_element_names,
                         errors,
                     );
                 }
@@ -449,6 +467,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -467,6 +486,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                         resolved_map,
                         all_crates,
                         wild_card_imports,
+                        module_element_names,
                         errors,
                     );
                 }
@@ -479,6 +499,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                         resolved_map,
                         all_crates,
                         wild_card_imports,
+                        module_element_names,
                         errors,
                     );
                 }
@@ -491,6 +512,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                         resolved_map,
                         all_crates,
                         wild_card_imports,
+                        module_element_names,
                         errors,
                     );
                 }
@@ -503,6 +525,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                         resolved_map,
                         all_crates,
                         wild_card_imports,
+                        module_element_names,
                         errors,
                     );
                 }
@@ -515,6 +538,8 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                         resolved_map,
                         all_crates,
                         wild_card_imports,
+                        module_element_names,
+                        false,
                         errors,
                     );
                 }
@@ -527,6 +552,7 @@ fn resolve_name_for_variable_binding<'input, 'name_env_alloc>(
     ast: &VariableBinding<'input, '_>,
     environment: NameEnvironmentID,
     components: &mut NameEnvironmentSet<'input, 'name_env_alloc>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     match ast {
@@ -536,17 +562,17 @@ fn resolve_name_for_variable_binding<'input, 'name_env_alloc>(
                 span: literal.span.clone(),
                 kind: DefineKind::Variable,
             };
-            components.define(
-                environment,
-                literal.value.into(),
-                literal.span.clone(),
-                define,
-                errors,
-            );
+            components.define(environment, literal.value.into(), define);
         }
         VariableBinding::Binding { bindings, span: _ } => {
             for binding in bindings.iter() {
-                resolve_name_for_variable_binding(binding, environment, components, errors);
+                resolve_name_for_variable_binding(
+                    binding,
+                    environment,
+                    components,
+                    module_element_names,
+                    errors,
+                );
             }
         }
     }
@@ -559,9 +585,16 @@ fn resolve_name_for_function_argument<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
-    resolve_name_for_variable_binding(&ast.binding, environment, components, errors);
+    resolve_name_for_variable_binding(
+        &ast.binding,
+        environment,
+        components,
+        module_element_names,
+        errors,
+    );
 
     if let Ok(type_info) = &ast.type_tag.type_info {
         resolve_name_for_type_info(
@@ -571,6 +604,7 @@ fn resolve_name_for_function_argument<'input, 'name_env_alloc>(
             resolved_map,
             all_crates,
             wild_card_imports,
+            module_element_names,
             errors,
         );
     }
@@ -583,6 +617,7 @@ fn resolve_name_for_generics_define<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     for element in ast.elements.iter() {
@@ -591,13 +626,7 @@ fn resolve_name_for_generics_define<'input, 'name_env_alloc>(
             span: element.name.span.clone(),
             kind: DefineKind::Generics,
         };
-        components.define(
-            environment,
-            element.name.value.into(),
-            element.name.span.clone(),
-            define,
-            errors,
-        );
+        components.define(environment, element.name.value.into(), define);
 
         for bound in element.bounds.iter() {
             resolve_name_for_type_info(
@@ -607,6 +636,7 @@ fn resolve_name_for_generics_define<'input, 'name_env_alloc>(
                 resolved_map,
                 all_crates,
                 wild_card_imports,
+                module_element_names,
                 errors,
             );
         }
@@ -620,6 +650,7 @@ fn resolve_name_for_where_clause<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     for element in ast.elements.iter() {
@@ -630,6 +661,7 @@ fn resolve_name_for_where_clause<'input, 'name_env_alloc>(
             resolved_map,
             all_crates,
             wild_card_imports,
+            module_element_names,
             errors,
         );
 
@@ -641,6 +673,7 @@ fn resolve_name_for_where_clause<'input, 'name_env_alloc>(
                 resolved_map,
                 all_crates,
                 wild_card_imports,
+                module_element_names,
                 errors,
             );
         }
@@ -654,6 +687,7 @@ fn resolve_name_for_type_info<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     match &ast.base {
@@ -665,6 +699,7 @@ fn resolve_name_for_type_info<'input, 'name_env_alloc>(
                 resolved_map,
                 all_crates,
                 wild_card_imports,
+                module_element_names,
                 errors,
             );
         }
@@ -676,6 +711,7 @@ fn resolve_name_for_type_info<'input, 'name_env_alloc>(
                 resolved_map,
                 all_crates,
                 wild_card_imports,
+                module_element_names,
                 errors,
             );
         }
@@ -687,6 +723,7 @@ fn resolve_name_for_type_info<'input, 'name_env_alloc>(
                 resolved_map,
                 all_crates,
                 wild_card_imports,
+                module_element_names,
                 errors,
             );
         }
@@ -711,6 +748,7 @@ fn resolve_name_for_base_type_info<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     if let Some(first) = ast.path.first() {
@@ -738,6 +776,7 @@ fn resolve_name_for_base_type_info<'input, 'name_env_alloc>(
             resolved_map,
             all_crates,
             wild_card_imports,
+            module_element_names,
             errors,
         );
     }
@@ -750,6 +789,7 @@ fn resolve_name_for_array_type_info<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     if let Ok(base_type) = &ast.base_type {
@@ -760,6 +800,7 @@ fn resolve_name_for_array_type_info<'input, 'name_env_alloc>(
             resolved_map,
             all_crates,
             wild_card_imports,
+            module_element_names,
             errors,
         );
     }
@@ -772,6 +813,7 @@ fn resolve_name_for_tuple_type_info<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     for element in ast.types.iter() {
@@ -782,6 +824,7 @@ fn resolve_name_for_tuple_type_info<'input, 'name_env_alloc>(
             resolved_map,
             all_crates,
             wild_card_imports,
+            module_element_names,
             errors,
         );
     }
@@ -794,6 +837,7 @@ fn resolve_name_for_generics_info<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     for element in ast.types.iter() {
@@ -804,6 +848,7 @@ fn resolve_name_for_generics_info<'input, 'name_env_alloc>(
             resolved_map,
             all_crates,
             wild_card_imports,
+            module_element_names,
             errors,
         );
     }
@@ -816,6 +861,7 @@ fn resolve_name_for_expression<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     match ast {
@@ -828,6 +874,7 @@ fn resolve_name_for_expression<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -853,6 +900,7 @@ fn resolve_name_for_expression<'input, 'name_env_alloc>(
                                     resolved_map,
                                     all_crates,
                                     wild_card_imports,
+                                    module_element_names,
                                     errors,
                                 );
                             }
@@ -863,6 +911,7 @@ fn resolve_name_for_expression<'input, 'name_env_alloc>(
                                     variable_binding,
                                     environment,
                                     components,
+                                    module_element_names,
                                     errors,
                                 );
                             }
@@ -875,13 +924,7 @@ fn resolve_name_for_expression<'input, 'name_env_alloc>(
                         span: literal.span.clone(),
                         kind: DefineKind::Variable,
                     };
-                    components.define(
-                        environment,
-                        literal.value.into(),
-                        literal.span.clone(),
-                        define,
-                        errors,
-                    );
+                    components.define(environment, literal.value.into(), define);
                 }
             }
 
@@ -895,6 +938,7 @@ fn resolve_name_for_expression<'input, 'name_env_alloc>(
                             resolved_map,
                             all_crates,
                             wild_card_imports,
+                            module_element_names,
                             errors,
                         );
                     }
@@ -906,6 +950,8 @@ fn resolve_name_for_expression<'input, 'name_env_alloc>(
                             resolved_map,
                             all_crates,
                             wild_card_imports,
+                            module_element_names,
+                            false,
                             errors,
                         );
                     }
@@ -920,6 +966,7 @@ fn resolve_name_for_expression<'input, 'name_env_alloc>(
                 resolved_map,
                 all_crates,
                 wild_card_imports,
+                module_element_names,
                 errors,
             );
         }
@@ -935,6 +982,7 @@ macro_rules! resolve_name_2op {
             resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
             all_crates: &std::vec::Vec<String>,
             wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+            module_element_names: &mut HashMap<String, Range<usize>>,
             errors: &mut std::vec::Vec<NameResolveError>,
         ) {
             $next(
@@ -944,6 +992,7 @@ macro_rules! resolve_name_2op {
                 resolved_map,
                 all_crates,
                 wild_card_imports,
+                module_element_names,
                 errors,
             );
 
@@ -955,6 +1004,7 @@ macro_rules! resolve_name_2op {
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -968,6 +1018,7 @@ macro_rules! resolve_name_2op {
             resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
             all_crates: &std::vec::Vec<String>,
             wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+            module_element_names: &mut HashMap<String, Range<usize>>,
             errors: &mut std::vec::Vec<NameResolveError>,
         ) {
             $next(
@@ -977,6 +1028,7 @@ macro_rules! resolve_name_2op {
                 resolved_map,
                 all_crates,
                 wild_card_imports,
+                module_element_names,
                 errors,
             );
 
@@ -988,6 +1040,7 @@ macro_rules! resolve_name_2op {
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -1037,6 +1090,7 @@ fn resolve_name_for_factor<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     if let Ok(primary) = &ast.primary {
@@ -1047,6 +1101,7 @@ fn resolve_name_for_factor<'input, 'name_env_alloc>(
             resolved_map,
             all_crates,
             wild_card_imports,
+            module_element_names,
             errors,
         );
     }
@@ -1059,6 +1114,7 @@ fn resolve_name_for_primary<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     resolve_name_for_primary_left(
@@ -1068,6 +1124,7 @@ fn resolve_name_for_primary<'input, 'name_env_alloc>(
         resolved_map,
         all_crates,
         wild_card_imports,
+        module_element_names,
         errors,
     );
 
@@ -1079,6 +1136,7 @@ fn resolve_name_for_primary<'input, 'name_env_alloc>(
             resolved_map,
             all_crates,
             wild_card_imports,
+            module_element_names,
             errors,
         );
     }
@@ -1091,6 +1149,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     match &ast.first {
@@ -1113,6 +1172,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                             resolved_map,
                             all_crates,
                             wild_card_imports,
+                            module_element_names,
                             errors,
                         );
                     }
@@ -1165,6 +1225,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -1178,6 +1239,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                         resolved_map,
                         all_crates,
                         wild_card_imports,
+                        module_element_names,
                         errors,
                     );
                 }
@@ -1204,6 +1266,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -1217,6 +1280,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -1230,6 +1294,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -1242,6 +1307,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -1255,6 +1321,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -1266,6 +1333,8 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
+                    false,
                     errors,
                 );
             }
@@ -1281,6 +1350,7 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                                 resolved_map,
                                 all_crates,
                                 wild_card_imports,
+                                module_element_names,
                                 errors,
                             );
                         }
@@ -1292,6 +1362,8 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                                 resolved_map,
                                 all_crates,
                                 wild_card_imports,
+                                module_element_names,
+                                false,
                                 errors,
                             );
                         }
@@ -1304,6 +1376,8 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                             resolved_map,
                             all_crates,
                             wild_card_imports,
+                            module_element_names,
+                            false,
                             errors,
                         );
                     }
@@ -1319,6 +1393,8 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
+                    false,
                     errors,
                 );
             }
@@ -1333,6 +1409,7 @@ fn resolve_name_for_mapping_operator<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     let block = match ast {
@@ -1349,6 +1426,8 @@ fn resolve_name_for_mapping_operator<'input, 'name_env_alloc>(
             resolved_map,
             all_crates,
             wild_card_imports,
+            module_element_names,
+            false,
             errors,
         );
     }
@@ -1361,6 +1440,7 @@ fn resolve_name_for_primary_right<'input, 'name_env_alloc>(
     resolved_map: &mut HashMap<EntityID, ResolvedInfo>,
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
+    module_element_names: &mut HashMap<String, Range<usize>>,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     if let Some(second) = &ast.second {
@@ -1372,6 +1452,7 @@ fn resolve_name_for_primary_right<'input, 'name_env_alloc>(
                 resolved_map,
                 all_crates,
                 wild_card_imports,
+                module_element_names,
                 errors,
             );
         }
@@ -1384,6 +1465,7 @@ fn resolve_name_for_primary_right<'input, 'name_env_alloc>(
                     resolved_map,
                     all_crates,
                     wild_card_imports,
+                    module_element_names,
                     errors,
                 );
             }
@@ -1397,6 +1479,7 @@ fn resolve_name_for_primary_right<'input, 'name_env_alloc>(
             resolved_map,
             all_crates,
             wild_card_imports,
+            module_element_names,
             errors,
         );
     }

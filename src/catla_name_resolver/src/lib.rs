@@ -15,9 +15,11 @@ pub fn resolve_name<'input>(
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
 ) -> (
     HashMap<EntityID, ResolvedInfo>,
+    std::vec::Vec<String>,
     std::vec::Vec<NameResolveError>,
 ) {
     let mut resolved_map = HashMap::new();
+    let mut module_element_names = HashMap::new();
     let mut errors = std::vec::Vec::new();
 
     let allocator = Bump::new();
@@ -33,10 +35,16 @@ pub fn resolve_name<'input>(
         &mut resolved_map,
         all_crates,
         wild_card_imports,
+        &mut module_element_names,
+        false,
         &mut errors,
     );
 
-    (resolved_map, errors)
+    (
+        resolved_map,
+        module_element_names.into_keys().collect(),
+        errors,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,27 +152,7 @@ impl<'input, 'name_env_alloc> NameEnvironmentSet<'input, 'name_env_alloc> {
         }
     }
 
-    pub fn define(
-        &mut self,
-        env: NameEnvironmentID,
-        name: Cow<'input, str>,
-        name_span: Range<usize>,
-        define: DefineInfo,
-        errors: &mut std::vec::Vec<NameResolveError>,
-    ) {
-        if let Some(exists) = self.resolve_inner(env, name.as_ref(), &mut None) {
-            if define.kind != DefineKind::Variable {
-                let error = NameResolveError {
-                    name: name.to_string(),
-                    kind: NameResolveErrorKind::DuplicatedName {
-                        exists: exists.span.clone(),
-                    },
-                    span: name_span.clone(),
-                };
-                errors.push(error);
-            }
-        }
-
+    pub fn define(&mut self, env: NameEnvironmentID, name: Cow<'input, str>, define: DefineInfo) {
         let environment = &mut self.components[env.0];
 
         environment.map.insert(name, define);
@@ -232,7 +220,7 @@ function print() {}
 
         let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
 
-        let (resolved, errors) = resolve_name(ast.ast(), &std::vec::Vec::new(), &HashMap::new());
+        let (resolved, _, errors) = resolve_name(ast.ast(), &std::vec::Vec::new(), &HashMap::new());
 
         dbg!(resolved);
         dbg!(errors);

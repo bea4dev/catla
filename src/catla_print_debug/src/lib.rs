@@ -4,7 +4,7 @@ pub mod type_infer;
 mod test {
     use std::{path::Path, sync::Arc};
 
-    use catla_import::resource::PackageResourceSet;
+    use catla_import::{import::collect_import, resource::PackageResourceSet};
     use catla_name_resolver::resolve_name;
     use catla_parser::CatlaAST;
     use catla_type::{
@@ -35,13 +35,30 @@ let a: (int, bool) = 100.test()
 
         dbg!(&ast.errors);
 
-        let (name_resolved_map, errors) = resolve_name(ast.ast(), &Vec::new(), &HashMap::new());
+        let (name_resolved_map, module_element_names, errors) =
+            resolve_name(ast.ast(), &Vec::new(), &HashMap::new());
+        dbg!(errors);
+
+        let module_path = ModulePath::new(["test"].into_iter(), Path::new("test.catla"));
+
+        let mut module_element_name_map = HashMap::new();
+        module_element_name_map
+            .insert(module_path.path_name.as_ref().clone(), module_element_names);
+
+        let package_resource_set = PackageResourceSet::new();
+
+        let (_, import_map, errors) = collect_import(
+            ast.ast(),
+            &package_resource_set,
+            &module_element_name_map,
+            &module_path,
+        );
+
         dbg!(errors);
 
         let mut module_entity_user_type_map = HashMap::new();
         let mut module_name_type_map = HashMap::new();
         let user_type_set = GlobalUserTypeSet::new();
-        let module_path = ModulePath::new(["test"].into_iter(), Path::new("test.catla"));
         collect_user_type_for_program(
             ast.ast(),
             &mut module_entity_user_type_map,
@@ -55,7 +72,6 @@ let a: (int, bool) = 100.test()
         let mut implements_infos = ImplementsInfoSet::new(None);
         let mut errors = Vec::new();
         let mut generics = HashMap::new();
-        let import_map = HashMap::new();
         let mut moduled_name_user_type_map = HashMap::new();
         moduled_name_user_type_map.insert(
             module_path
@@ -111,7 +127,6 @@ let a: (int, bool) = 100.test()
         module_entity_type_map.extend(module_element_entity_type_map);
 
         let moduled_name_type_map = HashMap::new();
-        let package_resource_set = PackageResourceSet::new();
         let implements_element_checker = ImplementsElementChecker::new();
         let result = infer_type(
             ast.ast(),

@@ -6,4 +6,5 @@ edition = "2024"
 
 [dependencies]
 catla_util = { path = "../catla_util", version = "0.1.0" }
+catla_parser = { path = "../catla_parser", version = "0.1.0" }
 hashbrown = "0.16.0"

@@ -1174,7 +1174,7 @@ pub fn infer_type(
     implements_element_checker: &ImplementsElementChecker,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1219,7 +1219,7 @@ fn infer_type_for_program(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1655,7 +1655,7 @@ fn generics_define_register_and_bounds_check(
     where_clause_ast: &Option<WhereClause>,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1844,7 +1844,7 @@ fn infer_type_for_expression(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1930,7 +1930,7 @@ fn infer_type_for_or_expression(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1972,7 +1972,7 @@ fn infer_type_for_and_expression(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -2014,7 +2014,7 @@ fn infer_type_for_equals_expression(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -2056,7 +2056,7 @@ fn infer_type_for_less_or_greater_expression(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -2098,7 +2098,7 @@ fn infer_type_for_add_or_sub_expression(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -2140,7 +2140,7 @@ fn infer_type_for_mul_or_div_expression(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -2182,7 +2182,7 @@ fn infer_type_for_factor(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -2226,7 +2226,7 @@ fn infer_type_for_primary(
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
     implements_infos: &ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     module_entity_type_map: &HashMap<EntityID, Type>,
     moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -2250,7 +2250,12 @@ fn infer_type_for_primary(
                     match name_resolved_map.get(&EntityID::from(literal)) {
                         Some(resolved) => match resolved.define.kind {
                             DefineKind::Import => {
-                                match import_map.get(&resolved.define.entity_id).unwrap() {
+                                match import_map
+                                    .get(&resolved.define.entity_id)
+                                    .unwrap()
+                                    .first()
+                                    .unwrap_or(&ImportElement::Unknown)
+                                {
                                     ImportElement::ModuleAlias { path } => {
                                         let path_name =
                                             path.iter().cloned().collect::<Vec<_>>().join("::");
@@ -2268,13 +2273,13 @@ fn infer_type_for_primary(
                                             errors,
                                         )
                                     }
-                                    ImportElement::ModuleElement { path, element } => {
+                                    ImportElement::ModuleElement { path, element: _ } => {
                                         let module_name =
                                             path.iter().cloned().collect::<Vec<_>>().join("::");
                                         let module_type = moduled_name_type_map
                                             .get(&module_name)
                                             .unwrap()
-                                            .get(element)
+                                            .get(literal.value)
                                             .unwrap();
 
                                         let instance = type_environment
@@ -2628,7 +2633,7 @@ fn infer_type_for_primary(
                 this_type: &Option<Type>,
                 generics: &HashMap<EntityID, Arc<GenericType>>,
                 implements_infos: &ImplementsInfoSet,
-                import_map: &HashMap<EntityID, ImportElement>,
+                import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
                 module_entity_type_map: &HashMap<EntityID, Type>,
                 moduled_name_type_map: &HashMap<String, HashMap<String, Type>>,
                 name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -2756,14 +2761,19 @@ fn infer_type_for_primary(
                     Some(resolved) => match resolved.define.kind {
                         DefineKind::Import => {
                             match new_object.path.len() {
-                                1 => match import_map.get(&resolved.define.entity_id).unwrap() {
-                                    ImportElement::ModuleElement { path, element } => {
+                                1 => match import_map
+                                    .get(&resolved.define.entity_id)
+                                    .unwrap()
+                                    .first()
+                                    .unwrap_or(&ImportElement::Unknown)
+                                {
+                                    ImportElement::ModuleElement { path, element: _ } => {
                                         let module_path_name =
                                             path.iter().cloned().collect::<Vec<_>>().join("::");
                                         let ty = moduled_name_type_map
                                             .get(&module_path_name)
                                             .unwrap()
-                                            .get(element)
+                                            .get(new_object.path.first().unwrap().value)
                                             .unwrap();
 
                                         infer_type_for_new_object_expression(
@@ -2806,7 +2816,12 @@ fn infer_type_for_primary(
                                     }
                                 },
                                 _ => {
-                                    match import_map.get(&resolved.define.entity_id).unwrap() {
+                                    match import_map
+                                        .get(&resolved.define.entity_id)
+                                        .unwrap()
+                                        .first()
+                                        .unwrap_or(&ImportElement::Unknown)
+                                    {
                                         ImportElement::ModuleAlias { path } => {
                                             let module_path_name = path
                                                 .iter()

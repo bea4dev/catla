@@ -29,7 +29,7 @@ pub fn collect_module_element_type_for_program(
     module_element_entity_type_map: &mut HashMap<EntityID, Type>,
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -585,7 +585,7 @@ fn get_function_type(
     ast: &FunctionDefine,
     this_type: &Option<Type>,
     generics: &mut HashMap<EntityID, Arc<GenericType>>,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -709,7 +709,7 @@ fn collect_generics_define(
     ast: &GenericsDefine,
     this_type: &Option<Type>,
     generics: &mut HashMap<EntityID, Arc<GenericType>>,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -760,7 +760,7 @@ pub(crate) fn get_type(
     ast: &TypeInfo,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -849,7 +849,7 @@ fn get_base_type(
     ast: &BaseTypeInfo,
     this_type: &Option<Type>,
     generics: &HashMap<EntityID, Arc<GenericType>>,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -862,7 +862,12 @@ fn get_base_type(
         Some(first) => match name_resolved_map.get(&EntityID::from(first)) {
             Some(resolved) => match resolved.define.kind {
                 DefineKind::Import => match ast.path.len() {
-                    1 => match import_map.get(&resolved.define.entity_id).unwrap() {
+                    1 => match import_map
+                        .get(&resolved.define.entity_id)
+                        .unwrap()
+                        .first()
+                        .unwrap_or(&ImportElement::Unknown)
+                    {
                         ImportElement::ModuleAlias { path: _ } => {
                             let error = TypeError {
                                 kind: TypeErrorKind::MissingModuleElementType,
@@ -873,12 +878,12 @@ fn get_base_type(
 
                             Type::Unknown
                         }
-                        ImportElement::ModuleElement { path, element } => {
+                        ImportElement::ModuleElement { path, element: _ } => {
                             let module_name = path.iter().cloned().collect::<Vec<_>>().join("::");
                             match moduled_name_user_type_map
                                 .get(&module_name)
                                 .unwrap()
-                                .get(element)
+                                .get(first.value)
                             {
                                 Some(user_type) => user_type.clone(),
                                 None => {
@@ -900,7 +905,12 @@ fn get_base_type(
                             .iter()
                             .map(|literal| literal.value.to_string());
 
-                        match import_map.get(&resolved.define.entity_id).unwrap() {
+                        match import_map
+                            .get(&resolved.define.entity_id)
+                            .unwrap()
+                            .first()
+                            .unwrap_or(&ImportElement::Unknown)
+                        {
                             ImportElement::ModuleAlias { path } => {
                                 let path = path
                                     .iter()
@@ -1200,7 +1210,7 @@ fn collect_where_clause(
     ast: &WhereClause,
     this_type: &Option<Type>,
     generics: &mut HashMap<EntityID, Arc<GenericType>>,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1262,7 +1272,7 @@ fn collect_module_element_type_for_expression(
     module_element_entity_type_map: &mut HashMap<EntityID, Type>,
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1356,7 +1366,7 @@ macro_rules! collect_module_element_type_for_2op {
             module_element_entity_type_map: &mut HashMap<EntityID, Type>,
             module_element_name_type_map: &mut HashMap<String, Type>,
             implements_infos: &mut ImplementsInfoSet,
-            import_map: &HashMap<EntityID, ImportElement>,
+            import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
             entity_user_type_map: &HashMap<EntityID, Type>,
             moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
             name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1403,7 +1413,7 @@ macro_rules! collect_module_element_type_for_2op {
             module_element_entity_type_map: &mut HashMap<EntityID, Type>,
             module_element_name_type_map: &mut HashMap<String, Type>,
             implements_infos: &mut ImplementsInfoSet,
-            import_map: &HashMap<EntityID, ImportElement>,
+            import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
             entity_user_type_map: &HashMap<EntityID, Type>,
             moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
             name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1491,7 +1501,7 @@ fn collect_module_element_type_for_factor(
     module_element_entity_type_map: &mut HashMap<EntityID, Type>,
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1523,7 +1533,7 @@ fn collect_module_element_type_for_primary(
     module_element_entity_type_map: &mut HashMap<EntityID, Type>,
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1569,7 +1579,7 @@ fn collect_module_element_type_for_primary_left(
     module_element_entity_type_map: &mut HashMap<EntityID, Type>,
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1846,7 +1856,7 @@ fn collect_module_element_type_for_primary_right(
     module_element_entity_type_map: &mut HashMap<EntityID, Type>,
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
@@ -1899,7 +1909,7 @@ fn collect_module_element_type_for_mapping_operator(
     module_element_entity_type_map: &mut HashMap<EntityID, Type>,
     module_element_name_type_map: &mut HashMap<String, Type>,
     implements_infos: &mut ImplementsInfoSet,
-    import_map: &HashMap<EntityID, ImportElement>,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
     entity_user_type_map: &HashMap<EntityID, Type>,
     moduled_name_user_type_map: &HashMap<String, HashMap<String, Type>>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,

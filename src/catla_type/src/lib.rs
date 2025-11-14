@@ -31,7 +31,7 @@ let c = b
 
         let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
 
-        let (name_resolved_map, errors) = resolve_name(ast.ast(), &Vec::new(), &HashMap::new());
+        let (name_resolved_map, _, errors) = resolve_name(ast.ast(), &Vec::new(), &HashMap::new());
         dbg!(errors);
 
         let mut module_entity_user_type_map = HashMap::new();

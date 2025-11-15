@@ -24,6 +24,11 @@ impl PackageResourceSet {
         let map = self.map.read().unwrap();
         map.get(name).cloned()
     }
+
+    pub fn get_all(&self) -> HashMap<String, PackageResource> {
+        let map = self.map.read().unwrap();
+        map.clone()
+    }
 }
 
 #[derive(Debug, Clone)]

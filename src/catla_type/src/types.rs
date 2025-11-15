@@ -217,10 +217,12 @@ impl Type {
                             }
                         }
 
-                        Type::UserType {
+                        let next = Type::UserType {
                             user_type_info: *user_type_info,
                             generics: Arc::new(new_generics),
-                        }
+                        };
+
+                        return next.resolve_type_alias(user_type_set);
                     }
                     _ => unreachable!(),
                 }

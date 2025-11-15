@@ -2,6 +2,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "src/catla_compiler",
     "src/catla_grammar",
     "src/catla_import",
     "src/catla_name_resolver",

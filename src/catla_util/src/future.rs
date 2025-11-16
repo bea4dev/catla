@@ -8,6 +8,7 @@ use std::{
 
 use manual_future::{ManualFuture, ManualFutureCompleter};
 
+#[derive(Debug)]
 pub struct SharedManualFuture<T: Send> {
     value: Mutex<(Option<Arc<T>>, Vec<ManualFutureCompleter<Arc<T>>>)>,
 }
@@ -60,6 +61,7 @@ impl<T: Send> SharedManualFuture<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct MultiTaskFuture {
     task_count: AtomicUsize,
     future: SharedManualFuture<()>,

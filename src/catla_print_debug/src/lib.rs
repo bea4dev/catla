@@ -13,7 +13,7 @@ mod test {
         types::{GlobalUserTypeSet, ImplementsElementChecker, ImplementsInfoSet, Type},
         user_type_collector::collect_user_type_for_program,
     };
-    use catla_util::module_path::ModulePath;
+    use catla_util::{module_path::ModulePath, source_code::SourceCode};
     use hashbrown::HashMap;
 
     use crate::type_infer::print_type_infer_result;
@@ -31,15 +31,18 @@ implements <F, D> TestInterface<F> for D {
 
 let a: (int, bool) = 100.test()
         ";
-        let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
+
+        let module_path = ModulePath::new(["test"].into_iter(), Path::new("test.catla"));
+
+        let source_code = SourceCode::new(module_path.clone(), source.to_string());
+
+        let ast = CatlaAST::parse(source_code);
 
         dbg!(&ast.errors);
 
         let (name_resolved_map, module_element_names, errors) =
             resolve_name(ast.ast(), &Vec::new(), &HashMap::new());
         dbg!(errors);
-
-        let module_path = ModulePath::new(["test"].into_iter(), Path::new("test.catla"));
 
         let mut module_element_name_map = HashMap::new();
         module_element_name_map

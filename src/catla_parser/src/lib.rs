@@ -1,6 +1,7 @@
 use std::{mem::transmute, sync::Arc};
 
 use bumpalo::Bump;
+use catla_util::source_code::SourceCode;
 
 use crate::{ast::Program, error::ParseError, lexer::Lexer, parser::parse_program};
 
@@ -13,8 +14,7 @@ pub mod parser;
 pub struct CatlaAST {
     /// fake static
     ast: &'static Program<'static, 'static>,
-    pub source_code: Arc<String>,
-    pub source_code_name: Arc<String>,
+    pub source_code: SourceCode,
     pub errors: Arc<std::vec::Vec<ParseError>>,
     _allocator: Arc<Bump>,
 }
@@ -23,14 +23,8 @@ unsafe impl Send for CatlaAST {}
 unsafe impl Sync for CatlaAST {}
 
 impl CatlaAST {
-    pub fn parse(
-        source_code: impl Into<Arc<String>>,
-        source_code_name: impl Into<Arc<String>>,
-    ) -> Self {
-        let source_code: Arc<String> = source_code.into();
-        let source_code_name: Arc<String> = source_code_name.into();
-
-        let mut lexer = Lexer::new(source_code.as_str());
+    pub fn parse(source_code: SourceCode) -> Self {
+        let mut lexer = Lexer::new(source_code.code.as_str());
         let allocator = Arc::new(Bump::new());
         let mut errors = Vec::new();
 
@@ -41,7 +35,6 @@ impl CatlaAST {
         Self {
             ast: fake_static_ast,
             source_code,
-            source_code_name,
             errors: Arc::new(errors),
             _allocator: allocator,
         }

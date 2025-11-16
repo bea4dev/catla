@@ -28,22 +28,28 @@ pub fn print_type_infer_result(
 
     let mut builder = Report::build(
         ReportKind::Custom("Debug", Color::Cyan),
-        (ast.source_code_name.as_str(), ast.ast().span.clone()),
+        (
+            ast.source_code.module_path.path_name.as_str(),
+            ast.ast().span.clone(),
+        ),
     );
 
     for result in results.iter() {
         builder.add_label(
-            Label::new((ast.source_code_name.as_str(), result.span.clone()))
-                .with_message(result.value.to_display_string(user_type_set, None))
-                .with_color(Color::Cyan),
+            Label::new((
+                ast.source_code.module_path.path_name.as_str(),
+                result.span.clone(),
+            ))
+            .with_message(result.value.to_display_string(user_type_set, None))
+            .with_color(Color::Cyan),
         );
     }
 
     builder
         .finish()
         .print((
-            ast.source_code_name.as_str(),
-            Source::from(ast.source_code.as_str()),
+            ast.source_code.module_path.path_name.as_str(),
+            Source::from(ast.source_code.code.as_str()),
         ))
         .unwrap();
 }

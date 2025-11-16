@@ -204,7 +204,10 @@ pub enum NameResolveErrorKind {
 
 #[cfg(test)]
 mod test {
+    use std::path::Path;
+
     use catla_parser::CatlaAST;
+    use catla_util::{module_path::ModulePath, source_code::SourceCode};
     use hashbrown::HashMap;
 
     use crate::resolve_name;
@@ -218,7 +221,10 @@ print(aaa)
 function print() {}
 "#;
 
-        let ast = CatlaAST::parse(source.to_string(), "test.catla".to_string());
+        let module_path = ModulePath::new(["test"].into_iter(), Path::new("test.catla"));
+        let source_code = SourceCode::new(module_path, source.to_string());
+
+        let ast = CatlaAST::parse(source_code);
 
         let (resolved, _, errors) = resolve_name(ast.ast(), &std::vec::Vec::new(), &HashMap::new());
 

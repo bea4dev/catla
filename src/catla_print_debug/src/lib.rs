@@ -4,7 +4,7 @@ pub mod type_infer;
 mod test {
     use std::{path::Path, sync::Arc};
 
-    use catla_import::{import::collect_import, resource::PackageResourceSet};
+    use catla_import::{element::collect_import_element, resource::PackageResourceSet};
     use catla_name_resolver::resolve_name;
     use catla_parser::CatlaAST;
     use catla_type::{
@@ -45,12 +45,14 @@ let a: (int, bool) = 100.test()
         dbg!(errors);
 
         let mut module_element_name_map = HashMap::new();
-        module_element_name_map
-            .insert(module_path.path_name.as_ref().clone(), module_element_names);
+        module_element_name_map.insert(
+            module_path.path_name.as_ref().clone(),
+            Arc::new(module_element_names),
+        );
 
         let package_resource_set = PackageResourceSet::new();
 
-        let (_, import_map, errors) = collect_import(
+        let (import_map, errors) = collect_import_element(
             ast.ast(),
             &package_resource_set,
             &module_element_name_map,

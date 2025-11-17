@@ -1,6 +1,7 @@
 pub mod resource;
-pub mod import;
+pub mod element;
 pub mod error;
+pub mod import;
 
 pub enum ImportElement {
     ModuleAlias { path: Vec<String> },

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use catla_import::{
+    element::collect_import_element,
     import::collect_import,
     resource::{PackageResource, PackageResourceSet},
 };
@@ -17,7 +18,7 @@ use catla_util::{future::MultiTaskFuture, source_code::SourceCode};
 use hashbrown::HashMap;
 use tokio::runtime::{Builder, Runtime};
 
-use crate::settings::CatlaCompilerSettings;
+use crate::{resource::ModuleResourceSet, settings::CatlaCompilerSettings};
 
 #[derive(Debug, Clone)]
 pub struct CatlaCompiler {
@@ -30,10 +31,13 @@ struct CatlaCompilerInner {
     user_type_set: GlobalUserTypeSet,
     runtime: Runtime,
     phases: CompilePhases,
+    states: CompileStates,
 }
 
 impl CatlaCompiler {
     pub fn new(package_resource_set: PackageResourceSet, settings: CatlaCompilerSettings) -> Self {
+        let states = CompileStates::new(&package_resource_set);
+
         let inner = CatlaCompilerInner {
             package_resource_set,
             user_type_set: GlobalUserTypeSet::new(),
@@ -42,6 +46,7 @@ impl CatlaCompiler {
                 .build()
                 .unwrap(),
             phases: CompilePhases::new(),
+            states,
         };
 
         Self {
@@ -60,12 +65,6 @@ impl CatlaCompiler {
 
         for resource in resouces.into_values() {
             if let PackageResource::Module { source_code } = resource {
-                self.inner
-                    .phases
-                    .parse_and_name_resolve
-                    .mark_as_started()
-                    .await;
-
                 let self_clone = self.clone();
 
                 self.inner.runtime.spawn(async move {
@@ -73,8 +72,6 @@ impl CatlaCompiler {
                 });
             }
         }
-
-        self.inner.phases.parse_and_name_resolve.future().await;
     }
 
     async fn compile_module(&self, source_code: SourceCode) {
@@ -86,15 +83,28 @@ impl CatlaCompiler {
             resolve_name(ast.ast(), &Vec::new(), &HashMap::new());
         dbg!(errors);
 
-        let mut module_element_name_map = HashMap::new();
-        module_element_name_map.insert(
-            source_code.module_path.path_name.as_ref().clone(),
-            module_element_names,
-        );
+        let module_element_names = Arc::new(module_element_names);
 
-        let package_resource_set = PackageResourceSet::new();
+        let module_name = source_code.module_path.path_name.as_ref();
 
-        let (_, import_map, errors) = collect_import(
+        self.inner
+            .states
+            .module_element_name_map
+            .set(module_name, module_element_names)
+            .await;
+
+        let package_resource_set = &self.inner.package_resource_set;
+
+        let modules = collect_import(ast.ast(), package_resource_set);
+
+        let module_element_name_map = self
+            .inner
+            .states
+            .module_element_name_map
+            .get(&modules)
+            .await;
+
+        let (import_map, errors) = collect_import_element(
             ast.ast(),
             &package_resource_set,
             &module_element_name_map,
@@ -195,14 +205,23 @@ impl CatlaCompiler {
 }
 
 #[derive(Debug)]
-pub struct CompilePhases {
-    pub parse_and_name_resolve: MultiTaskFuture,
-}
+pub struct CompilePhases {}
 
 impl CompilePhases {
     pub fn new() -> Self {
+        Self {}
+    }
+}
+
+#[derive(Debug)]
+pub struct CompileStates {
+    pub module_element_name_map: ModuleResourceSet<Vec<String>>,
+}
+
+impl CompileStates {
+    pub fn new(package_resource_set: &PackageResourceSet) -> Self {
         Self {
-            parse_and_name_resolve: MultiTaskFuture::new(),
+            module_element_name_map: ModuleResourceSet::new(package_resource_set),
         }
     }
 }

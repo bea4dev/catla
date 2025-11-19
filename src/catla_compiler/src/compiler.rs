@@ -129,9 +129,8 @@ impl CatlaCompiler {
         let mut implements_infos = ImplementsInfoSet::new(None);
         let mut errors = Vec::new();
         let mut generics = HashMap::new();
-        let mut moduled_name_user_type_map = HashMap::new();
-        moduled_name_user_type_map.insert(
-            source_code.module_path.path_name.as_ref().clone(),
+
+        let module_name_user_type_map: Arc<HashMap<_, _>> = Arc::new(
             module_name_type_map
                 .iter()
                 .map(|(name, user_type_id)| {
@@ -144,6 +143,23 @@ impl CatlaCompiler {
                     )
                 })
                 .collect(),
+        );
+
+        self.inner
+            .states
+            .module_name_user_type_map
+            .set(module_name, module_name_user_type_map.clone())
+            .await;
+
+        let mut moduled_name_user_type_map = self
+            .inner
+            .states
+            .module_name_user_type_map
+            .get(&modules)
+            .await;
+        moduled_name_user_type_map.insert(
+            source_code.module_path.path_name.as_ref().clone(),
+            module_name_user_type_map,
         );
 
         let mut module_entity_type_map = HashMap::new();
@@ -216,12 +232,14 @@ impl CompilePhases {
 #[derive(Debug)]
 pub struct CompileStates {
     pub module_element_name_map: ModuleResourceSet<Vec<String>>,
+    pub module_name_user_type_map: ModuleResourceSet<HashMap<String, Type>>,
 }
 
 impl CompileStates {
     pub fn new(package_resource_set: &PackageResourceSet) -> Self {
         Self {
             module_element_name_map: ModuleResourceSet::new(package_resource_set),
+            module_name_user_type_map: ModuleResourceSet::new(package_resource_set),
         }
     }
 }

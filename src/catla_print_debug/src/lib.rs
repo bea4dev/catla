@@ -85,18 +85,20 @@ let a: (int, bool) = 100.test()
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("::"),
-            module_name_type_map
-                .iter()
-                .map(|(name, user_type_id)| {
-                    (
-                        name.clone(),
-                        Type::UserType {
-                            user_type_info: *user_type_id,
-                            generics: Arc::new(Vec::new()),
-                        },
-                    )
-                })
-                .collect(),
+            Arc::new(
+                module_name_type_map
+                    .iter()
+                    .map(|(name, user_type_id)| {
+                        (
+                            name.clone(),
+                            Type::UserType {
+                                user_type_info: *user_type_id,
+                                generics: Arc::new(Vec::new()),
+                            },
+                        )
+                    })
+                    .collect(),
+            ),
         );
 
         let mut module_entity_type_map = HashMap::new();

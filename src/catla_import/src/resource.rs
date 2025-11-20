@@ -34,6 +34,13 @@ impl PackageResourceSet {
         map.clone()
     }
 
+    pub fn is_module_name(&self, name: &str) -> bool {
+        match self.get(name) {
+            Some(PackageResource::Module { source_code: _ }) => true,
+            _ => false,
+        }
+    }
+
     pub fn search_source_code(
         &mut self,
         current_module_name: &str,
@@ -41,6 +48,11 @@ impl PackageResourceSet {
     ) -> Result<(), String> {
         if !path.is_dir() {
             return Ok(());
+        }
+
+        if let Some(PackageResource::Module { source_code: _ }) = self.get(&current_module_name) {
+        } else {
+            self.register(current_module_name.to_string(), PackageResource::Package);
         }
 
         for entry in read_dir(path).map_err(|_| format!("Failed to read '{}'", path.display()))? {
@@ -59,14 +71,6 @@ impl PackageResourceSet {
 
             if path.is_dir() {
                 self.search_source_code(&current_module_name, &path)?;
-
-                if let Some(PackageResource::Module { source_code: _ }) =
-                    self.get(&current_module_name)
-                {
-                    continue;
-                }
-
-                self.register(current_module_name, PackageResource::Package);
             } else {
                 let extension = path.extension().unwrap().to_str();
                 if extension.is_none() || extension.unwrap() != "catla" {

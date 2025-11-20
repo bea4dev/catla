@@ -86,8 +86,17 @@ impl CatlaCompiler {
 
         dbg!(&ast.errors);
 
+        let all_crates = &self
+            .inner
+            .package_resource_set
+            .get_all()
+            .keys()
+            .filter(|path| !path.contains("::"))
+            .cloned()
+            .collect();
+
         let (name_resolved_map, module_element_names, errors) =
-            resolve_name(ast.ast(), &Vec::new(), &HashMap::new());
+            resolve_name(ast.ast(), &all_crates, &HashMap::new());
         dbg!(errors);
 
         let module_element_names = Arc::new(module_element_names);
@@ -102,7 +111,10 @@ impl CatlaCompiler {
 
         let package_resource_set = &self.inner.package_resource_set;
 
-        let modules = collect_import(ast.ast(), package_resource_set);
+        let modules = collect_import(ast.ast(), package_resource_set)
+            .into_iter()
+            .filter(|module_name| package_resource_set.is_module_name(&module_name))
+            .collect::<Vec<_>>();
 
         let module_element_name_map = self
             .inner

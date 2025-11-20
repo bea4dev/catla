@@ -1,6 +1,6 @@
-import test::test::{Interface1, print}
+import test::test::Interface1
 
-print()
+std::io::print()
 
 interface TestInterface<T> {
     function <U> test() -> (T, U);

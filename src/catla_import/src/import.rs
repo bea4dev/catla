@@ -184,6 +184,10 @@ fn collect_import_for_import_statement(
     modules: &mut Vec<String>,
     package_resource_set: &PackageResourceSet,
 ) {
+    if ast.path.is_empty() {
+        return;
+    }
+
     let path = ast
         .path
         .iter()
@@ -236,7 +240,17 @@ fn collect_import_for_import_statement(
                 },
             }
         }
-        None => {}
+        None => {
+            let path = ast.path[..ast.path.len() - 1]
+                .iter()
+                .map(|path| path.value.to_string())
+                .collect::<Vec<_>>();
+            let path_string = path.join("::");
+
+            if let Some(_) = package_resource_set.get(&path_string) {
+                modules.push(path_string);
+            }
+        }
     }
 }
 

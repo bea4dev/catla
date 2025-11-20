@@ -22,10 +22,10 @@ impl<T: Sync + Send> ModuleResourceSet<T> {
         }
     }
 
-    pub async fn get(&self, modules: &Vec<String>) -> HashMap<String, Arc<T>> {
+    pub async fn get(&self, modules: impl IntoIterator<Item = &String>) -> HashMap<String, Arc<T>> {
         let mut map = HashMap::new();
 
-        for module in modules.iter() {
+        for module in modules.into_iter() {
             let value = self.resources.get(module).unwrap().get().await;
             map.insert(module.clone(), value);
         }

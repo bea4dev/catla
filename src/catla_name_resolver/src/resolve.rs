@@ -24,7 +24,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
     all_crates: &std::vec::Vec<String>,
     wild_card_imports: &HashMap<EntityID, std::vec::Vec<String>>,
     module_element_names: &mut HashMap<String, Range<usize>>,
-    is_user_type_scope: bool,
+    is_user_type_or_impl_scope: bool,
     errors: &mut std::vec::Vec<NameResolveError>,
 ) {
     for statement in ast.statements.iter() {
@@ -100,7 +100,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                 };
                                 components.define(environment, name.value.into(), define);
 
-                                if !is_user_type_scope {
+                                if !is_user_type_or_impl_scope {
                                     collect_module_element_name(name, module_element_names, errors);
                                 }
                             }
@@ -539,7 +539,7 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                         all_crates,
                         wild_card_imports,
                         module_element_names,
-                        false,
+                        true,
                         errors,
                     );
                 }

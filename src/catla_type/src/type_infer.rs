@@ -2242,7 +2242,7 @@ fn infer_type_for_primary(
             left,
             generics: generics_info,
             function_call,
-            span,
+            span: _,
         } => {
             let mut last_type_variable_id = match left {
                 SimplePrimary::Tuple { expressions, span } => todo!(),

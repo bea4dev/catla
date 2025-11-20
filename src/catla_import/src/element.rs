@@ -333,6 +333,10 @@ fn collect_import_element_for_import_statement(
     errors: &mut Vec<ImportError>,
     module_path: &ModulePath,
 ) {
+    if ast.path.is_empty() {
+        return;
+    }
+
     let path = ast
         .path
         .iter()
@@ -428,6 +432,10 @@ fn collect_import_element_for_import_statement(
                                         module_path: module_path.clone(),
                                     };
                                     errors.push(error);
+                                    import_elements.insert(
+                                        EntityID::from(element),
+                                        vec![ImportElement::Unknown],
+                                    );
                                 }
                             }
                         }
@@ -458,14 +466,52 @@ fn collect_import_element_for_import_statement(
             },
         },
         None => {
-            let error = ImportError {
-                kind: ImportErrorKind::ModuleNotFound {
-                    module_name: path_string,
-                },
-                span: ast.span.clone(),
-                module_path: module_path.clone(),
-            };
-            errors.push(error);
+            let path = ast.path[..ast.path.len() - 1]
+                .iter()
+                .map(|path| path.value.to_string())
+                .collect::<Vec<_>>();
+            let path_string = path.join("::");
+
+            if let Some(PackageResource::Module { source_code: _ }) =
+                package_resource_set.get(&path_string)
+            {
+                if module_element_name_map
+                    .get(&path_string)
+                    .unwrap()
+                    .iter()
+                    .any(|element| element.as_str() == ast.path.last().unwrap().value)
+                {
+                    import_elements.insert(
+                        EntityID::from(ast.path.last().unwrap()),
+                        vec![ImportElement::ModuleElement {
+                            path,
+                            element: ast.path.last().unwrap().value.to_string(),
+                        }],
+                    );
+                } else {
+                    let error = ImportError {
+                        kind: ImportErrorKind::NoElementFound {
+                            element_name: ast.path.last().unwrap().value.to_string(),
+                        },
+                        span: ast.path.last().unwrap().span.clone(),
+                        module_path: module_path.clone(),
+                    };
+                    errors.push(error);
+                    import_elements.insert(
+                        EntityID::from(ast.path.last().unwrap()),
+                        vec![ImportElement::Unknown],
+                    );
+                }
+            } else {
+                let error = ImportError {
+                    kind: ImportErrorKind::ModuleNotFound {
+                        module_name: path_string,
+                    },
+                    span: ast.span.clone(),
+                    module_path: module_path.clone(),
+                };
+                errors.push(error);
+            }
         }
     }
 }

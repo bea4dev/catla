@@ -15,7 +15,7 @@ use catla_type::{
     user_type_collector::collect_user_type_for_program,
 };
 use catla_util::{future::MultiTaskFuture, source_code::SourceCode};
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use tokio::runtime::{Builder, Runtime};
 
 use crate::{resource::ModuleResourceSet, settings::CatlaCompilerSettings};
@@ -63,14 +63,21 @@ impl CatlaCompiler {
     async fn compile_inner(&self) {
         let resouces = self.inner.package_resource_set.get_all();
 
+        let mut futures = Vec::new();
+
         for resource in resouces.into_values() {
             if let PackageResource::Module { source_code } = resource {
                 let self_clone = self.clone();
 
-                self.inner.runtime.spawn(async move {
-                    self_clone.clone().compile_module(source_code).await;
+                let future = self.inner.runtime.spawn(async move {
+                    self_clone.compile_module(source_code).await;
                 });
+                futures.push(future);
             }
+        }
+
+        for future in futures.into_iter() {
+            future.await.unwrap();
         }
     }
 
@@ -124,12 +131,6 @@ impl CatlaCompiler {
             &source_code.module_path,
         );
 
-        let mut module_element_entity_type_map = HashMap::new();
-        let mut module_element_name_type_map = HashMap::new();
-        let mut implements_infos = ImplementsInfoSet::new(None);
-        let mut errors = Vec::new();
-        let mut generics = HashMap::new();
-
         let module_name_user_type_map: Arc<HashMap<_, _>> = Arc::new(
             module_name_type_map
                 .iter()
@@ -157,10 +158,7 @@ impl CatlaCompiler {
             .module_name_user_type_map
             .get(&modules)
             .await;
-        moduled_name_user_type_map.insert(
-            source_code.module_path.path_name.as_ref().clone(),
-            module_name_user_type_map,
-        );
+        moduled_name_user_type_map.insert(module_name.clone(), module_name_user_type_map.clone());
 
         let mut module_entity_type_map = HashMap::new();
         module_entity_type_map.extend(module_entity_user_type_map.iter().map(
@@ -174,6 +172,12 @@ impl CatlaCompiler {
                 )
             },
         ));
+
+        let mut module_element_entity_type_map = HashMap::new();
+        let mut module_element_name_type_map = HashMap::new();
+        let mut implements_infos = ImplementsInfoSet::new(None);
+        let mut errors = Vec::new();
+        let mut generics = HashMap::new();
 
         collect_module_element_type_for_program(
             ast.ast(),
@@ -192,15 +196,70 @@ impl CatlaCompiler {
             &mut errors,
         );
 
+        module_element_name_type_map.extend(module_name_user_type_map.as_ref().clone());
+
+        self.inner
+            .states
+            .module_name_type_map
+            .set(module_name, Arc::new(module_element_name_type_map))
+            .await;
+
+        let moduled_name_type_map = self.inner.states.module_name_type_map.get(&modules).await;
+
+        self.inner
+            .states
+            .module_imports
+            .set(module_name, Arc::new(modules.clone()))
+            .await;
+
+        self.inner
+            .states
+            .module_implements_infos
+            .set(module_name, Arc::new(implements_infos.clone()))
+            .await;
+
+        let global_implements_infos = ImplementsInfoSet::new(None);
+        let mut merged_module = HashSet::new();
+        merged_module.insert(module_name.clone());
+        let mut candidate_modules = Vec::new();
+        candidate_modules.push(module_name.clone());
+
+        loop {
+            let Some(candidate_module) = candidate_modules.pop() else {
+                break;
+            };
+
+            let import_modules = self
+                .inner
+                .states
+                .module_imports
+                .get([&candidate_module])
+                .await;
+            let implements_infos = self
+                .inner
+                .states
+                .module_implements_infos
+                .get([&candidate_module])
+                .await;
+
+            global_implements_infos.merge(implements_infos.get(&candidate_module).unwrap());
+
+            for import_module in import_modules.get(&candidate_module).unwrap().iter() {
+                if merged_module.contains(import_module) {
+                    continue;
+                }
+                merged_module.insert(import_module.clone());
+            }
+        }
+
         module_entity_type_map.extend(module_element_entity_type_map);
 
-        let moduled_name_type_map = HashMap::new();
         let implements_element_checker = ImplementsElementChecker::new();
         let result = infer_type(
             ast.ast(),
             &implements_element_checker,
             &mut generics,
-            &implements_infos,
+            &global_implements_infos,
             &import_map,
             &module_entity_type_map,
             &moduled_name_type_map,
@@ -212,7 +271,7 @@ impl CatlaCompiler {
         );
 
         implements_element_checker.register_implements(&implements_infos);
-        implements_element_checker.check(&user_type_set, &implements_infos, &mut errors);
+        implements_element_checker.check(&user_type_set, &global_implements_infos, &mut errors);
 
         dbg!(errors);
 
@@ -233,6 +292,9 @@ impl CompilePhases {
 pub struct CompileStates {
     pub module_element_name_map: ModuleResourceSet<Vec<String>>,
     pub module_name_user_type_map: ModuleResourceSet<HashMap<String, Type>>,
+    pub module_imports: ModuleResourceSet<Vec<String>>,
+    pub module_implements_infos: ModuleResourceSet<ImplementsInfoSet>,
+    pub module_name_type_map: ModuleResourceSet<HashMap<String, Type>>,
 }
 
 impl CompileStates {
@@ -240,6 +302,9 @@ impl CompileStates {
         Self {
             module_element_name_map: ModuleResourceSet::new(package_resource_set),
             module_name_user_type_map: ModuleResourceSet::new(package_resource_set),
+            module_imports: ModuleResourceSet::new(package_resource_set),
+            module_implements_infos: ModuleResourceSet::new(package_resource_set),
+            module_name_type_map: ModuleResourceSet::new(package_resource_set),
         }
     }
 }

@@ -1,0 +1,13 @@
+import test::test::{Interface1, print}
+
+print()
+
+interface TestInterface<T> {
+    function <U> test() -> (T, U);
+}
+
+implements <F, D> TestInterface<F> for D {
+    function <E> test() -> (F, E) {}
+}
+
+let a: (int, bool) = 100.test()

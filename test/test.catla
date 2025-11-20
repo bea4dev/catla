@@ -1,0 +1,5 @@
+interface Interface1 {
+    function test() -> int;
+}
+
+function print() {}

@@ -872,6 +872,12 @@ impl ImplementsInfoSet {
         }
     }
 
+    pub fn merge(&self, other: &Self) {
+        let mut infos = self.infos.write().unwrap();
+        let other = other.infos.read().unwrap();
+        infos.extend(other.iter().cloned());
+    }
+
     pub fn register_implements_info(&self, implements_info: ImplementsInfo) {
         self.infos.write().unwrap().push(Arc::new(implements_info));
     }

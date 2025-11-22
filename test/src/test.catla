@@ -1,3 +1,1 @@
-interface Interface1 {
-    function test() -> int;
-}
+

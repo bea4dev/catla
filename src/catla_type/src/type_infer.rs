@@ -2236,6 +2236,7 @@ fn infer_type_for_primary(
     errors: &mut std::vec::Vec<TypeError>,
 ) -> TypeVariableID {
     let mut chain_start_position = 0;
+    let mut is_inline_import = false;
 
     let first_type_variable_id = match &ast.left.first {
         PrimaryLeftExpr::Simple {
@@ -2260,6 +2261,7 @@ fn infer_type_for_primary(
                                         let path_name =
                                             path.iter().cloned().collect::<Vec<_>>().join("::");
 
+                                        is_inline_import = true;
                                         get_module_import_type(
                                             ast,
                                             literal,
@@ -2334,18 +2336,21 @@ fn infer_type_for_primary(
                             DefineKind::Generics => todo!(),
                         },
                         None => match package_resource_set.get(literal.value) {
-                            Some(_) => get_module_import_type(
-                                ast,
-                                literal,
-                                literal.value.to_string(),
-                                &mut chain_start_position,
-                                type_environment,
-                                implements_element_checker,
-                                moduled_name_type_map,
-                                package_resource_set,
-                                module_path,
-                                errors,
-                            ),
+                            Some(_) => {
+                                is_inline_import = true;
+                                get_module_import_type(
+                                    ast,
+                                    literal,
+                                    literal.value.to_string(),
+                                    &mut chain_start_position,
+                                    type_environment,
+                                    implements_element_checker,
+                                    moduled_name_type_map,
+                                    package_resource_set,
+                                    module_path,
+                                    errors,
+                                )
+                            }
                             None => Spanned::new(
                                 type_environment.create_type_variable_id_with_set(),
                                 literal.span.clone(),
@@ -2353,7 +2358,18 @@ fn infer_type_for_primary(
                         },
                     }
                 }
-                SimplePrimary::StringLiteral(literal) => todo!(),
+                SimplePrimary::StringLiteral(literal) => type_environment
+                    .create_and_set_entity_type(
+                        EntityID::from(literal),
+                        moduled_name_type_map
+                            .get("std::string")
+                            .unwrap()
+                            .get("String")
+                            .unwrap()
+                            .clone()
+                            .moduled(module_path.clone(), literal.span.clone()),
+                    )
+                    .with_span(literal.span.clone()),
                 SimplePrimary::NumericLiteral(literal) => Spanned::new(
                     type_environment.create_and_set_entity_type(
                         EntityID::from(literal),
@@ -3134,16 +3150,18 @@ fn infer_type_for_primary(
                 None => None,
             };
 
-            let element_type = type_environment.get_user_type_element(
-                last_type_variable_id,
-                &second.literal,
-                function_type_hints,
-                implements_infos,
-                user_type_set,
-                errors,
-            );
+            if !is_inline_import {
+                let element_type = type_environment.get_user_type_element(
+                    last_type_variable_id,
+                    &second.literal,
+                    function_type_hints,
+                    implements_infos,
+                    user_type_set,
+                    errors,
+                );
 
-            last_type_variable_id = Spanned::new(element_type, second.literal.span.clone());
+                last_type_variable_id = Spanned::new(element_type, second.literal.span.clone());
+            }
 
             match &second.generics {
                 Some(generics_info) => {

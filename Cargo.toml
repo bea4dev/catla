@@ -9,6 +9,7 @@ members = [
     "src/catla_parser",
     "src/catla_print_debug",
     "src/catla_semantics",
+    "src/catla_codegen",
     "src/catla_type",
     "src/catla_util"
 ]

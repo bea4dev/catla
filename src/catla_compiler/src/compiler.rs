@@ -111,10 +111,11 @@ impl CatlaCompiler {
 
         let package_resource_set = &self.inner.package_resource_set;
 
-        let modules = collect_import(ast.ast(), package_resource_set)
+        let mut modules = collect_import(ast.ast(), package_resource_set)
             .into_iter()
             .filter(|module_name| package_resource_set.is_module_name(&module_name))
             .collect::<Vec<_>>();
+        modules.push("std::string".to_string());
 
         let module_element_name_map = self
             .inner

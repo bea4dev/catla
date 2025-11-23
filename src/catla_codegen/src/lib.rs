@@ -1,4 +1,5 @@
-pub mod transpiler;
+pub mod codegen;
+pub mod catla_std;
 
 use std::{
     cell::{Cell, RefCell},
@@ -40,7 +41,7 @@ impl CodeBuilder {
         CodeBuilderScope { code: self.clone() }
     }
 
-    pub fn dump(self) -> String {
+    pub fn dump(&self) -> String {
         self.code.borrow().clone()
     }
 }
@@ -60,5 +61,12 @@ impl CodeBuilderScope {
         *self.code.code.borrow_mut() +=
             format!("{}{}\n", "    ".repeat(self.code.depth.get()), code).as_str();
     }
-}
 
+    pub fn scope(&self) -> CodeBuilderScope {
+        self.code.scope()
+    }
+
+    pub fn dump(&self) -> String {
+        self.code.dump()
+    }
+}

@@ -1,7 +1,8 @@
 use catla_parser::ast::{
-    AddOrSubExpression, AndExpression, Define, EqualsExpression, Expression, Factor,
-    LessOrGreaterExpression, MulOrDivExpression, OrExpression, Primary, Program, Statement,
-    TypeAttribute, TypeInfo, TypeInfoBase, VariableBinding,
+    AddOrSubExpression, AndExpression, Define, ElementsOrWildCard, EqualsExpression, Expression,
+    Factor, ImportStatement, LessOrGreaterExpression, MulOrDivExpression, OrExpression, Primary,
+    PrimaryLeftExpr, Program, SimplePrimary, Statement, TypeAttribute, TypeInfo, TypeInfoBase,
+    VariableBinding,
 };
 
 use crate::CodeBuilderScope;
@@ -11,7 +12,9 @@ pub(crate) fn codegen_for_program(ast: &Program, in_impl_scope: bool, builder: &
         match &statement.statement {
             Statement::Assignment(assignment) => todo!(),
             Statement::Swap(swap_statement) => todo!(),
-            Statement::Import(import_statement) => todo!(),
+            Statement::Import(import_statement) => {
+                builder.push_line(codegen_import(import_statement).as_str());
+            }
             Statement::DefineWithAttribute(define_with_attribute) => {
                 if let Ok(define) = &define_with_attribute.define {
                     match define {
@@ -64,7 +67,10 @@ pub(crate) fn codegen_for_program(ast: &Program, in_impl_scope: bool, builder: &
                 }
             }
             Statement::Drop(drop_statement) => todo!(),
-            Statement::Expression(expression) => todo!(),
+            Statement::Expression(expression) => {
+                builder.push_raw(codegen_expression(expression, &builder).as_str());
+                builder.push_line(";");
+            }
             Statement::Implements(implements) => todo!(),
         }
     }
@@ -125,6 +131,43 @@ fn codegen_for_type(ast: &TypeInfo) -> String {
             TypeAttribute::Optional { span } => todo!(),
             TypeAttribute::Result { generics, span } => todo!(),
         }
+    }
+
+    code
+}
+
+fn codegen_import(ast: &ImportStatement) -> String {
+    let mut code = String::new();
+    code += "use ";
+
+    let mut path_temp = Vec::new();
+    for (index, path) in ast.path.iter().enumerate() {
+        if index == 0 && path.value == "std" {
+            path_temp.push("catla_std");
+        } else {
+            path_temp.push(path.value);
+        }
+    }
+    code += path_temp.join("::").as_str();
+
+    if let Some(element) = &ast.elements_or_wild_card {
+        code += "{";
+
+        match element {
+            ElementsOrWildCard::Elements(literals) => {
+                code += literals
+                    .iter()
+                    .map(|literal| literal.value)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+                    .as_str();
+            }
+            ElementsOrWildCard::WildCard(_) => {
+                code += "*";
+            }
+        }
+
+        code += "}";
     }
 
     code
@@ -203,5 +246,52 @@ fn codegen_for_factor(ast: &Factor, builder: &CodeBuilderScope) -> String {
 }
 
 fn codegen_for_primary(ast: &Primary, builder: &CodeBuilderScope) -> String {
-    
+    match &ast.left.first {
+        PrimaryLeftExpr::Simple {
+            left,
+            generics,
+            function_call,
+            span,
+        } => {
+            let mut code = String::new();
+
+            match left {
+                SimplePrimary::Tuple { expressions, span } => todo!(),
+                SimplePrimary::Literal(literal) => code += literal.value,
+                SimplePrimary::StringLiteral(literal) => {
+                    code += format!(
+                        "catla_std::string::String::from_static_str({})",
+                        literal.value
+                    )
+                    .as_str()
+                }
+                SimplePrimary::NumericLiteral(spanned) => todo!(),
+                SimplePrimary::Null(range) => todo!(),
+                SimplePrimary::True(range) => todo!(),
+                SimplePrimary::False(range) => todo!(),
+                SimplePrimary::This(range) => todo!(),
+                SimplePrimary::LargeThis(range) => todo!(),
+            }
+
+            if let Some(function_call) = function_call {
+                code += format!(
+                    "({})",
+                    function_call
+                        .arguments
+                        .iter()
+                        .map(|expression| codegen_expression(expression, builder))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+                .as_str();
+            }
+
+            code
+        }
+        PrimaryLeftExpr::NewObject { new_object } => todo!(),
+        PrimaryLeftExpr::NewArray { new_array } => todo!(),
+        PrimaryLeftExpr::NewArrayInit { new_array_init } => todo!(),
+        PrimaryLeftExpr::If { if_expression } => todo!(),
+        PrimaryLeftExpr::Loop { loop_expression } => todo!(),
+    }
 }

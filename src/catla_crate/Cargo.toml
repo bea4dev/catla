@@ -1,0 +1,8 @@
+# !tyml @cargo/Cargo
+[package]
+name = "catla_crate"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+semver = "1.0"

@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use catla_codegen::{CodegenSettings, codegen, crates::codegen_cargo_toml};
+use catla_crate::CrateInfoSet;
 use catla_import::{
     element::collect_import_element,
     import::collect_import,
@@ -14,7 +16,8 @@ use catla_type::{
     types::{GlobalUserTypeSet, ImplementsElementChecker, ImplementsInfoSet, Type},
     user_type_collector::collect_user_type_for_program,
 };
-use catla_util::{future::MultiTaskFuture, source_code::SourceCode};
+use catla_util::source_code::SourceCode;
+use futures::{StreamExt, stream::FuturesUnordered};
 use hashbrown::{HashMap, HashSet};
 use tokio::runtime::{Builder, Runtime};
 
@@ -27,18 +30,26 @@ pub struct CatlaCompiler {
 
 #[derive(Debug)]
 struct CatlaCompilerInner {
+    crate_info_set: CrateInfoSet,
     package_resource_set: PackageResourceSet,
     user_type_set: GlobalUserTypeSet,
     runtime: Runtime,
     phases: CompilePhases,
     states: CompileStates,
+    codegen_settings: CodegenSettings,
 }
 
 impl CatlaCompiler {
-    pub fn new(package_resource_set: PackageResourceSet, settings: CatlaCompilerSettings) -> Self {
+    pub fn new(
+        crate_info_set: CrateInfoSet,
+        package_resource_set: PackageResourceSet,
+        settings: CatlaCompilerSettings,
+        codegen_settings: CodegenSettings,
+    ) -> Self {
         let states = CompileStates::new(&package_resource_set);
 
         let inner = CatlaCompilerInner {
+            crate_info_set,
             package_resource_set,
             user_type_set: GlobalUserTypeSet::new(),
             runtime: Builder::new_multi_thread()
@@ -47,6 +58,7 @@ impl CatlaCompiler {
                 .unwrap(),
             phases: CompilePhases::new(),
             states,
+            codegen_settings,
         };
 
         Self {
@@ -63,7 +75,7 @@ impl CatlaCompiler {
     async fn compile_inner(&self) {
         let resouces = self.inner.package_resource_set.get_all();
 
-        let mut futures = Vec::new();
+        let mut futures = FuturesUnordered::new();
 
         for resource in resouces.into_values() {
             if let PackageResource::Module { source_code } = resource {
@@ -76,8 +88,18 @@ impl CatlaCompiler {
             }
         }
 
-        for future in futures.into_iter() {
-            future.await.unwrap();
+        while let Some(result) = futures.next().await {
+            result.unwrap();
+        }
+
+        let mut futures = FuturesUnordered::new();
+
+        for crate_info in self.inner.crate_info_set.crates.iter() {
+            futures.push(codegen_cargo_toml(crate_info, &self.inner.codegen_settings));
+        }
+
+        while let Some(result) = futures.next().await {
+            result.unwrap();
         }
     }
 
@@ -289,6 +311,14 @@ impl CatlaCompiler {
         dbg!(errors);
 
         print_type_infer_result(&ast, &result, &user_type_set);
+
+        codegen(
+            ast.ast(),
+            &self.inner.codegen_settings,
+            &source_code.module_path,
+        )
+        .await
+        .unwrap();
     }
 }
 

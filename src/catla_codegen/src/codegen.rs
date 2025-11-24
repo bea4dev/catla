@@ -20,8 +20,8 @@ pub(crate) fn codegen_for_program(ast: &Program, in_impl_scope: bool, builder: &
                     match define {
                         Define::Function(function_define) => {
                             let public = match in_impl_scope {
-                                true => "pub ",
-                                false => "",
+                                true => "",
+                                false => "pub ",
                             };
 
                             let mut arguments_str = String::new();
@@ -49,16 +49,27 @@ pub(crate) fn codegen_for_program(ast: &Program, in_impl_scope: bool, builder: &
 
                             builder.push_line(
                                 format!(
-                                    "{}fn {}",
+                                    "{}fn {}{} {{",
                                     public,
                                     function_define
                                         .name
                                         .as_ref()
                                         .map(|name| name.value)
-                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                    arguments_str,
                                 )
                                 .as_str(),
                             );
+
+                            {
+                                    let scope = builder.scope();
+
+                                if let Some(block) = &function_define.block {
+                                    codegen_for_program(block.program, false, &scope);
+                                }
+                            }
+
+                            builder.push_line("}");
                         }
                         Define::UserType(user_type_define) => {}
                         Define::Variable(variable_define) => todo!(),
@@ -68,8 +79,9 @@ pub(crate) fn codegen_for_program(ast: &Program, in_impl_scope: bool, builder: &
             }
             Statement::Drop(drop_statement) => todo!(),
             Statement::Expression(expression) => {
-                builder.push_raw(codegen_expression(expression, &builder).as_str());
-                builder.push_line(";");
+                builder.push_line(
+                    format!("{};", codegen_expression(expression, &builder).as_str()).as_str(),
+                );
             }
             Statement::Implements(implements) => todo!(),
         }
@@ -170,6 +182,8 @@ fn codegen_import(ast: &ImportStatement) -> String {
         code += "}";
     }
 
+    code += ";";
+
     code
 }
 
@@ -177,7 +191,7 @@ fn codegen_expression(ast: &Expression, builder: &CodeBuilderScope) -> String {
     match ast {
         Expression::Return(return_expression) => todo!(),
         Expression::Closure(closure) => todo!(),
-        Expression::Or(or_expression) => todo!(),
+        Expression::Or(or_expression) => codegen_or_expression(*or_expression, builder),
     }
 }
 

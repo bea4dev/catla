@@ -4,9 +4,15 @@ pub mod settings;
 
 #[cfg(test)]
 mod test {
-    use std::path::Path;
+    use std::{
+        path::{Path, PathBuf},
+        process::Command,
+    };
 
+    use catla_codegen::CodegenSettings;
+    use catla_crate::{CrateInfo, CrateInfoSet, Dependency};
     use catla_import::resource::PackageResourceSet;
+    use semver::Version;
 
     use crate::{compiler::CatlaCompiler, settings::CatlaCompilerSettings};
 
@@ -15,6 +21,21 @@ mod test {
         unsafe {
             std::env::set_var("RUST_BACKTRACE", "full");
         };
+
+        let mut crate_info_set = CrateInfoSet::new();
+        crate_info_set.crates.push(CrateInfo {
+            name: "std".to_string(),
+            version: Version::parse("0.1.0").unwrap(),
+            dependencies: Vec::new(),
+        });
+        crate_info_set.crates.push(CrateInfo {
+            name: "test".to_string(),
+            version: Version::parse("0.1.0").unwrap(),
+            dependencies: vec![Dependency {
+                name: "std".to_string(),
+                version: Version::parse("0.1.0").unwrap(),
+            }],
+        });
 
         let mut package_resource_set = PackageResourceSet::new();
         package_resource_set
@@ -26,7 +47,27 @@ mod test {
 
         let settings = CatlaCompilerSettings { threads: 20 };
 
-        let compiler = CatlaCompiler::new(package_resource_set, settings);
+        let mut out_dir = PathBuf::new();
+        out_dir.push("../../.catla");
+        let codegen_settings = CodegenSettings {
+            out_dir: out_dir.clone(),
+        };
+
+        let compiler = CatlaCompiler::new(
+            crate_info_set,
+            package_resource_set,
+            settings,
+            codegen_settings,
+        );
         compiler.compile();
+
+        let mut dir_temp = out_dir.clone();
+        dir_temp.push("test");
+
+        Command::new("cargo")
+            .arg("run")
+            .current_dir(&dir_temp)
+            .spawn()
+            .unwrap();
     }
 }

@@ -13,5 +13,8 @@ catla_type = { path = "../catla_type", version = "0.1.0" }
 catla_util = { path = "../catla_util", version = "0.1.0" }
 catla_print_debug = { path = "../catla_print_debug", version = "0.1.0" }
 catla_codegen = { path = "../catla_codegen", version = "0.1.0" }
+catla_crate = { path = "../catla_crate", version = "0.1.0" }
 tokio = { version = "1.48.0", features = [ "full" ] }
 hashbrown = "0.16.0"
+semver = "1.0"
+futures = "0.3"

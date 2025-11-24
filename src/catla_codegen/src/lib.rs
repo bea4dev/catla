@@ -1,5 +1,5 @@
 pub mod codegen;
-pub mod catla_std;
+pub mod crates;
 
 use std::{
     cell::{Cell, RefCell},
@@ -8,18 +8,71 @@ use std::{
 };
 
 use catla_parser::ast::Program;
+use catla_std::get_std_map;
+use catla_util::module_path::ModulePath;
 
-pub fn transpile(ast: &Program, settings: &TranspilerSettings) {}
+use crate::codegen::codegen_for_program;
+
+pub async fn codegen(
+    ast: &Program<'_, '_>,
+    settings: &CodegenSettings,
+    module_path: &ModulePath,
+) -> Result<(), String> {
+    let string = match get_std_map().get(module_path.path_name.as_str()) {
+        Some(code) => code.to_string(),
+        None => {
+            let builder = CodeBuilder::new();
+            {
+                let scope = builder.scope();
+
+                codegen_for_program(ast, false, &scope);
+            }
+
+            builder.dump()
+        }
+    };
+
+    let mut out_path = settings.out_dir.clone();
+
+    if let Some(first) = module_path.path.first() {
+        if first.as_str() == "std" {
+            out_path.push("catla_std");
+        } else {
+            out_path.push(first);
+        }
+        out_path.push("src");
+
+        for (index, path) in module_path.path[1..].iter().enumerate() {
+            if index == module_path.path.len() - 2 {
+                out_path.push(format!("{}.rs", path));
+            } else {
+                out_path.push(path);
+            }
+        }
+    }
+
+    if let Some(parent) = out_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|_| "Failed to create dirs.".to_string())?;
+    }
+
+    tokio::fs::write(out_path, string)
+        .await
+        .map_err(|error| format!("Failed to write rust source code : {}", error))?;
+
+    Ok(())
+}
 
 #[derive(Debug)]
-pub struct TranspilerSettings {
+pub struct CodegenSettings {
     pub out_dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
 pub struct CodeBuilder {
     code: Rc<RefCell<String>>,
-    depth: Cell<usize>,
+    depth: Rc<Cell<usize>>,
 }
 
 #[derive(Debug)]
@@ -31,12 +84,13 @@ impl CodeBuilder {
     pub fn new() -> Self {
         Self {
             code: Rc::new(RefCell::new(String::new())),
-            depth: Cell::new(0),
+            depth: Rc::new(Cell::new(0)),
         }
     }
 
     pub fn scope(&self) -> CodeBuilderScope {
         self.depth.set(self.depth.get() + 1);
+        dbg!(self.depth.get());
 
         CodeBuilderScope { code: self.clone() }
     }
@@ -59,14 +113,10 @@ impl CodeBuilderScope {
 
     pub fn push_line(&self, code: &str) {
         *self.code.code.borrow_mut() +=
-            format!("{}{}\n", "    ".repeat(self.code.depth.get()), code).as_str();
+            format!("{}{}\n", "    ".repeat(self.code.depth.get() - 1), code).as_str();
     }
 
     pub fn scope(&self) -> CodeBuilderScope {
         self.code.scope()
-    }
-
-    pub fn dump(&self) -> String {
-        self.code.dump()
     }
 }

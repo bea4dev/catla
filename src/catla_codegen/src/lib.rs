@@ -7,14 +7,17 @@ use std::{
     rc::Rc,
 };
 
-use catla_parser::ast::Program;
+use catla_parser::ast::{EntityID, Program, Spanned};
 use catla_std::get_std_map;
+use catla_type::types::Type;
 use catla_util::module_path::ModulePath;
+use hashbrown::HashMap;
 
 use crate::codegen::codegen_for_program;
 
 pub async fn codegen(
     ast: &Program<'_, '_>,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
     settings: &CodegenSettings,
     module_path: &ModulePath,
 ) -> Result<(), String> {
@@ -25,7 +28,7 @@ pub async fn codegen(
             {
                 let scope = builder.scope();
 
-                codegen_for_program(ast, false, &scope);
+                codegen_for_program(ast, false, type_infer_results, &scope);
             }
 
             builder.dump()

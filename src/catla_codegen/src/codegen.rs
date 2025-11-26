@@ -1,13 +1,20 @@
 use catla_parser::ast::{
-    AddOrSubExpression, AndExpression, Define, ElementsOrWildCard, EqualsExpression, Expression,
-    Factor, ImportStatement, LessOrGreaterExpression, MulOrDivExpression, OrExpression, Primary,
-    PrimaryLeftExpr, Program, SimplePrimary, Statement, TypeAttribute, TypeInfo, TypeInfoBase,
-    VariableBinding,
+    AddOrSubExpression, AndExpression, Define, ElementsOrWildCard, EntityID, EqualsExpression,
+    Expression, Factor, ImportStatement, LessOrGreaterExpression, MulOrDivExpression, OrExpression,
+    Primary, PrimaryLeftExpr, Program, SimplePrimary, Spanned, Statement, TypeAttribute, TypeInfo,
+    TypeInfoBase, VariableBinding,
 };
+use catla_type::types::Type;
+use hashbrown::HashMap;
 
 use crate::CodeBuilderScope;
 
-pub(crate) fn codegen_for_program(ast: &Program, in_impl_scope: bool, builder: &CodeBuilderScope) {
+pub(crate) fn codegen_for_program(
+    ast: &Program,
+    in_impl_scope: bool,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    builder: &CodeBuilderScope,
+) {
     for statement in ast.statements.iter() {
         match &statement.statement {
             Statement::Assignment(assignment) => todo!(),
@@ -62,10 +69,15 @@ pub(crate) fn codegen_for_program(ast: &Program, in_impl_scope: bool, builder: &
                             );
 
                             {
-                                    let scope = builder.scope();
+                                let scope = builder.scope();
 
                                 if let Some(block) = &function_define.block {
-                                    codegen_for_program(block.program, false, &scope);
+                                    codegen_for_program(
+                                        block.program,
+                                        false,
+                                        type_infer_results,
+                                        &scope,
+                                    );
                                 }
                             }
 
@@ -80,7 +92,11 @@ pub(crate) fn codegen_for_program(ast: &Program, in_impl_scope: bool, builder: &
             Statement::Drop(drop_statement) => todo!(),
             Statement::Expression(expression) => {
                 builder.push_line(
-                    format!("{};", codegen_expression(expression, &builder).as_str()).as_str(),
+                    format!(
+                        "{};",
+                        codegen_expression(expression, &type_infer_results, builder).as_str()
+                    )
+                    .as_str(),
                 );
             }
             Statement::Implements(implements) => todo!(),
@@ -187,16 +203,26 @@ fn codegen_import(ast: &ImportStatement) -> String {
     code
 }
 
-fn codegen_expression(ast: &Expression, builder: &CodeBuilderScope) -> String {
+fn codegen_expression(
+    ast: &Expression,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    builder: &CodeBuilderScope,
+) -> String {
     match ast {
         Expression::Return(return_expression) => todo!(),
         Expression::Closure(closure) => todo!(),
-        Expression::Or(or_expression) => codegen_or_expression(*or_expression, builder),
+        Expression::Or(or_expression) => {
+            codegen_or_expression(*or_expression, type_infer_results, builder)
+        }
     }
 }
 
-fn codegen_or_expression(ast: &OrExpression, builder: &CodeBuilderScope) -> String {
-    let left_result = codegen_and_expression(&ast.left, builder);
+fn codegen_or_expression(
+    ast: &OrExpression,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    builder: &CodeBuilderScope,
+) -> String {
+    let left_result = codegen_and_expression(&ast.left, type_infer_results, builder);
 
     match ast.chain.len() {
         0 => left_result,
@@ -204,8 +230,12 @@ fn codegen_or_expression(ast: &OrExpression, builder: &CodeBuilderScope) -> Stri
     }
 }
 
-fn codegen_and_expression(ast: &AndExpression, builder: &CodeBuilderScope) -> String {
-    let left_result = codegen_equals_expression(&ast.left, builder);
+fn codegen_and_expression(
+    ast: &AndExpression,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    builder: &CodeBuilderScope,
+) -> String {
+    let left_result = codegen_equals_expression(&ast.left, type_infer_results, builder);
 
     match ast.chain.len() {
         0 => left_result,
@@ -213,8 +243,12 @@ fn codegen_and_expression(ast: &AndExpression, builder: &CodeBuilderScope) -> St
     }
 }
 
-fn codegen_equals_expression(ast: &EqualsExpression, builder: &CodeBuilderScope) -> String {
-    let left_result = codegen_less_or_greater_expression(&ast.left, builder);
+fn codegen_equals_expression(
+    ast: &EqualsExpression,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    builder: &CodeBuilderScope,
+) -> String {
+    let left_result = codegen_less_or_greater_expression(&ast.left, type_infer_results, builder);
 
     match ast.chain.len() {
         0 => left_result,
@@ -224,9 +258,10 @@ fn codegen_equals_expression(ast: &EqualsExpression, builder: &CodeBuilderScope)
 
 fn codegen_less_or_greater_expression(
     ast: &LessOrGreaterExpression,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
     builder: &CodeBuilderScope,
 ) -> String {
-    let left_result = codegen_add_or_sub_expression(&ast.left, builder);
+    let left_result = codegen_add_or_sub_expression(&ast.left, type_infer_results, builder);
 
     match ast.chain.len() {
         0 => left_result,
@@ -234,8 +269,12 @@ fn codegen_less_or_greater_expression(
     }
 }
 
-fn codegen_add_or_sub_expression(ast: &AddOrSubExpression, builder: &CodeBuilderScope) -> String {
-    let left_result = codegen_mul_or_div_expression(&ast.left, builder);
+fn codegen_add_or_sub_expression(
+    ast: &AddOrSubExpression,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    builder: &CodeBuilderScope,
+) -> String {
+    let left_result = codegen_mul_or_div_expression(&ast.left, type_infer_results, builder);
 
     match ast.chain.len() {
         0 => left_result,
@@ -243,8 +282,12 @@ fn codegen_add_or_sub_expression(ast: &AddOrSubExpression, builder: &CodeBuilder
     }
 }
 
-fn codegen_mul_or_div_expression(ast: &MulOrDivExpression, builder: &CodeBuilderScope) -> String {
-    let left_result = codegen_for_factor(&ast.left, builder);
+fn codegen_mul_or_div_expression(
+    ast: &MulOrDivExpression,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    builder: &CodeBuilderScope,
+) -> String {
+    let left_result = codegen_for_factor(&ast.left, type_infer_results, builder);
 
     match ast.chain.len() {
         0 => left_result,
@@ -252,14 +295,22 @@ fn codegen_mul_or_div_expression(ast: &MulOrDivExpression, builder: &CodeBuilder
     }
 }
 
-fn codegen_for_factor(ast: &Factor, builder: &CodeBuilderScope) -> String {
+fn codegen_for_factor(
+    ast: &Factor,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    builder: &CodeBuilderScope,
+) -> String {
     if let Ok(primary) = &ast.primary {
-        return codegen_for_primary(primary, builder);
+        return codegen_for_primary(primary, type_infer_results, builder);
     }
     String::new()
 }
 
-fn codegen_for_primary(ast: &Primary, builder: &CodeBuilderScope) -> String {
+fn codegen_for_primary(
+    ast: &Primary,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    builder: &CodeBuilderScope,
+) -> String {
     match &ast.left.first {
         PrimaryLeftExpr::Simple {
             left,
@@ -279,7 +330,7 @@ fn codegen_for_primary(ast: &Primary, builder: &CodeBuilderScope) -> String {
                     )
                     .as_str()
                 }
-                SimplePrimary::NumericLiteral(spanned) => todo!(),
+                SimplePrimary::NumericLiteral(literal) => code += literal.value,
                 SimplePrimary::Null(range) => todo!(),
                 SimplePrimary::True(range) => todo!(),
                 SimplePrimary::False(range) => todo!(),
@@ -293,7 +344,11 @@ fn codegen_for_primary(ast: &Primary, builder: &CodeBuilderScope) -> String {
                     function_call
                         .arguments
                         .iter()
-                        .map(|expression| codegen_expression(expression, builder))
+                        .map(|expression| codegen_expression(
+                            expression,
+                            type_infer_results,
+                            builder
+                        ))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )

@@ -138,6 +138,7 @@ impl CatlaCompiler {
             .filter(|module_name| package_resource_set.is_module_name(&module_name))
             .collect::<Vec<_>>();
         modules.push("std::string".to_string());
+        modules.push("std::operators::add".to_string());
 
         let module_element_name_map = self
             .inner
@@ -290,7 +291,7 @@ impl CatlaCompiler {
         module_entity_type_map.extend(module_element_entity_type_map);
 
         let implements_element_checker = ImplementsElementChecker::new();
-        let result = infer_type(
+        let type_infer_results = infer_type(
             ast.ast(),
             &implements_element_checker,
             &mut generics,
@@ -310,10 +311,11 @@ impl CatlaCompiler {
 
         dbg!(errors);
 
-        print_type_infer_result(&ast, &result, &user_type_set);
+        print_type_infer_result(&ast, &type_infer_results, &user_type_set);
 
         codegen(
             ast.ast(),
+            &type_infer_results,
             &self.inner.codegen_settings,
             &source_code.module_path,
         )

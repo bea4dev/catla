@@ -1921,6 +1921,17 @@ fn infer_type_for_expression(
     }
 }
 
+fn infer_type_for_2op(
+    type_environment: &mut TypeEnvironment,
+    literal: &Literal,
+    function_type_hints: Option<(&str, &[Moduled<Type>])>,
+    implements_infos: &ImplementsInfoSet,
+    user_type_set: &GlobalUserTypeSet,
+    errors: &mut std::vec::Vec<TypeError>,
+) -> TypeVariableID {
+    todo!()
+}
+
 fn infer_type_for_or_expression(
     ast: &OrExpression,
     as_expression: bool,

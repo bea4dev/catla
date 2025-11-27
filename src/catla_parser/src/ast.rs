@@ -27,6 +27,7 @@ impl_ast!(for<T> Spanned<T>);
 impl_ast!(for<'input, 'allocator> Program<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> StatementWithTagAndDocs<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> Documents<'input, 'allocator>);
+impl_ast!(for<'input> CompilerTag<'input>);
 impl_ast!(for<'input, 'allocator> Statement<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> DefineWithAttribute<'input, 'allocator>);
 impl_ast!(for<'input, 'allocator> Define<'input, 'allocator>);
@@ -134,7 +135,14 @@ pub struct Program<'input, 'allocator> {
 #[derive(Debug)]
 pub struct StatementWithTagAndDocs<'input, 'allocator> {
     pub documents: Documents<'input, 'allocator>,
+    pub compiler_tags: &'allocator [CompilerTag<'input>],
     pub statement: Statement<'input, 'allocator>,
+    pub span: Range<usize>,
+}
+
+#[derive(Debug)]
+pub struct CompilerTag<'input> {
+    pub literal: Literal<'input>,
     pub span: Range<usize>,
 }
 

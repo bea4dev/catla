@@ -3,14 +3,14 @@ use bumpalo::Bump;
 use catla_import::{ImportElement, resource::PackageResourceSet};
 use catla_name_resolver::{DefineKind, ResolvedInfo};
 use catla_parser::ast::{
-    AddOrSubExpression, AndExpression, Define, EntityID, EqualsExpression, Expression, Factor,
-    GenericsDefine, LessOrGreaterExpression, Literal, MulOrDivExpression, NewObjectExpression,
-    OrExpression, Primary, PrimaryLeftExpr, PrimarySeparator, Program, SimplePrimary, Spanned,
-    Statement, StatementAttribute, VariableBinding, WhereClause, WithSpan,
+    AddOrSub, AddOrSubExpression, AndExpression, Define, EntityID, EqualsExpression, Expression,
+    Factor, GenericsDefine, LessOrGreaterExpression, Literal, MulOrDivExpression,
+    NewObjectExpression, OrExpression, Primary, PrimaryLeftExpr, PrimarySeparator, Program,
+    SimplePrimary, Spanned, Statement, StatementAttribute, VariableBinding, WhereClause, WithSpan,
 };
 use catla_util::module_path::{ModulePath, Moduled, ToModuled};
 use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
-use std::{mem::swap, sync::Arc};
+use std::{mem::swap, ops::Range, sync::Arc};
 
 use crate::{
     error::{TypeError, TypeErrorKind},
@@ -415,8 +415,6 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         }
 
         let equals = match &left.value {
-            Type::IntegerLiteral => unreachable!(),
-            Type::FloatLiteral => unreachable!(),
             Type::UserType {
                 user_type_info: left_user_type,
                 generics: left_generics,
@@ -753,7 +751,9 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
                         new_generics,
                     } => {
                         let element_type = match implements_info.element_type.get(literal.value) {
-                            Some(element_type) => element_type.value.clone(),
+                            Some(element_type) => element_type
+                                .value
+                                .replace_generics(&implements_info.generics_define, &new_generics),
                             None => {
                                 if !implements_info.is_instant {
                                     continue;
@@ -761,7 +761,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
 
                                 let Type::UserType {
                                     user_type_info,
-                                    generics: new_generics,
+                                    generics: _,
                                 } = &implements_info.interface.value
                                 else {
                                     continue;
@@ -780,7 +780,7 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
 
                                 element_type
                                     .value
-                                    .replace_generics(old_generics, new_generics)
+                                    .replace_generics(old_generics, &new_generics)
                             }
                         };
 
@@ -1922,14 +1922,204 @@ fn infer_type_for_expression(
 }
 
 fn infer_type_for_2op(
+    left: Spanned<TypeVariableID>,
+    right: Spanned<TypeVariableID>,
+    op_span: Range<usize>,
+    function_name: &'static str,
+    interface_name: &'static str,
     type_environment: &mut TypeEnvironment,
-    literal: &Literal,
-    function_type_hints: Option<(&str, &[Moduled<Type>])>,
     implements_infos: &ImplementsInfoSet,
     user_type_set: &GlobalUserTypeSet,
+    module_path: &ModulePath,
     errors: &mut std::vec::Vec<TypeError>,
-) -> TypeVariableID {
-    todo!()
+) -> Option<TypeVariableID> {
+    let Some(left_type) = type_environment.get_type_variable_type(left.value) else {
+        let error = TypeError {
+            kind: TypeErrorKind::UnknownTypeAtThisPoint,
+            span: left.span.clone(),
+            module_path: module_path.clone(),
+        };
+        errors.push(error);
+        return None;
+    };
+
+    let left_type = match &left_type.value {
+        Type::IntegerLiteral => {
+            Type::TypeVariable(left.value).moduled(left_type.module_path, left_type.span)
+        }
+        Type::FloatLiteral => {
+            Type::TypeVariable(left.value).moduled(left_type.module_path, left_type.span)
+        }
+        _ => left_type,
+    };
+
+    let Some(right_type) = type_environment.get_type_variable_type(right.value) else {
+        let error = TypeError {
+            kind: TypeErrorKind::UnknownTypeAtThisPoint,
+            span: right.span.clone(),
+            module_path: module_path.clone(),
+        };
+        errors.push(error);
+        return None;
+    };
+
+    let right_type = match &right_type.value {
+        Type::IntegerLiteral => {
+            Type::TypeVariable(right.value).moduled(right_type.module_path, right_type.span)
+        }
+        Type::FloatLiteral => {
+            Type::TypeVariable(right.value).moduled(right_type.module_path, right_type.span)
+        }
+        _ => right_type,
+    };
+
+    let result = implements_infos
+        .find_implements_for(
+            left_type.clone(),
+            function_name,
+            &[right_type],
+            user_type_set,
+            type_environment,
+        )
+        .into_iter()
+        .filter(|(implements_info, _)| {
+            let Type::UserType {
+                user_type_info,
+                generics: _,
+            } = &implements_info.interface.value
+            else {
+                return false;
+            };
+            let interface = user_type_set.get(*user_type_info);
+            let interface = interface.read().unwrap();
+
+            let name = format!(
+                "{}::{}",
+                &interface.module_path.path_name, &interface.name.value
+            );
+
+            name.as_str() == interface_name
+        })
+        .collect::<Vec<_>>();
+
+    match result.len() {
+        1 => {
+            let (implements_info, result) = result.first().unwrap();
+
+            match result {
+                ImplementsCheckResult::NoImplementsFound => unreachable!(),
+                ImplementsCheckResult::Conflicts { conflicts } => {
+                    let error = TypeError {
+                        kind: TypeErrorKind::ConflictedImplementInTypeInfer {
+                            conflicts: conflicts
+                                .iter()
+                                .map(|ty| {
+                                    ty.clone().map(|ty| {
+                                        ty.to_display_string(user_type_set, Some(type_environment))
+                                    })
+                                })
+                                .collect(),
+                        },
+                        span: op_span.clone(),
+                        module_path: module_path.clone(),
+                    };
+                    errors.push(error);
+                    None
+                }
+                ImplementsCheckResult::Success {
+                    new_concrete: _,
+                    new_interface: _,
+                    new_generics,
+                } => {
+                    let element_type = match implements_info.element_type.get(function_name) {
+                        Some(element_type) => element_type
+                            .value
+                            .replace_generics(&implements_info.generics_define, new_generics),
+                        None => {
+                            if !implements_info.is_instant {
+                                return None;
+                            }
+
+                            let Type::UserType {
+                                user_type_info,
+                                generics: _,
+                            } = &implements_info.interface.value
+                            else {
+                                return None;
+                            };
+
+                            let user_type_info = user_type_set.get(*user_type_info);
+                            let user_type_info = user_type_info.read().unwrap();
+
+                            let old_generics = &user_type_info.generics;
+
+                            let Some(element_type) =
+                                user_type_info.element_types.get(function_name)
+                            else {
+                                return None;
+                            };
+
+                            element_type
+                                .value
+                                .replace_generics(old_generics, new_generics)
+                        }
+                    };
+
+                    let Type::Function {
+                        function_info,
+                        generics: _,
+                    } = element_type
+                    else {
+                        return None;
+                    };
+
+                    Some(
+                        type_environment.create_type_variable_id_with_type(
+                            function_info
+                                .return_type
+                                .value
+                                .clone()
+                                .moduled(module_path.clone(), op_span.clone()),
+                        ),
+                    )
+                }
+            }
+        }
+        0 => {
+            let error = TypeError {
+                kind: TypeErrorKind::NotImplementsOpInteface {
+                    interface: interface_name,
+                },
+                span: left_type.span.clone(),
+                module_path: module_path.clone(),
+            };
+            errors.push(error);
+            None
+        }
+        _ => {
+            let error = TypeError {
+                kind: TypeErrorKind::MultiImplements {
+                    concretes: result
+                        .iter()
+                        .map(|(implements_info, _)| {
+                            implements_info
+                                .concrete
+                                .value
+                                .to_display_string(user_type_set, Some(type_environment))
+                                .moduled(
+                                    implements_info.module_path.clone(),
+                                    implements_info.concrete.span.clone(),
+                                )
+                        })
+                        .collect(),
+                },
+                span: op_span.clone(),
+                module_path: module_path.clone(),
+            };
+            errors.push(error);
+            None
+        }
+    }
 }
 
 fn infer_type_for_or_expression(
@@ -2138,7 +2328,74 @@ fn infer_type_for_add_or_sub_expression(
             errors,
         )
     } else {
-        todo!()
+        let left = infer_type_for_mul_or_div_expression(
+            &ast.left,
+            true,
+            type_environment,
+            implements_element_checker,
+            return_type,
+            this_type,
+            generics,
+            implements_infos,
+            import_map,
+            module_entity_type_map,
+            moduled_name_type_map,
+            name_resolved_map,
+            user_type_set,
+            module_path,
+            package_resource_set,
+            errors,
+        );
+
+        let mut last = left.with_span(ast.left.span.clone());
+
+        for (op, chain) in ast.chain.iter() {
+            let right = infer_type_for_mul_or_div_expression(
+                chain,
+                true,
+                type_environment,
+                implements_element_checker,
+                return_type,
+                this_type,
+                generics,
+                implements_infos,
+                import_map,
+                module_entity_type_map,
+                moduled_name_type_map,
+                name_resolved_map,
+                user_type_set,
+                module_path,
+                package_resource_set,
+                errors,
+            );
+
+            let (interface_name, function_name) = match op.value {
+                AddOrSub::Add => ("test::Add", "add"),
+                AddOrSub::Sub => ("std::operators::sub::Sub", "sub"),
+            };
+
+            let result = infer_type_for_2op(
+                last.clone(),
+                right.with_span(chain.span.clone()),
+                op.span.clone(),
+                function_name,
+                interface_name,
+                type_environment,
+                implements_infos,
+                user_type_set,
+                module_path,
+                errors,
+            );
+
+            if let Some(output) = result {
+                let span_start = last.span.start;
+                let span_end = chain.span.end;
+
+                last = output.with_span(span_start..span_end);
+            }
+        }
+
+        last.value
     }
 }
 
@@ -2385,7 +2642,11 @@ fn infer_type_for_primary(
                     type_environment.create_and_set_entity_type(
                         EntityID::from(literal),
                         Moduled::new(
-                            Type::IntegerLiteral,
+                            if literal.value.contains(".") {
+                                Type::FloatLiteral
+                            } else {
+                                Type::IntegerLiteral
+                            },
                             module_path.clone(),
                             literal.span.clone(),
                         ),
@@ -2395,8 +2656,18 @@ fn infer_type_for_primary(
                 SimplePrimary::Null(range) => todo!(),
                 SimplePrimary::True(range) => todo!(),
                 SimplePrimary::False(range) => todo!(),
-                SimplePrimary::This(range) => todo!(),
-                SimplePrimary::LargeThis(range) => todo!(),
+                SimplePrimary::This(span) | SimplePrimary::LargeThis(span) => match this_type {
+                    Some(this_type) => type_environment
+                        .create_type_variable_id_with_type(
+                            this_type.clone().moduled(module_path.clone(), span.clone()),
+                        )
+                        .with_span(span.clone()),
+                    None => type_environment
+                        .create_type_variable_id_with_type(
+                            Type::Unknown.moduled(module_path.clone(), span.clone()),
+                        )
+                        .with_span(span.clone()),
+                },
             };
 
             if let Some(function_call) = function_call {

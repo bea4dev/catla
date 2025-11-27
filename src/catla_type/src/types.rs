@@ -993,6 +993,21 @@ impl ImplementsInfo {
         type_environment: &mut TypeEnvironment,
         all_implements_info_set: &ImplementsInfoSet,
     ) -> ImplementsCheckResult {
+        println!(
+            "concrete : {}",
+            concrete
+                .value
+                .to_display_string(user_type_set, Some(type_environment))
+        );
+        println!(
+            "interface : {}",
+            interface
+                .as_ref()
+                .map(|value| value
+                    .value
+                    .to_display_string(user_type_set, Some(type_environment)))
+                .unwrap_or("".to_string())
+        );
         let retake_concrete = concrete.map(|ty| type_environment.retake_type_variable(&ty));
 
         let retake_interface =
@@ -1079,14 +1094,16 @@ impl ImplementsInfo {
                 .iter()
                 .zip(retake_arguments.into_iter())
             {
-                type_environment.test_unify_type(
+                if !type_environment.test_unify_type(
                     argument
                         .value
                         .clone()
                         .moduled(self.module_path.clone(), argument.span.clone()),
                     retake_argument,
                     user_type_set,
-                );
+                ) {
+                    return ImplementsCheckResult::NoImplementsFound;
+                }
             }
         }
 

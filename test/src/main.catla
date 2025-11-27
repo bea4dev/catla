@@ -1,5 +1,5 @@
-import std::io::print
-
 function main() {
-    print("Hello, world!")
+    let a = 100
+    let b = 100
+    let c = a + b
 }

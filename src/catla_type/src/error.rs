@@ -73,4 +73,7 @@ pub enum TypeErrorKind {
         interface: Moduled<String>,
         impl_element: Moduled<String>,
     },
+    NotImplementsOpInteface {
+        interface: &'static str,
+    }
 }

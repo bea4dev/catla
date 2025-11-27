@@ -1,0 +1,11 @@
+import std::numeric::Numeric
+
+interface Sub<Right, Output> {
+    function sub(let this, right: Right) -> Output;
+}
+
+implements<T: Numeric> Sub<T, T> for T {
+    function sub(let this, right: T) -> T {
+        return this - right
+    }
+}

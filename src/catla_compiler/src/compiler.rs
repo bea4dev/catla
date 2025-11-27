@@ -139,6 +139,7 @@ impl CatlaCompiler {
             .collect::<Vec<_>>();
         modules.push("std::string".to_string());
         modules.push("std::operators::add".to_string());
+        modules.push("std::operators::sub".to_string());
 
         let module_element_name_map = self
             .inner
@@ -285,6 +286,8 @@ impl CatlaCompiler {
                     continue;
                 }
                 merged_module.insert(import_module.clone());
+
+                candidate_modules.push(import_module.clone());
             }
         }
 

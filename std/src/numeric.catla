@@ -1,0 +1,14 @@
+interface Numeric {}
+
+implements Numeric for int8 {}
+implements Numeric for int16 {}
+implements Numeric for int32 {}
+implements Numeric for int64 {}
+
+implements Numeric for uint8 {}
+implements Numeric for uint16 {}
+implements Numeric for uint32 {}
+implements Numeric for uint64 {}
+
+implements Numeric for float32 {}
+implements Numeric for float64 {}

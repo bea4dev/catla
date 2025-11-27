@@ -54,8 +54,9 @@ mod test {
     #[test]
     fn parser() {
         let source = r#"
-function test() -> int {
-    return 100
+#[compiler_support]
+function test(a: int, b: int) -> int {
+    return a + b
 }
 "#;
 

@@ -1,73 +1,11 @@
+import std::numeric::Numeric
+
 interface Add<Right, Output> {
     function add(let this, right: Right) -> Output;
 }
 
-implements Add<int8, int8> for int8 {
-    #[compiler_support]
-    function add(let this, right: int8) -> int8 {
-        this + right
-    }
-}
-
-implements Add<int16, int16> for int16 {
-    #[compiler_support]
-    function add(let this, right: int16) -> int16 {
-        this + right
-    }
-}
-
-implements Add<int32, int32> for int32 {
-    #[compiler_support]
-    function add(let this, right: int32) -> int32 {
-        this + right
-    }
-}
-
-implements Add<int64, int64> for int64 {
-    #[compiler_support]
-    function add(let this, right: int64) -> int64 {
-        this + right
-    }
-}
-
-implements Add<uint8, uint8> for uint8 {
-    #[compiler_support]
-    function add(let this, right: uint8) -> uint8 {
-        this + right
-    }
-}
-
-implements Add<uint16, uint16> for uint16 {
-    #[compiler_support]
-    function add(let this, right: uint16) -> uint16 {
-        this + right
-    }
-}
-
-implements Add<uint32, uint32> for uint32 {
-    #[compiler_support]
-    function add(let this, right: uint32) -> uint32 {
-        this + right
-    }
-}
-
-implements Add<uint64, uint64> for uint64 {
-    #[compiler_support]
-    function add(let this, right: uint64) -> uint64 {
-        this + right
-    }
-}
-
-implements Add<float32, float32> for float32 {
-    #[compiler_support]
-    function add(let this, right: float32) -> float32 {
-        this + right
-    }
-}
-
-implements Add<float64, float64> for float64 {
-    #[compiler_support]
-    function add(let this, right: float64) -> float64 {
-        this + right
+implements<T: Numeric> Add<T, T> for T {
+    function add(let this, right: T) -> T {
+        return this + right
     }
 }

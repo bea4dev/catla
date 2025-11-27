@@ -215,10 +215,11 @@ mod test {
     #[test]
     fn name_resolve() {
         let source = r#"
-let aaa = 100
-print(aaa)
-
-function print() {}
+class TestClass {
+    function test(let this) -> This {
+        return this
+    }
+}
 "#;
 
         let module_path = ModulePath::new(["test"].into_iter(), Path::new("test.catla"));

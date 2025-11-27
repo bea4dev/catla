@@ -10,7 +10,7 @@ bnf_rules! {
 
     program             ::= [ statement ] { end_of_statement [ statement ] }
 
-    statement           ::= documents { transpiler_tag } (
+    statement           ::= documents { compiler_tag line_feed } (
                                 assignment
                                 | swap_statement
                                 | import_statement
@@ -25,7 +25,7 @@ bnf_rules! {
 
     define_with_attr    ::= statement_attribute ( function_define | user_type_define | variable_define | type_alias )
 
-    transpiler_tag      ::= "#" "[" literal "]"
+    compiler_tag        ::= "#" "[" literal "]"
 
     function_define     ::= "function" [ generics_define ] ( literal | memory_manage_attr ) function_arguments
                             [ function_type_tag ] [ line_feed ] [ where_clause ] ( block | ";" )

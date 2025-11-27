@@ -3,11 +3,11 @@ use bumpalo::Bump;
 
 use crate::{
     ast::{
-        Assignment, Define, DefineWithAttribute, Documents, DropStatement, ElementsOrWildCard,
-        FunctionArgument, FunctionArguments, FunctionDefine, Implements, ImportStatement, LetVar,
-        Spanned, Statement, StatementAttribute, StatementWithTagAndDocs, SuperTypeInfo,
-        SwapStatement, ThisMutability, TypeAlias, UserTypeDefine, UserTypeKind, VariableBinding,
-        VariableDefine,
+        Assignment, CompilerTag, Define, DefineWithAttribute, Documents, DropStatement,
+        ElementsOrWildCard, FunctionArgument, FunctionArguments, FunctionDefine, Implements,
+        ImportStatement, LetVar, Spanned, Statement, StatementAttribute, StatementWithTagAndDocs,
+        SuperTypeInfo, SwapStatement, ThisMutability, TypeAlias, UserTypeDefine, UserTypeKind,
+        VariableBinding, VariableDefine,
     },
     error::{ParseError, ParseErrorKind, recover_until},
     lexer::{GetKind, Lexer, TokenKind},
@@ -30,6 +30,8 @@ pub(crate) fn parse_statement_with_tag_and_docs<'input, 'allocator>(
 
     let documents = parse_documents(lexer, allocator);
 
+    let compiler_tags = parse_compiler_tags(lexer, errors, allocator);
+
     let Some(statement) = parse_statement(lexer, errors, allocator) else {
         lexer.back_to_anchor(anchor);
         return None;
@@ -37,6 +39,7 @@ pub(crate) fn parse_statement_with_tag_and_docs<'input, 'allocator>(
 
     Some(StatementWithTagAndDocs {
         documents,
+        compiler_tags,
         statement,
         span: anchor.elapsed(lexer),
     })
@@ -60,6 +63,69 @@ pub(crate) fn parse_documents<'input, 'allocator>(
     Documents {
         documents,
         span: anchor.elapsed(lexer),
+    }
+}
+
+pub(crate) fn parse_compiler_tags<'input, 'allocator>(
+    lexer: &mut Lexer<'input>,
+    errors: &mut std::vec::Vec<ParseError>,
+    allocator: &'allocator Bump,
+) -> &'allocator [CompilerTag<'input>] {
+    let mut compiler_tags = Vec::new_in(allocator);
+
+    loop {
+        let anchor = lexer.cast_anchor();
+
+        if lexer.current().get_kind() != TokenKind::Hash {
+            break;
+        }
+        lexer.next();
+
+        if lexer.current().get_kind() != TokenKind::BracketLeft {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed],
+                ParseErrorKind::InvalidCompilerTagFormat,
+            );
+            errors.push(error);
+            continue;
+        }
+        lexer.next();
+
+        if lexer.current().get_kind() != TokenKind::Literal {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed],
+                ParseErrorKind::InvalidCompilerTagFormat,
+            );
+            errors.push(error);
+            continue;
+        }
+        let literal = lexer.parse_as_literal();
+
+        if lexer.current().get_kind() != TokenKind::BracketRight {
+            let error = recover_until(
+                lexer,
+                &[TokenKind::LineFeed],
+                ParseErrorKind::InvalidCompilerTagFormat,
+            );
+            errors.push(error);
+        } else {
+            lexer.next();
+        }
+
+        lexer.skip_line_feed();
+
+        compiler_tags.push(CompilerTag {
+            literal,
+            span: anchor.elapsed(lexer),
+        });
+    }
+
+    if compiler_tags.is_empty() {
+        &[]
+    } else {
+        allocator.alloc(compiler_tags).as_slice()
     }
 }
 
@@ -483,6 +549,7 @@ fn parse_function_arguments<'input, 'allocator>(
         if lexer.current().get_kind() != TokenKind::Comma {
             break;
         }
+        lexer.next();
         lexer.skip_line_feed();
     }
 

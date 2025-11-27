@@ -301,20 +301,6 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                 user_type_define.span.clone(),
                             );
 
-                            let define = DefineInfo {
-                                entity_id: user_type_define.into(),
-                                span: user_type_define.span.clone(),
-                                kind: DefineKind::UserType,
-                            };
-                            components.define(environment, "This".into(), define);
-
-                            let define = DefineInfo {
-                                entity_id: user_type_define.into(),
-                                span: user_type_define.span.clone(),
-                                kind: DefineKind::Variable,
-                            };
-                            components.define(environment, "this".into(), define);
-
                             if let Some(generics) = &user_type_define.generics {
                                 resolve_name_for_generics_define(
                                     generics,
@@ -371,6 +357,19 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                             }
                         }
                         Define::Variable(variable_define) => {
+                            if let Some(expression) = &variable_define.expression {
+                                resolve_name_for_expression(
+                                    expression,
+                                    environment,
+                                    components,
+                                    resolved_map,
+                                    all_crates_and_auto_import,
+                                    wild_card_imports,
+                                    module_element_names,
+                                    errors,
+                                );
+                            }
+
                             if !define_with_attribute
                                 .attribute
                                 .iter()
@@ -400,19 +399,6 @@ pub(crate) fn resolve_name_for_program<'input, 'name_env_alloc>(
                                         errors,
                                     );
                                 }
-                            }
-
-                            if let Some(expression) = &variable_define.expression {
-                                resolve_name_for_expression(
-                                    expression,
-                                    environment,
-                                    components,
-                                    resolved_map,
-                                    all_crates_and_auto_import,
-                                    wild_card_imports,
-                                    module_element_names,
-                                    errors,
-                                );
                             }
                         }
                         Define::TypeAlias(type_alias) => {
@@ -1193,28 +1179,8 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                 SimplePrimary::Null(_) => {}
                 SimplePrimary::True(_) => {}
                 SimplePrimary::False(_) => {}
-                SimplePrimary::This(span) => {
-                    components.resolve(
-                        environment,
-                        "this".into(),
-                        left.into(),
-                        span.clone(),
-                        all_crates_and_auto_import,
-                        resolved_map,
-                        errors,
-                    );
-                }
-                SimplePrimary::LargeThis(span) => {
-                    components.resolve(
-                        environment,
-                        "This".into(),
-                        left.into(),
-                        span.clone(),
-                        all_crates_and_auto_import,
-                        resolved_map,
-                        errors,
-                    );
-                }
+                SimplePrimary::This(span) => {}
+                SimplePrimary::LargeThis(span) => {}
             }
 
             if let Some(generics) = &generics {

@@ -65,6 +65,7 @@ pub enum ParseErrorKind {
     InvalidTypeTag,
     InvalidVariableBindingOrUnclosedParen,
     InvalidClosureArgumentOrUnclosedVerticalLine,
+    InvalidCompilerTagFormat,
 }
 
 pub(crate) fn recover_until(

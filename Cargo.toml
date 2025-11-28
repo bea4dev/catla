@@ -12,6 +12,7 @@ members = [
     "src/catla_codegen",
     "src/catla_type",
     "src/catla_util",
-    "src/catla_crate"
-, "src/catla_std"]
+    "src/catla_crate",
+    "src/catla_std"
+]
 exclude = [ ".catla" ]

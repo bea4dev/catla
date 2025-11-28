@@ -5,6 +5,7 @@ interface Sub<Right, Output> {
 }
 
 implements<T: Numeric> Sub<T, T> for T {
+    #[compiler_support_unreachable]
     function sub(let this, right: T) -> T {
         return this - right
     }

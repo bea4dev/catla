@@ -21,24 +21,7 @@ mod test {
     #[test]
     fn infer_type_test() {
         let source = r"
-interface Add<Right, Output> {
-    function add(let this, right: Right) -> Output;
-}
-
-interface Numeric {}
-
-implements Numeric for int32 {}
-implements Numeric for int64 {}
-
-implements<T: Numeric> Add<T, T> for T {
-    function add(let this, right: T) -> T {
-        this + right
-    }
-}
-
-let a = 100
-let b = 200
-let a = a + b
+let a = 100 + 200
         ";
 
         let module_path = ModulePath::new(["test"].into_iter(), Path::new("test.catla"));

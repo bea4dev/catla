@@ -1179,8 +1179,8 @@ fn resolve_name_for_primary_left<'input, 'name_env_alloc>(
                 SimplePrimary::Null(_) => {}
                 SimplePrimary::True(_) => {}
                 SimplePrimary::False(_) => {}
-                SimplePrimary::This(span) => {}
-                SimplePrimary::LargeThis(span) => {}
+                SimplePrimary::This(_) => {}
+                SimplePrimary::LargeThis(_) => {}
             }
 
             if let Some(generics) = &generics {

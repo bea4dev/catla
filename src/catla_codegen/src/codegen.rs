@@ -1,8 +1,8 @@
 use catla_parser::ast::{
     AddOrSubExpression, AndExpression, Define, ElementsOrWildCard, EntityID, EqualsExpression,
-    Expression, Factor, ImportStatement, LessOrGreaterExpression, MulOrDivExpression, OrExpression,
-    Primary, PrimaryLeftExpr, Program, SimplePrimary, Spanned, Statement, TypeAttribute, TypeInfo,
-    TypeInfoBase, VariableBinding,
+    Expression, Factor, GenericsDefine, ImportStatement, LessOrGreaterExpression,
+    MulOrDivExpression, OrExpression, Primary, PrimaryLeftExpr, Program, SimplePrimary, Spanned,
+    Statement, TypeAttribute, TypeInfo, TypeInfoBase, VariableBinding, WhereClause,
 };
 use catla_type::types::Type;
 use hashbrown::HashMap;
@@ -35,6 +35,10 @@ pub(crate) fn codegen_for_program(
                             arguments_str += "(";
 
                             if let Ok(arguments) = &function_define.arguments {
+                                if let Some(_) = &arguments.this_mutability {
+                                    arguments_str += "&self, ";
+                                }
+
                                 arguments_str += arguments
                                     .arguments
                                     .iter()
@@ -42,9 +46,12 @@ pub(crate) fn codegen_for_program(
                                         format!(
                                             "{}: {}",
                                             codegen_for_variable_binding(&argument.binding),
-                                            codegen_for_type(
-                                                argument.type_tag.type_info.as_ref().unwrap()
-                                            )
+                                            argument
+                                                .type_tag
+                                                .type_info
+                                                .as_ref()
+                                                .map(|ty| codegen_for_type(ty))
+                                                .unwrap_or_default()
                                         )
                                     })
                                     .collect::<Vec<_>>()
@@ -71,20 +78,59 @@ pub(crate) fn codegen_for_program(
                             {
                                 let scope = builder.scope();
 
-                                if let Some(block) = &function_define.block {
-                                    codegen_for_program(
-                                        block.program,
-                                        false,
-                                        type_infer_results,
-                                        &scope,
-                                    );
+                                if statement
+                                    .compiler_tags
+                                    .iter()
+                                    .any(|tag| tag.literal.value == "compiler_support_unreachable")
+                                {
+                                    scope.push_line("unreachable!()");
+                                } else {
+                                    if let Some(block) = &function_define.block {
+                                        codegen_for_program(
+                                            block.program,
+                                            false,
+                                            type_infer_results,
+                                            &scope,
+                                        );
+                                    }
                                 }
                             }
 
                             builder.push_line("}");
                         }
                         Define::UserType(user_type_define) => {}
-                        Define::Variable(variable_define) => todo!(),
+                        Define::Variable(variable_define) => {
+                            builder.push_line(
+                                format!(
+                                    "let {}{}{};",
+                                    variable_define
+                                        .binding
+                                        .as_ref()
+                                        .map(|binding| codegen_for_variable_binding(binding))
+                                        .unwrap_or_default(),
+                                    variable_define
+                                        .type_tag
+                                        .as_ref()
+                                        .map(|type_tag| type_tag.type_info.as_ref().ok())
+                                        .flatten()
+                                        .map(|ty| format!(": {}", codegen_for_type(ty)))
+                                        .unwrap_or_default(),
+                                    variable_define
+                                        .expression
+                                        .as_ref()
+                                        .map(|expression| format!(
+                                            " = {}",
+                                            codegen_expression(
+                                                expression,
+                                                type_infer_results,
+                                                builder
+                                            )
+                                        ))
+                                        .unwrap_or_default()
+                                )
+                                .as_str(),
+                            );
+                        }
                         Define::TypeAlias(type_alias) => todo!(),
                     }
                 }
@@ -99,7 +145,44 @@ pub(crate) fn codegen_for_program(
                     .as_str(),
                 );
             }
-            Statement::Implements(implements) => todo!(),
+            Statement::Implements(implements) => {
+                builder.push_line(
+                    format!(
+                        "impl{} {} for {} {} {{",
+                        implements
+                            .generics
+                            .as_ref()
+                            .map(|generics| codegen_for_generics_define(generics))
+                            .unwrap_or_default(),
+                        implements
+                            .interface
+                            .as_ref()
+                            .map(|ty| codegen_for_type(ty))
+                            .unwrap_or_default(),
+                        implements
+                            .concrete
+                            .as_ref()
+                            .map(|ty| codegen_for_type(ty))
+                            .unwrap_or_default(),
+                        implements
+                            .where_clause
+                            .as_ref()
+                            .map(|where_clause| codegen_for_where_clause(where_clause))
+                            .unwrap_or_default(),
+                    )
+                    .as_str(),
+                );
+
+                {
+                    let scope = builder.scope();
+
+                    if let Ok(block) = &implements.block {
+                        codegen_for_program(block.program, true, type_infer_results, &scope);
+                    }
+                }
+
+                builder.push_line("}");
+            }
         }
     }
 }
@@ -125,6 +208,54 @@ fn codegen_for_variable_binding(ast: &VariableBinding) -> String {
     }
 }
 
+fn codegen_for_generics_define(ast: &GenericsDefine) -> String {
+    let mut code = String::new();
+    code += "<";
+
+    code += ast
+        .elements
+        .iter()
+        .map(|element| {
+            format!(
+                "{}: {}",
+                element.name.value,
+                element
+                    .bounds
+                    .iter()
+                    .map(|bound| codegen_for_type(bound))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+        .as_str();
+
+    code += ">";
+
+    code
+}
+
+fn codegen_for_where_clause(ast: &WhereClause) -> String {
+    let mut code = String::new();
+    code += "where ";
+
+    for element in ast.elements.iter() {
+        code += codegen_for_type(&element.target_type).as_str();
+        code += ": ";
+
+        code += element
+            .bounds
+            .iter()
+            .map(|bound| codegen_for_type(bound))
+            .collect::<Vec<_>>()
+            .join(" + ")
+            .as_str();
+    }
+
+    code
+}
+
 fn codegen_for_type(ast: &TypeInfo) -> String {
     let mut code = String::new();
 
@@ -134,7 +265,14 @@ fn codegen_for_type(ast: &TypeInfo) -> String {
             code += base_type_info
                 .path
                 .iter()
-                .map(|path| path.value.to_string())
+                .enumerate()
+                .map(|(index, path)| {
+                    if index == 0 && path.value == "std" {
+                        "catla_std".to_string()
+                    } else {
+                        path.value.to_string()
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("::")
                 .as_str();
@@ -151,7 +289,7 @@ fn codegen_for_type(ast: &TypeInfo) -> String {
             }
         }
         TypeInfoBase::Tuple(tuple_type_info) => todo!(),
-        TypeInfoBase::This(spanned) => todo!(),
+        TypeInfoBase::This(_) => code += "Self",
     }
 
     for attribute in ast.attributes.iter() {
@@ -278,7 +416,13 @@ fn codegen_add_or_sub_expression(
 
     match ast.chain.len() {
         0 => left_result,
-        _ => todo!(),
+        _ => {
+            let left_type = type_infer_results.get(&EntityID::from(&ast.left)).unwrap();
+
+            if left_type.value.is_integer() || left_type.value.is_float() {
+                
+            }
+        },
     }
 }
 

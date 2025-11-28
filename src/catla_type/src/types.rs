@@ -993,21 +993,6 @@ impl ImplementsInfo {
         type_environment: &mut TypeEnvironment,
         all_implements_info_set: &ImplementsInfoSet,
     ) -> ImplementsCheckResult {
-        println!(
-            "concrete : {}",
-            concrete
-                .value
-                .to_display_string(user_type_set, Some(type_environment))
-        );
-        println!(
-            "interface : {}",
-            interface
-                .as_ref()
-                .map(|value| value
-                    .value
-                    .to_display_string(user_type_set, Some(type_environment)))
-                .unwrap_or("".to_string())
-        );
         let retake_concrete = concrete.map(|ty| type_environment.retake_type_variable(&ty));
 
         let retake_interface =
@@ -1121,7 +1106,16 @@ impl ImplementsInfo {
             }
         }
 
-        for where_bounds in self.where_clause.iter() {
+        let mut where_bounds = Vec::new();
+        for generic in self.generics_define.iter() {
+            where_bounds.push(WhereClauseInfo {
+                target: Type::Generic(generic.clone()).with_span(generic.name.span.clone()),
+                bounds: generic.bounds.read().unwrap().clone(),
+            });
+        }
+        where_bounds.extend(self.where_clause.clone());
+
+        for where_bounds in where_bounds {
             let new_target = where_bounds
                 .target
                 .value

@@ -1,1 +1,12 @@
+import std::numeric::Numeric
+
 class String {}
+
+interface ToString {
+    function to_string(let this) -> String;
+}
+
+implements<T: Numeric> ToString for T {
+    #[compiler_support_unreachable]
+    function to_string(let this) -> String {}
+}

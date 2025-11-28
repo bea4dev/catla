@@ -153,6 +153,10 @@ impl<'type_env_alloc> TypeEnvironment<'type_env_alloc> {
         type_variable_set_id
     }
 
+    fn register_entity_variable(&mut self, entity_id: EntityID, variable_id: TypeVariableID) {
+        self.entity_var_map.insert(entity_id, variable_id);
+    }
+
     fn unify_entity_id(
         &mut self,
         left: EntityID,
@@ -1944,11 +1948,9 @@ fn infer_type_for_2op(
     };
 
     let left_type = match &left_type.value {
-        Type::IntegerLiteral => {
-            Type::TypeVariable(left.value).moduled(left_type.module_path, left_type.span)
-        }
-        Type::FloatLiteral => {
-            Type::TypeVariable(left.value).moduled(left_type.module_path, left_type.span)
+        Type::IntegerLiteral | Type::FloatLiteral => {
+            type_environment.unify(left.value, right.value, user_type_set, errors);
+            return Some(right.value);
         }
         _ => left_type,
     };
@@ -2346,6 +2348,7 @@ fn infer_type_for_add_or_sub_expression(
             package_resource_set,
             errors,
         );
+        type_environment.register_entity_variable(EntityID::from(&ast.left), left);
 
         let mut last = left.with_span(ast.left.span.clone());
 
@@ -2370,7 +2373,7 @@ fn infer_type_for_add_or_sub_expression(
             );
 
             let (interface_name, function_name) = match op.value {
-                AddOrSub::Add => ("test::Add", "add"),
+                AddOrSub::Add => ("std::operators::add::Add", "add"),
                 AddOrSub::Sub => ("std::operators::sub::Sub", "sub"),
             };
 

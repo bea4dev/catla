@@ -5,6 +5,7 @@ interface Add<Right, Output> {
 }
 
 implements<T: Numeric> Add<T, T> for T {
+    #[compiler_support_unreachable]
     function add(let this, right: T) -> T {
         return this + right
     }

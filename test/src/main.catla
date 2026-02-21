@@ -1,3 +1,26 @@
+class TestClass1 {
+    let field: TestClass2
+}
+
+class TestClass2 {}
+
 function main() {
-    let c = 100 + 200
+    let b = new TestClass2 {}
+    let a = new TestClass1 {
+        field: b
+    }
+    test(a, b)
+    global(a)
+}
+
+static var c: TestClass1 = new TestClass1 {
+    field: new TestClass2 {}
+}
+
+function test(a: TestClass1, b: TestClass2) {
+    a.field = b
+}
+
+function global(a: TestClass1) {
+    c = a
 }

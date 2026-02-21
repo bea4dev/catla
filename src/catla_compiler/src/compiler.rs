@@ -13,8 +13,14 @@ use catla_import::{
     resource::{PackageResource, PackageResourceSet},
 };
 use catla_name_resolver::resolve_name;
+use catla_optimization::lifetime::{
+    LifetimeAnalyzeResults, ModuleLifetimeSource, collect_lifetime_source,
+    evaluate_lifetime_sources,
+};
 use catla_parser::CatlaAST;
-use catla_print_debug::type_infer::print_type_infer_result;
+use catla_print_debug::{
+    optimization::print_lifetime_optimization_result, type_infer::print_type_infer_result,
+};
 use catla_type::{
     module_element_collector::collect_module_element_type_for_program,
     type_infer::infer_type,
@@ -77,8 +83,21 @@ impl CatlaCompiler {
         });
     }
 
+    pub fn print_optimization_debug(&self) {
+        self.inner.runtime.block_on(async {
+            self.print_optimization_debug_inner().await;
+        });
+    }
+
     async fn compile_inner(&self) {
         let resouces = self.inner.package_resource_set.get_all();
+        let module_names = resouces
+            .iter()
+            .filter_map(|(module_name, resource)| match resource {
+                PackageResource::Module { source_code: _ } => Some(module_name.clone()),
+                PackageResource::Package => None,
+            })
+            .collect::<Vec<_>>();
 
         let mut futures = FuturesUnordered::new();
 
@@ -91,6 +110,66 @@ impl CatlaCompiler {
                 });
                 futures.push(future);
             }
+        }
+
+        while let Some(result) = futures.next().await {
+            result.unwrap();
+        }
+
+        let lifetime_sources = self
+            .inner
+            .states
+            .module_lifetime_sources
+            .get(module_names.iter())
+            .await;
+        let module_implements_infos = self
+            .inner
+            .states
+            .module_implements_infos
+            .get(module_names.iter())
+            .await;
+
+        let global_implements_infos = ImplementsInfoSet::new(None);
+        for module_name in module_names.iter() {
+            if let Some(implements_infos) = module_implements_infos.get(module_name) {
+                global_implements_infos.merge(implements_infos);
+            }
+        }
+
+        let lifetime_results = evaluate_lifetime_sources(
+            &lifetime_sources,
+            &self.inner.user_type_set,
+            &global_implements_infos,
+        );
+
+        for (module_name, result) in lifetime_results.iter() {
+            self.inner
+                .states
+                .module_lifetime_analyze_results
+                .set(module_name, Arc::new(result.clone()))
+                .await;
+        }
+
+        let mut futures = FuturesUnordered::new();
+
+        for module_name in module_names.iter() {
+            let Some(source) = lifetime_sources.get(module_name) else {
+                continue;
+            };
+            let Some(lifetime_result) = lifetime_results.get(module_name) else {
+                continue;
+            };
+
+            futures.push(codegen(
+                source.ast.ast(),
+                &source.type_infer_results,
+                &source.name_resolved_map,
+                &source.module_entity_type_map,
+                &self.inner.user_type_set,
+                Some(lifetime_result),
+                &self.inner.codegen_settings,
+                &source.ast.source_code.module_path,
+            ));
         }
 
         while let Some(result) = futures.next().await {
@@ -119,6 +198,48 @@ impl CatlaCompiler {
 
         while let Some(result) = futures.next().await {
             result.unwrap();
+        }
+    }
+
+    async fn print_optimization_debug_inner(&self) {
+        let mut module_names = self
+            .inner
+            .package_resource_set
+            .get_all()
+            .into_iter()
+            .filter_map(|(module_name, resource)| match resource {
+                PackageResource::Module { source_code: _ } => Some(module_name),
+                PackageResource::Package => None,
+            })
+            .collect::<Vec<_>>();
+        module_names.sort();
+
+        let module_lifetime_sources = self
+            .inner
+            .states
+            .module_lifetime_sources
+            .get(module_names.iter())
+            .await;
+        let module_lifetime_results = self
+            .inner
+            .states
+            .module_lifetime_analyze_results
+            .get(module_names.iter())
+            .await;
+
+        for module_name in module_names.iter() {
+            let Some(source) = module_lifetime_sources.get(module_name) else {
+                continue;
+            };
+            let Some(result) = module_lifetime_results.get(module_name) else {
+                continue;
+            };
+
+            print_lifetime_optimization_result(
+                &source.ast,
+                &source.name_resolved_map,
+                result.as_ref(),
+            );
         }
     }
 
@@ -333,16 +454,19 @@ impl CatlaCompiler {
 
         dbg!(errors);
 
-        print_type_infer_result(&ast, &type_infer_results, &user_type_set);
-
-        codegen(
-            ast.ast(),
+        let lifetime_source = collect_lifetime_source(
+            module_name,
+            &ast,
             &type_infer_results,
-            &self.inner.codegen_settings,
-            &source_code.module_path,
-        )
-        .await
-        .unwrap();
+            &module_entity_type_map,
+            &name_resolved_map,
+        );
+
+        self.inner
+            .states
+            .module_lifetime_sources
+            .set(module_name, Arc::new(lifetime_source))
+            .await;
     }
 }
 
@@ -362,6 +486,8 @@ pub struct CompileStates {
     pub module_imports: ModuleResourceSet<Vec<String>>,
     pub module_implements_infos: ModuleResourceSet<ImplementsInfoSet>,
     pub module_name_type_map: ModuleResourceSet<HashMap<String, Type>>,
+    pub module_lifetime_sources: ModuleResourceSet<ModuleLifetimeSource>,
+    pub module_lifetime_analyze_results: ModuleResourceSet<LifetimeAnalyzeResults>,
 }
 
 impl CompileStates {
@@ -372,6 +498,8 @@ impl CompileStates {
             module_imports: ModuleResourceSet::new(package_resource_set),
             module_implements_infos: ModuleResourceSet::new(package_resource_set),
             module_name_type_map: ModuleResourceSet::new(package_resource_set),
+            module_lifetime_sources: ModuleResourceSet::new(package_resource_set),
+            module_lifetime_analyze_results: ModuleResourceSet::new(package_resource_set),
         }
     }
 }

@@ -4,3 +4,5 @@ Cargo.lock
 .DS_Store
 /.vscode
 /.catla
+/.catla_compiler_test
+/.catla_optimization_debug

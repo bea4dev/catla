@@ -16,12 +16,7 @@ mod test {
 
     use crate::{compiler::CatlaCompiler, settings::CatlaCompilerSettings};
 
-    #[test]
-    fn compiler() {
-        unsafe {
-            std::env::set_var("RUST_BACKTRACE", "full");
-        };
-
+    fn create_test_compiler(out_dir_name: &str) -> (CatlaCompiler, PathBuf) {
         let mut crate_info_set = CrateInfoSet::new();
         crate_info_set.crates.push(CrateInfo {
             name: "std".to_string(),
@@ -48,7 +43,8 @@ mod test {
         let settings = CatlaCompilerSettings { threads: 20 };
 
         let mut out_dir = PathBuf::new();
-        out_dir.push("../../.catla");
+        out_dir.push("../../");
+        out_dir.push(out_dir_name);
         let codegen_settings = CodegenSettings {
             out_dir: out_dir.clone(),
         };
@@ -59,6 +55,17 @@ mod test {
             settings,
             codegen_settings,
         );
+
+        (compiler, out_dir)
+    }
+
+    #[test]
+    fn compiler() {
+        unsafe {
+            std::env::set_var("RUST_BACKTRACE", "full");
+        };
+
+        let (compiler, out_dir) = create_test_compiler(".catla_compiler_test");
         compiler.compile();
 
         let mut dir_temp = out_dir.clone();
@@ -69,5 +76,16 @@ mod test {
             .current_dir(&dir_temp)
             .spawn()
             .unwrap();
+    }
+
+    #[test]
+    fn optimization_debug() {
+        unsafe {
+            std::env::set_var("RUST_BACKTRACE", "full");
+        };
+
+        let (compiler, _) = create_test_compiler(".catla_optimization_debug");
+        compiler.compile();
+        compiler.print_optimization_debug();
     }
 }

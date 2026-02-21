@@ -1,15 +1,11 @@
 # !tyml @cargo/Cargo
 [package]
-name = "catla_print_debug"
+name = "catla_optimization"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 catla_parser = { path = "../catla_parser", version = "0.1.0" }
 catla_name_resolver = { path = "../catla_name_resolver", version = "0.1.0" }
-catla_optimization = { path = "../catla_optimization", version = "0.1.0" }
 catla_type = { path = "../catla_type", version = "0.1.0" }
-catla_util = { path = "../catla_util", version = "0.1.0" }
-catla_import = { path = "../catla_import", version = "0.1.0" }
-ariadne = "0.5.1"
 hashbrown = "0.16.0"

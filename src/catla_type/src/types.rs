@@ -378,6 +378,11 @@ impl GlobalUserTypeSet {
         let lock = self.map.read().unwrap();
         lock.get(&id).unwrap().clone()
     }
+
+    pub fn all_infos(&self) -> Vec<Arc<RwLock<UserTypeInfo>>> {
+        let lock = self.map.read().unwrap();
+        lock.values().cloned().collect()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -880,6 +885,10 @@ impl ImplementsInfoSet {
 
     pub fn register_implements_info(&self, implements_info: ImplementsInfo) {
         self.infos.write().unwrap().push(Arc::new(implements_info));
+    }
+
+    pub fn all_infos(&self) -> Vec<Arc<ImplementsInfo>> {
+        self.infos.read().unwrap().clone()
     }
 
     pub fn find_implements_for(

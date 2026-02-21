@@ -5,6 +5,7 @@ members = [
     "src/catla_compiler",
     "src/catla_grammar",
     "src/catla_import",
+    "src/catla_optimization",
     "src/catla_name_resolver",
     "src/catla_parser",
     "src/catla_print_debug",
@@ -15,4 +16,8 @@ members = [
     "src/catla_crate",
     "src/catla_std"
 ]
-exclude = [ ".catla" ]
+exclude = [
+    ".catla",
+    ".catla_compiler_test",
+    ".catla_optimization_debug",
+]

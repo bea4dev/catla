@@ -7,17 +7,23 @@ use std::{
     rc::Rc,
 };
 
+use catla_name_resolver::ResolvedInfo;
+use catla_optimization::lifetime::LifetimeAnalyzeResults;
 use catla_parser::ast::{EntityID, Program, Spanned};
 use catla_std::get_std_map;
-use catla_type::types::Type;
+use catla_type::types::{GlobalUserTypeSet, Type};
 use catla_util::module_path::ModulePath;
 use hashbrown::HashMap;
 
-use crate::codegen::codegen_for_program;
+use crate::codegen::{codegen_for_program, collect_module_static_variables};
 
 pub async fn codegen(
     ast: &Program<'_, '_>,
     type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
+    user_type_set: &GlobalUserTypeSet,
+    lifetime_analyze_results: Option<&LifetimeAnalyzeResults>,
     settings: &CodegenSettings,
     module_path: &ModulePath,
 ) -> Result<(), String> {
@@ -32,8 +38,22 @@ pub async fn codegen(
                     .first()
                     .map(|name| name.as_str())
                     .unwrap_or_default();
+                let mut stack_slot_counter = 0usize;
+                let module_static_variables = collect_module_static_variables(ast);
 
-                codegen_for_program(ast, false, type_infer_results, &scope, current_crate_name);
+                codegen_for_program(
+                    ast,
+                    false,
+                    type_infer_results,
+                    lifetime_analyze_results,
+                    user_type_set,
+                    &module_static_variables,
+                    name_resolved_map,
+                    module_entity_type_map,
+                    &scope,
+                    current_crate_name,
+                    &mut stack_slot_counter,
+                );
             }
 
             builder.dump()
@@ -98,7 +118,6 @@ impl CodeBuilder {
 
     pub fn scope(&self) -> CodeBuilderScope {
         self.depth.set(self.depth.get() + 1);
-        dbg!(self.depth.get());
 
         CodeBuilderScope { code: self.clone() }
     }

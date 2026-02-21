@@ -1,6 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    mem::{ManuallyDrop, transmute},
+    mem::{ManuallyDrop, MaybeUninit, transmute},
     ops::Deref,
     process::abort,
     sync::atomic::{AtomicUsize, Ordering, fence},
@@ -13,6 +13,9 @@ pub struct CatlaObject<T: CatlaDrop> {
     value: UnsafeCell<ManuallyDrop<T>>,
     count_and_flags: UnsafeCell<usize>,
 }
+
+unsafe impl<T: CatlaDrop> Sync for CatlaObject<T> {}
+unsafe impl<T: CatlaDrop> Send for CatlaObject<T> {}
 
 const BIT_SHIFT_MUTEX: usize = usize::BITS as usize - 1;
 const BIT_SHIFT_HEAP: usize = usize::BITS as usize - 2;
@@ -82,6 +85,9 @@ impl<T: CatlaDrop> CatlaObject<T> {
             return;
         }
 
+        let should_drop = Self::drop(count_and_flags);
+        let should_free = Self::heap(count_and_flags);
+
         if Self::mutex(count_and_flags) {
             let count =
                 unsafe { transmute::<*mut usize, &AtomicUsize>(self.count_and_flags.get()) };
@@ -91,17 +97,30 @@ impl<T: CatlaDrop> CatlaObject<T> {
                 fence(Ordering::Acquire);
 
                 unsafe {
-                    CatlaDrop::drop((&*self.value.get()).deref());
-                    ManuallyDrop::drop(&mut *self.value.get());
+                    if should_drop {
+                        CatlaDrop::drop((&*self.value.get()).deref());
+                        ManuallyDrop::drop(&mut *self.value.get());
+                    }
+
+                    if should_free {
+                        drop(Box::from_raw(self as *const Self as *mut Self));
+                    }
                 }
             }
         } else {
+            let old_count = count_and_flags;
             unsafe { *self.count_and_flags.get() -= 1 };
 
-            if (count_and_flags & COUNTER_BIT_MASK) == 1 {
+            if (old_count & COUNTER_BIT_MASK) == 1 {
                 unsafe {
-                    CatlaDrop::drop((&*self.value.get()).deref());
-                    ManuallyDrop::drop(&mut *self.value.get());
+                    if should_drop {
+                        CatlaDrop::drop((&*self.value.get()).deref());
+                        ManuallyDrop::drop(&mut *self.value.get());
+                    }
+
+                    if should_free {
+                        drop(Box::from_raw(self as *const Self as *mut Self));
+                    }
                 }
             }
         }
@@ -146,9 +165,22 @@ pub struct CatlaObjectRef<T: 'static + CatlaDrop> {
 }
 
 impl<T: 'static + CatlaDrop> CatlaObjectRef<T> {
+    #[inline(always)]
     pub fn heap(value: T, mutex: bool, drop: bool) -> Self {
         let value = Box::leak(Box::new(CatlaObject::new(value, mutex, true, drop)));
         Self { value }
+    }
+
+    #[inline(always)]
+    pub fn stack(
+        value: T,
+        drop: bool,
+        ptr: &mut ManuallyDrop<MaybeUninit<CatlaObject<T>>>,
+    ) -> Self {
+        ptr.write(CatlaObject::new(value, false, false, drop));
+        Self {
+            value: unsafe { std::mem::transmute(ptr.assume_init_ref()) },
+        }
     }
 
     #[inline(always)]

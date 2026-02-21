@@ -1,3 +1,4 @@
+pub mod optimization;
 pub mod type_infer;
 
 #[cfg(test)]

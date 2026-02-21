@@ -1,7 +1,0 @@
-[package]
-name = "catla_transpile_std"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-allocator-api2 = "0.2.21"

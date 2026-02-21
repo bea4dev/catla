@@ -1,5 +1,0 @@
-import std::string::String
-
-#[rust_codegen]
-function print(str: String) {}
-

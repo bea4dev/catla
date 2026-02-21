@@ -27,8 +27,13 @@ pub async fn codegen(
             let builder = CodeBuilder::new();
             {
                 let scope = builder.scope();
+                let current_crate_name = module_path
+                    .path
+                    .first()
+                    .map(|name| name.as_str())
+                    .unwrap_or_default();
 
-                codegen_for_program(ast, false, type_infer_results, &scope);
+                codegen_for_program(ast, false, type_infer_results, &scope, current_crate_name);
             }
 
             builder.dump()

@@ -1,4 +1,9 @@
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::ErrorKind,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use catla_codegen::{CodegenSettings, codegen, crates::codegen_cargo_toml};
 use catla_crate::CrateInfoSet;
@@ -86,6 +91,20 @@ impl CatlaCompiler {
                 });
                 futures.push(future);
             }
+        }
+
+        while let Some(result) = futures.next().await {
+            result.unwrap();
+        }
+
+        let mut futures = FuturesUnordered::new();
+
+        for crate_info in self.inner.crate_info_set.crates.iter() {
+            futures.push(ensure_pub_mod_tree(
+                crate_info.name.clone(),
+                &self.inner.package_resource_set,
+                &self.inner.codegen_settings,
+            ));
         }
 
         while let Some(result) = futures.next().await {
@@ -355,4 +374,189 @@ impl CompileStates {
             module_name_type_map: ModuleResourceSet::new(package_resource_set),
         }
     }
+}
+
+async fn ensure_pub_mod_tree(
+    crate_name: String,
+    package_resource_set: &PackageResourceSet,
+    codegen_settings: &CodegenSettings,
+) -> Result<(), String> {
+    let crate_prefix = format!("{}::", crate_name);
+
+    let module_paths = package_resource_set
+        .get_all()
+        .into_iter()
+        .filter_map(|(module_name, resource)| match resource {
+            PackageResource::Module { source_code: _ } => Some(module_name),
+            PackageResource::Package => None,
+        })
+        .filter_map(|module_name| {
+            module_name.strip_prefix(&crate_prefix).map(|module_name| {
+                module_name
+                    .split("::")
+                    .map(|segment| segment.to_string())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if module_paths.is_empty() {
+        return Ok(());
+    }
+
+    let module_set = module_paths.iter().cloned().collect::<BTreeSet<_>>();
+
+    let has_lib = module_set.contains(&vec!["lib".to_string()]);
+    let has_main = module_set.contains(&vec!["main".to_string()]);
+
+    let (root_file, root_name) = if has_lib {
+        ("lib.rs", Some("lib"))
+    } else if has_main {
+        ("main.rs", Some("main"))
+    } else {
+        ("lib.rs", None)
+    };
+
+    let mut parent_children = BTreeMap::<Vec<String>, BTreeSet<String>>::new();
+    for module_path in module_paths.iter() {
+        if module_path.is_empty() {
+            continue;
+        }
+
+        for parent_length in 0..module_path.len() {
+            let parent = module_path[..parent_length].to_vec();
+            let child = module_path[parent_length].clone();
+            parent_children.entry(parent).or_default().insert(child);
+        }
+    }
+
+    if let Some(root_name) = root_name {
+        if let Some(root_children) = parent_children.get_mut(&Vec::new()) {
+            root_children.remove(root_name);
+        }
+    }
+
+    for (parent_module, children) in parent_children.into_iter() {
+        if children.is_empty() {
+            continue;
+        }
+
+        let source_path = resolve_parent_source_path(
+            &crate_name,
+            &parent_module,
+            root_file,
+            &module_set,
+            codegen_settings,
+        );
+
+        append_missing_pub_mods(&source_path, &children).await?;
+    }
+
+    Ok(())
+}
+
+fn resolve_parent_source_path(
+    crate_name: &str,
+    parent_module: &[String],
+    root_file: &str,
+    module_set: &BTreeSet<Vec<String>>,
+    codegen_settings: &CodegenSettings,
+) -> PathBuf {
+    let mut source_path = crate_source_dir(crate_name, codegen_settings);
+
+    if parent_module.is_empty() {
+        source_path.push(root_file);
+        return source_path;
+    }
+
+    if module_set.contains(parent_module) {
+        for (index, segment) in parent_module.iter().enumerate() {
+            if index + 1 == parent_module.len() {
+                source_path.push(format!("{}.rs", segment));
+            } else {
+                source_path.push(segment);
+            }
+        }
+    } else {
+        for segment in parent_module.iter() {
+            source_path.push(segment);
+        }
+        source_path.push("mod.rs");
+    }
+
+    source_path
+}
+
+fn crate_source_dir(crate_name: &str, codegen_settings: &CodegenSettings) -> PathBuf {
+    let mut path = codegen_settings.out_dir.clone();
+
+    if crate_name == "std" {
+        path.push("catla_std");
+    } else {
+        path.push(crate_name);
+    }
+
+    path.push("src");
+    path
+}
+
+async fn append_missing_pub_mods(
+    source_path: &Path,
+    children: &BTreeSet<String>,
+) -> Result<(), String> {
+    if let Some(parent) = source_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|error| format!("Failed to create dirs '{}': {}", parent.display(), error))?;
+    }
+
+    let mut source = match tokio::fs::read_to_string(source_path).await {
+        Ok(source) => source,
+        Err(error) if error.kind() == ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(format!(
+                "Failed to read '{}': {}",
+                source_path.display(),
+                error
+            ));
+        }
+    };
+
+    let existing_modules = source
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let module = trimmed.strip_prefix("pub mod ")?;
+            let module = module.strip_suffix(';')?.trim();
+
+            if module.is_empty() || module.contains(' ') {
+                return None;
+            }
+
+            Some(module.to_string())
+        })
+        .collect::<BTreeSet<_>>();
+
+    let missing_modules = children
+        .iter()
+        .filter(|module| !existing_modules.contains(*module))
+        .collect::<Vec<_>>();
+
+    if missing_modules.is_empty() {
+        return Ok(());
+    }
+
+    if !source.is_empty() && !source.ends_with('\n') {
+        source.push('\n');
+    }
+
+    for module in missing_modules.into_iter() {
+        source += format!("pub mod {};\n", module).as_str();
+    }
+
+    tokio::fs::write(source_path, source)
+        .await
+        .map_err(|error| format!("Failed to write '{}': {}", source_path.display(), error))?;
+
+    Ok(())
 }

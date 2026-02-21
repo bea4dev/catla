@@ -1,0 +1,67 @@
+
+interface Add<Other, Out> {
+    function add(let this, other: Other) -> Out;
+}
+
+
+implements Add<uint8, uint8> for uint8 {
+    override function add(let this, other: uint8) -> uint8 {
+        return this + other
+    }
+}
+
+implements Add<uint16, uint16> for uint16 {
+    override function add(let this, other: uint16) -> uint16 {
+        return this + other
+    }
+}
+
+implements Add<uint32, uint32> for uint32 {
+    override function add(let this, other: uint32) -> uint32 {
+        return this + other
+    }
+}
+
+implements Add<uint64, uint64> for uint64 {
+    override function add(let this, other: uint64) -> uint64 {
+        return this + other
+    }
+}
+
+
+implements Add<int8, int8> for int8 {
+    override function add(let this, other: int8) -> int8 {
+        return this + other
+    }
+}
+
+implements Add<int16, int16> for int16 {
+    override function add(let this, other: int16) -> int16 {
+        return this + other
+    }
+}
+
+implements Add<int32, int32> for int32 {
+    override function add(let this, other: int32) -> int32 {
+        return this + other
+    }
+}
+
+implements Add<int64, int64> for int64 {
+    override function add(let this, other: int64) -> int64 {
+        return this + other
+    }
+}
+
+
+implements Add<float32, float32> for float32 {
+    override function add(let this, other: float32) -> float32 {
+        return this + other
+    }
+}
+
+implements Add<float64, float64> for float64 {
+    override function add(let this, other: float64) -> float64 {
+        return this + other
+    }
+}

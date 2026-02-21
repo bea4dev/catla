@@ -1,0 +1,4 @@
+
+#[rust_codegen]
+class String {}
+

@@ -1,10 +1,10 @@
-pub trait CatlaDrop {
+pub trait Drop {
     fn drop(&self);
 }
 
 macro_rules! impl_drop {
     ($ty:ty) => {
-        impl CatlaDrop for $ty {
+        impl Drop for $ty {
             fn drop(&self) {}
         }
     };

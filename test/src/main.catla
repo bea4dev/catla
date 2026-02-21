@@ -2,6 +2,12 @@ class TestClass1 {
     let field: TestClass2
 }
 
+import std::dispose::Drop
+
+implements Drop for TestClass2 {
+    function drop(let this) {}
+}
+
 class TestClass2 {}
 
 function main() {
@@ -9,18 +15,4 @@ function main() {
     let a = new TestClass1 {
         field: b
     }
-    test(a, b)
-    global(a)
-}
-
-static var c: TestClass1 = new TestClass1 {
-    field: new TestClass2 {}
-}
-
-function test(a: TestClass1, b: TestClass2) {
-    a.field = b
-}
-
-function global(a: TestClass1) {
-    c = a
 }

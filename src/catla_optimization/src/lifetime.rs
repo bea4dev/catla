@@ -7,7 +7,7 @@ use catla_parser::ast::{
     PrimaryLeftExpr, Statement, StatementAttribute, UserTypeKind, VariableBinding,
 };
 use catla_parser::CatlaAST;
-use catla_type::types::{GlobalUserTypeSet, ImplementsInfoSet, Type};
+use catla_type::types::{GlobalUserTypeID, GlobalUserTypeSet, ImplementsInfoSet, Type};
 use hashbrown::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +105,11 @@ pub fn evaluate_lifetime_sources(
     }
 
     let interface_adjacency = build_interface_adjacency(global_implements_infos, user_type_set);
+    let drop_required_user_types = collect_drop_required_user_types_for_sources(
+        module_sources,
+        user_type_set,
+        global_implements_infos,
+    );
 
     let mut summaries = HashMap::<FunctionSymbol, FunctionSummary>::new();
     for definition in definitions.iter() {
@@ -135,6 +140,7 @@ pub fn evaluate_lifetime_sources(
                 user_type_set,
                 &summaries,
                 &interface_adjacency,
+                &drop_required_user_types,
             );
 
             let entry = summaries
@@ -188,6 +194,7 @@ pub fn evaluate_lifetime_sources(
             symbols_by_name: &symbols_by_name,
             summaries: &summaries,
             interface_adjacency: &interface_adjacency,
+            drop_required_user_types: &drop_required_user_types,
             call_argument_borrow: &mut module_result.call_argument_borrow,
             object_results: &mut module_result.object_results,
             variable_origins: &mut module_result.variable_origins,
@@ -210,6 +217,7 @@ pub fn evaluate_lifetime_sources(
             symbols_by_name: &symbols_by_name,
             summaries: &summaries,
             interface_adjacency: &interface_adjacency,
+            drop_required_user_types: &drop_required_user_types,
             call_argument_borrow: &mut module_result.call_argument_borrow,
             object_results: &mut module_result.object_results,
             variable_origins: &mut module_result.variable_origins,
@@ -455,6 +463,7 @@ struct AnalyzerContext<'a> {
     symbols_by_name: &'a HashMap<String, Vec<FunctionSymbol>>,
     summaries: &'a HashMap<FunctionSymbol, FunctionSummary>,
     interface_adjacency: &'a HashMap<FunctionSymbol, HashSet<FunctionSymbol>>,
+    drop_required_user_types: &'a HashSet<GlobalUserTypeID>,
     call_argument_borrow: &'a mut HashMap<EntityID, bool>,
     object_results: &'a mut HashMap<EntityID, LifetimeAnalyzeResult>,
     variable_origins: &'a mut HashMap<EntityID, HashSet<EntityID>>,
@@ -472,6 +481,11 @@ pub fn analyze_lifetime<'input, 'allocator>(
         collect_function_definitions("__single__", ast, module_entity_type_map);
 
     let interface_adjacency = build_interface_adjacency(global_implements_infos, user_type_set);
+    let drop_required_user_types = collect_drop_required_user_types_for_module(
+        module_entity_type_map,
+        user_type_set,
+        global_implements_infos,
+    );
 
     let mut summaries = HashMap::<FunctionSymbol, FunctionSummary>::new();
     for definition in definitions.iter() {
@@ -498,6 +512,7 @@ pub fn analyze_lifetime<'input, 'allocator>(
                 user_type_set,
                 &summaries,
                 &interface_adjacency,
+                &drop_required_user_types,
             );
 
             let entry = summaries
@@ -541,6 +556,7 @@ pub fn analyze_lifetime<'input, 'allocator>(
             symbols_by_name: &symbols_by_name,
             summaries: &summaries,
             interface_adjacency: &interface_adjacency,
+            drop_required_user_types: &drop_required_user_types,
             call_argument_borrow: &mut results.call_argument_borrow,
             object_results: &mut results.object_results,
             variable_origins: &mut results.variable_origins,
@@ -799,6 +815,7 @@ fn analyze_function_summary<'ast, 'input, 'allocator>(
     user_type_set: &GlobalUserTypeSet,
     summaries: &HashMap<FunctionSymbol, FunctionSummary>,
     interface_adjacency: &HashMap<FunctionSymbol, HashSet<FunctionSymbol>>,
+    drop_required_user_types: &HashSet<GlobalUserTypeID>,
 ) -> FunctionSummary {
     let mut object_results = HashMap::new();
     let mut call_argument_borrow = HashMap::new();
@@ -812,6 +829,7 @@ fn analyze_function_summary<'ast, 'input, 'allocator>(
         symbols_by_name,
         summaries,
         interface_adjacency,
+        drop_required_user_types,
         call_argument_borrow: &mut call_argument_borrow,
         object_results: &mut object_results,
         variable_origins: &mut variable_origins,
@@ -1496,9 +1514,16 @@ fn analyze_primary_left(
             let new_object_entity = EntityID::from(new_object);
 
             if is_class_new_object(new_object, context) {
+                let requires_drop = new_object
+                    .path
+                    .first()
+                    .and_then(|_| resolve_new_object_user_type(new_object, context))
+                    .map(|user_type_id| context.drop_required_user_types.contains(&user_type_id))
+                    .unwrap_or(false);
+
                 context.object_results.entry(new_object_entity).or_insert(LifetimeAnalyzeResult {
                     allocation: AllocationKind::Stack,
-                    requires_drop: true,
+                    requires_drop,
                 });
                 flow.origins.insert(new_object_entity);
                 let owner_ref = match state.origin_tree_refs.get(&new_object_entity).copied() {
@@ -1780,7 +1805,7 @@ fn set_object_heap(
         .entry(object_entity)
         .or_insert(LifetimeAnalyzeResult {
             allocation: AllocationKind::Stack,
-            requires_drop: true,
+            requires_drop: false,
         });
 
     if entry.allocation == AllocationKind::Heap {
@@ -2142,19 +2167,245 @@ fn is_class_new_object(
     new_object: &catla_parser::ast::NewObjectExpression,
     context: &AnalyzerContext,
 ) -> bool {
-    let Some(first) = new_object.path.first() else {
-        return false;
+    resolve_new_object_user_type(new_object, context)
+        .map(|user_type_id| is_class_user_type(user_type_id, context.user_type_set))
+        .unwrap_or(false)
+}
+
+fn resolve_new_object_user_type(
+    new_object: &catla_parser::ast::NewObjectExpression,
+    context: &AnalyzerContext,
+) -> Option<GlobalUserTypeID> {
+    let first = new_object.path.first()?;
+    let resolved = context.name_resolved_map.get(&EntityID::from(first))?;
+    if resolved.define.kind != DefineKind::UserType {
+        return None;
+    }
+
+    let ty = context.module_entity_type_map.get(&resolved.define.entity_id)?;
+    let Type::UserType {
+        user_type_info,
+        generics: _,
+    } = ty.resolve_type_alias(context.user_type_set)
+    else {
+        return None;
     };
 
-    if let Some(resolved) = context.name_resolved_map.get(&EntityID::from(first)) {
-        if resolved.define.kind == DefineKind::UserType {
-            if let Some(ty) = context.module_entity_type_map.get(&resolved.define.entity_id) {
-                return is_class_type(ty, context.user_type_set);
+    Some(user_type_info)
+}
+
+fn collect_drop_required_user_types_for_sources(
+    module_sources: &HashMap<String, Arc<ModuleLifetimeSource>>,
+    user_type_set: &GlobalUserTypeSet,
+    global_implements_infos: &ImplementsInfoSet,
+) -> HashSet<GlobalUserTypeID> {
+    let mut candidate_user_types = HashSet::new();
+    for source in module_sources.values() {
+        for ty in source.module_entity_type_map.values() {
+            collect_user_type_ids_in_type(ty, user_type_set, &mut candidate_user_types);
+        }
+    }
+
+    collect_drop_required_user_types(
+        candidate_user_types,
+        user_type_set,
+        global_implements_infos,
+    )
+}
+
+fn collect_drop_required_user_types_for_module(
+    module_entity_type_map: &HashMap<EntityID, Type>,
+    user_type_set: &GlobalUserTypeSet,
+    global_implements_infos: &ImplementsInfoSet,
+) -> HashSet<GlobalUserTypeID> {
+    let mut candidate_user_types = HashSet::new();
+    for ty in module_entity_type_map.values() {
+        collect_user_type_ids_in_type(ty, user_type_set, &mut candidate_user_types);
+    }
+
+    collect_drop_required_user_types(
+        candidate_user_types,
+        user_type_set,
+        global_implements_infos,
+    )
+}
+
+fn collect_drop_required_user_types(
+    mut candidate_user_types: HashSet<GlobalUserTypeID>,
+    user_type_set: &GlobalUserTypeSet,
+    global_implements_infos: &ImplementsInfoSet,
+) -> HashSet<GlobalUserTypeID> {
+    let mut drop_required_user_types =
+        collect_direct_drop_implemented_user_types(user_type_set, global_implements_infos);
+
+    candidate_user_types.extend(drop_required_user_types.iter().copied());
+
+    let mut class_field_dependencies = HashMap::<GlobalUserTypeID, HashSet<GlobalUserTypeID>>::new();
+    let mut pending = candidate_user_types.iter().copied().collect::<Vec<_>>();
+    let mut visited = HashSet::new();
+
+    while let Some(class_type_id) = pending.pop() {
+        if !visited.insert(class_type_id) {
+            continue;
+        }
+
+        if !is_class_user_type(class_type_id, user_type_set) {
+            continue;
+        }
+
+        let class_info = user_type_set.get(class_type_id);
+        let class_info = class_info.read().unwrap();
+
+        let mut field_dependencies = HashSet::new();
+
+        for element_type in class_info.element_types.values() {
+            let resolved_element_type = element_type.value.resolve_type_alias(user_type_set);
+            if matches!(resolved_element_type, Type::Function { .. }) {
+                continue;
+            }
+
+            let mut contained_user_types = HashSet::new();
+            collect_user_type_ids_in_type(
+                &resolved_element_type,
+                user_type_set,
+                &mut contained_user_types,
+            );
+
+            for contained_type_id in contained_user_types.into_iter() {
+                candidate_user_types.insert(contained_type_id);
+                pending.push(contained_type_id);
+
+                if is_class_user_type(contained_type_id, user_type_set) {
+                    field_dependencies.insert(contained_type_id);
+                }
+            }
+        }
+
+        class_field_dependencies.insert(class_type_id, field_dependencies);
+    }
+
+    let mut changed = true;
+    let mut guard = 0usize;
+    while changed && guard < 128 {
+        changed = false;
+        guard += 1;
+
+        for (class_type_id, field_type_ids) in class_field_dependencies.iter() {
+            if drop_required_user_types.contains(class_type_id) {
+                continue;
+            }
+
+            if field_type_ids
+                .iter()
+                .any(|field_type_id| drop_required_user_types.contains(field_type_id))
+            {
+                drop_required_user_types.insert(*class_type_id);
+                changed = true;
             }
         }
     }
 
-    false
+    drop_required_user_types
+}
+
+fn collect_direct_drop_implemented_user_types(
+    user_type_set: &GlobalUserTypeSet,
+    global_implements_infos: &ImplementsInfoSet,
+) -> HashSet<GlobalUserTypeID> {
+    let mut drop_implemented_user_types = HashSet::new();
+
+    for implements_info in global_implements_infos.all_infos().into_iter() {
+        if !is_std_drop_interface(&implements_info.interface.value, user_type_set) {
+            continue;
+        }
+
+        let Type::UserType {
+            user_type_info,
+            generics: _,
+        } = implements_info.concrete.value.resolve_type_alias(user_type_set)
+        else {
+            continue;
+        };
+
+        if is_class_user_type(user_type_info, user_type_set) {
+            drop_implemented_user_types.insert(user_type_info);
+        }
+    }
+
+    drop_implemented_user_types
+}
+
+fn is_std_drop_interface(interface_type: &Type, user_type_set: &GlobalUserTypeSet) -> bool {
+    let Type::UserType {
+        user_type_info,
+        generics: _,
+    } = interface_type.resolve_type_alias(user_type_set)
+    else {
+        return false;
+    };
+
+    let user_type_info = user_type_set.get(user_type_info);
+    let user_type_info = user_type_info.read().unwrap();
+
+    user_type_info
+        .kind
+        .as_ref()
+        .map(|kind| kind.value == UserTypeKind::Interface)
+        .unwrap_or(false)
+        && user_type_info.name.value == "Drop"
+        && user_type_info.module_path.path_name.as_str() == "std::dispose"
+}
+
+fn collect_user_type_ids_in_type(
+    ty: &Type,
+    user_type_set: &GlobalUserTypeSet,
+    output: &mut HashSet<GlobalUserTypeID>,
+) {
+    match ty.resolve_type_alias(user_type_set) {
+        Type::UserType {
+            user_type_info,
+            generics,
+        } => {
+            output.insert(user_type_info);
+
+            for generic in generics.iter() {
+                collect_user_type_ids_in_type(generic, user_type_set, output);
+            }
+        }
+        Type::Function {
+            function_info,
+            generics,
+        } => {
+            for generic in generics.iter() {
+                collect_user_type_ids_in_type(generic, user_type_set, output);
+            }
+
+            for argument in function_info.arguments.iter() {
+                collect_user_type_ids_in_type(&argument.value, user_type_set, output);
+            }
+
+            collect_user_type_ids_in_type(&function_info.return_type.value, user_type_set, output);
+        }
+        Type::Array(base) => {
+            collect_user_type_ids_in_type(base.as_ref(), user_type_set, output);
+        }
+        Type::Tuple(items) => {
+            for item in items.iter() {
+                collect_user_type_ids_in_type(item, user_type_set, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_class_user_type(user_type_info: GlobalUserTypeID, user_type_set: &GlobalUserTypeSet) -> bool {
+    let info = user_type_set.get(user_type_info);
+    let info = info.read().unwrap();
+
+    info.kind
+        .as_ref()
+        .map(|kind| kind.value == UserTypeKind::Class)
+        .unwrap_or(false)
 }
 
 fn is_class_type(ty: &Type, user_type_set: &GlobalUserTypeSet) -> bool {

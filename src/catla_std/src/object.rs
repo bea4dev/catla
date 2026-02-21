@@ -6,16 +6,16 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering, fence},
 };
 
-use crate::drop::CatlaDrop;
+use crate::dispose::Drop;
 
 #[derive(Debug)]
-pub struct CatlaObject<T: CatlaDrop> {
+pub struct CatlaObject<T: Drop> {
     value: UnsafeCell<ManuallyDrop<T>>,
     count_and_flags: UnsafeCell<usize>,
 }
 
-unsafe impl<T: CatlaDrop> Sync for CatlaObject<T> {}
-unsafe impl<T: CatlaDrop> Send for CatlaObject<T> {}
+unsafe impl<T: Drop> Sync for CatlaObject<T> {}
+unsafe impl<T: Drop> Send for CatlaObject<T> {}
 
 const BIT_SHIFT_MUTEX: usize = usize::BITS as usize - 1;
 const BIT_SHIFT_HEAP: usize = usize::BITS as usize - 2;
@@ -23,7 +23,7 @@ const BIT_SHIFT_DROP: usize = usize::BITS as usize - 3;
 const COUNTER_BIT_MASK: usize =
     !((1 << BIT_SHIFT_MUTEX) | (1 << BIT_SHIFT_HEAP) | (1 << BIT_SHIFT_DROP));
 
-impl<T: CatlaDrop> CatlaObject<T> {
+impl<T: Drop> CatlaObject<T> {
     pub fn new(value: T, mutex: bool, heap: bool, drop: bool) -> Self {
         let init_count = 1;
         let mutex = (mutex as usize) << BIT_SHIFT_MUTEX;
@@ -98,7 +98,7 @@ impl<T: CatlaDrop> CatlaObject<T> {
 
                 unsafe {
                     if should_drop {
-                        CatlaDrop::drop((&*self.value.get()).deref());
+                        Drop::drop((&*self.value.get()).deref());
                         ManuallyDrop::drop(&mut *self.value.get());
                     }
 
@@ -114,7 +114,7 @@ impl<T: CatlaDrop> CatlaObject<T> {
             if (old_count & COUNTER_BIT_MASK) == 1 {
                 unsafe {
                     if should_drop {
-                        CatlaDrop::drop((&*self.value.get()).deref());
+                        Drop::drop((&*self.value.get()).deref());
                         ManuallyDrop::drop(&mut *self.value.get());
                     }
 
@@ -160,11 +160,11 @@ impl<T: CatlaDrop> CatlaObject<T> {
 }
 
 #[derive(Debug)]
-pub struct CatlaObjectRef<T: 'static + CatlaDrop> {
+pub struct CatlaObjectRef<T: 'static + Drop> {
     value: &'static CatlaObject<T>,
 }
 
-impl<T: 'static + CatlaDrop> CatlaObjectRef<T> {
+impl<T: 'static + Drop> CatlaObjectRef<T> {
     #[inline(always)]
     pub fn heap(value: T, mutex: bool, drop: bool) -> Self {
         let value = Box::leak(Box::new(CatlaObject::new(value, mutex, true, drop)));
@@ -205,7 +205,7 @@ impl<T: 'static + CatlaDrop> CatlaObjectRef<T> {
     }
 }
 
-impl<T: 'static + CatlaDrop> Clone for CatlaObjectRef<T> {
+impl<T: 'static + Drop> Clone for CatlaObjectRef<T> {
     fn clone(&self) -> Self {
         self.value.add_count();
 
@@ -213,7 +213,7 @@ impl<T: 'static + CatlaDrop> Clone for CatlaObjectRef<T> {
     }
 }
 
-impl<T: 'static + CatlaDrop> Drop for CatlaObjectRef<T> {
+impl<T: 'static + Drop> std::ops::Drop for CatlaObjectRef<T> {
     fn drop(&mut self) {
         self.value.sub_count();
     }

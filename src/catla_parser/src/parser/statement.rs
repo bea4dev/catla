@@ -442,7 +442,10 @@ fn parse_function_define<'input, 'allocator>(
 
     let generics = parse_generics_define(lexer, errors, allocator);
 
-    if lexer.current().get_kind() != TokenKind::Literal {
+    if let TokenKind::Literal | TokenKind::New | TokenKind::Mutex | TokenKind::Drop =
+        lexer.current().get_kind()
+    {
+    } else {
         let error = recover_until(
             lexer,
             &[TokenKind::LineFeed, TokenKind::SemiColon],

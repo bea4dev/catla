@@ -1,0 +1,3 @@
+interface Drop {
+    function drop(let this);
+}

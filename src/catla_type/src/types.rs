@@ -75,6 +75,37 @@ impl Type {
         }
     }
 
+    pub fn contains_unknown(&self) -> bool {
+        match self {
+            Type::Unknown | Type::TypeVariable(_) => true,
+            Type::UserType {
+                user_type_info: _,
+                generics,
+            } => generics.iter().any(|generic| generic.contains_unknown()),
+            Type::Function {
+                function_info,
+                generics,
+            } => {
+                generics.iter().any(|generic| generic.contains_unknown())
+                    || function_info
+                        .arguments
+                        .iter()
+                        .any(|argument| argument.value.contains_unknown())
+                    || function_info.return_type.value.contains_unknown()
+                    || function_info.where_clause.iter().any(|where_bound| {
+                        where_bound.target.value.contains_unknown()
+                            || where_bound
+                                .bounds
+                                .iter()
+                                .any(|bound| bound.value.contains_unknown())
+                    })
+            }
+            Type::Array(base_type) => base_type.contains_unknown(),
+            Type::Tuple(items) => items.iter().any(|item| item.contains_unknown()),
+            _ => false,
+        }
+    }
+
     pub fn to_display_string(
         &self,
         user_type_set: &GlobalUserTypeSet,
@@ -1035,7 +1066,7 @@ impl ImplementsInfo {
         }
 
         if let Some((function_name, arguments)) = function_type_hints {
-            let retake_arguments = arguments
+            let mut retake_arguments = arguments
                 .iter()
                 .map(|ty| {
                     ty.clone()
@@ -1083,10 +1114,32 @@ impl ImplementsInfo {
                 return ImplementsCheckResult::NoImplementsFound;
             };
 
+            let mut argument_start_index = 0;
+            if function_info.arguments.len() == retake_arguments.len() + 1 {
+                let this_argument = function_info.arguments.first().unwrap();
+                if !type_environment.test_unify_type(
+                    this_argument.value.clone().moduled(
+                        self.module_path.clone(),
+                        this_argument.span.clone(),
+                    ),
+                    retake_concrete.clone(),
+                    user_type_set,
+                ) {
+                    return ImplementsCheckResult::NoImplementsFound;
+                }
+
+                argument_start_index = 1;
+            }
+
+            if function_info.arguments.len() != retake_arguments.len() + argument_start_index {
+                return ImplementsCheckResult::NoImplementsFound;
+            }
+
             for (argument, retake_argument) in function_info
                 .arguments
                 .iter()
-                .zip(retake_arguments.into_iter())
+                .skip(argument_start_index)
+                .zip(retake_arguments.drain(..))
             {
                 if !type_environment.test_unify_type(
                     argument
@@ -1115,33 +1168,32 @@ impl ImplementsInfo {
             }
         }
 
-        let mut where_bounds = Vec::new();
-        for generic in self.generics_define.iter() {
-            where_bounds.push(WhereClauseInfo {
-                target: Type::Generic(generic.clone()).with_span(generic.name.span.clone()),
-                bounds: generic.bounds.read().unwrap().clone(),
-            });
-        }
-        where_bounds.extend(self.where_clause.clone());
-
-        for where_bounds in where_bounds {
-            let new_target = where_bounds
+        fn check_where_bound(
+            where_bound: &WhereClauseInfo,
+            old_generics: &[Arc<GenericType>],
+            new_generics: &[Type],
+            module_path: &ModulePath,
+            all_implements_info_set: &ImplementsInfoSet,
+            user_type_set: &GlobalUserTypeSet,
+            type_environment: &mut TypeEnvironment,
+        ) -> Option<ImplementsCheckResult> {
+            let new_target = where_bound
                 .target
                 .value
-                .replace_generics(&old_generics, &new_generics);
+                .replace_generics(old_generics, new_generics);
 
-            for bound in where_bounds.bounds.iter() {
-                let new_bound = bound.value.replace_generics(&old_generics, &new_generics);
+            for bound in where_bound.bounds.iter() {
+                let new_bound = bound.value.replace_generics(old_generics, new_generics);
 
                 match all_implements_info_set.is_implements(
                     Moduled::new(
                         new_target.clone(),
-                        self.module_path.clone(),
-                        where_bounds.target.span.clone(),
+                        module_path.clone(),
+                        where_bound.target.span.clone(),
                     ),
                     Moduled::new(
                         new_bound.clone(),
-                        self.module_path.clone(),
+                        module_path.clone(),
                         bound.span.clone(),
                     ),
                     None,
@@ -1149,10 +1201,10 @@ impl ImplementsInfo {
                     type_environment,
                 ) {
                     ImplementsCheckResult::NoImplementsFound => {
-                        return ImplementsCheckResult::NoImplementsFound;
+                        return Some(ImplementsCheckResult::NoImplementsFound);
                     }
                     ImplementsCheckResult::Conflicts { conflicts } => {
-                        return ImplementsCheckResult::Conflicts { conflicts };
+                        return Some(ImplementsCheckResult::Conflicts { conflicts });
                     }
                     ImplementsCheckResult::Success {
                         new_concrete,
@@ -1162,8 +1214,8 @@ impl ImplementsInfo {
                         let target_result = type_environment.test_unify_type(
                             Moduled::new(
                                 new_target.clone(),
-                                self.module_path.clone(),
-                                where_bounds.target.span.clone(),
+                                module_path.clone(),
+                                where_bound.target.span.clone(),
                             ),
                             new_concrete,
                             user_type_set,
@@ -1173,7 +1225,7 @@ impl ImplementsInfo {
                         }
 
                         let bound_result = type_environment.test_unify_type(
-                            Moduled::new(new_bound, self.module_path.clone(), bound.span.clone()),
+                            Moduled::new(new_bound, module_path.clone(), bound.span.clone()),
                             new_interface.unwrap(),
                             user_type_set,
                         );
@@ -1182,6 +1234,53 @@ impl ImplementsInfo {
                         }
                     }
                 }
+            }
+
+            None
+        }
+
+        for generic in self.generics_define.iter() {
+            let where_bound = WhereClauseInfo {
+                target: Type::Generic(generic.clone()).with_span(generic.name.span.clone()),
+                bounds: generic.bounds.read().unwrap().clone(),
+            };
+
+            let target = where_bound
+                .target
+                .value
+                .replace_generics(&old_generics, &new_generics);
+            let resolved_target = type_environment.resolve_type(&target, user_type_set);
+
+            // Generic bounds are assumptions; if the target still contains unknown pieces,
+            // defer checking until later constraints resolve it.
+            if resolved_target.contains_unknown() {
+                continue;
+            }
+
+            if let Some(result) = check_where_bound(
+                &where_bound,
+                old_generics,
+                &new_generics,
+                &self.module_path,
+                all_implements_info_set,
+                user_type_set,
+                type_environment,
+            ) {
+                return result;
+            }
+        }
+
+        for where_bound in self.where_clause.iter() {
+            if let Some(result) = check_where_bound(
+                where_bound,
+                old_generics,
+                &new_generics,
+                &self.module_path,
+                all_implements_info_set,
+                user_type_set,
+                type_environment,
+            ) {
+                return result;
             }
         }
 

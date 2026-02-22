@@ -6,3 +6,4 @@ Cargo.lock
 /.catla
 /.catla_compiler_test
 /.catla_optimization_debug
+/.catla_type_infer_debug

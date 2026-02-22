@@ -77,6 +77,41 @@ Relevant functions:
 - `resolve_callee_function_type_for_literal(...)`
 - `function_argument_usage(...)`
 
+## 8) per-class object model generation (RC runtime shape change)
+
+Codegen now emits a class-specific object carrier type per class (e.g. `__CatlaObject_Foo`) and class references are emitted as:
+
+- `catla_std::object::CatlaObjectRef<__CatlaObject_Foo>`
+
+`catla_std::object::CatlaObject` generic struct was removed from runtime and replaced with a trait-based object contract implemented by generated per-class object carriers.
+
+Current runtime points:
+
+- refcount operations live in `CatlaObjectRef` (`add_count`/`sub_count`)
+- generated carriers provide count/value pointers via `catla_std::object::CatlaObject` trait
+- `CatlaObjectRef` now implements `Deref<Target = T>`
+
+Drop-codegen points:
+
+- class-level drop hook impl target is generated carrier type (`impl catla_std::dispose::Drop for __CatlaObject_Foo`)
+- explicit Catla `implements Drop for Foo { ... }` is currently consumed into generated carrier drop impl
+
+## 9) `::` class path rewriting in expressions
+
+Codegen now rewrites class symbols on `::` paths to generated carrier names.
+
+Examples:
+
+- `Foo::bar()` -> `__CatlaObject_Foo::bar()`
+- `pkg::Foo::bar()` -> `pkg::__CatlaObject_Foo::bar()`
+
+The class判定 uses resolved entity metadata (`name_resolved_map` + `module_entity_type_map`) so same-name types across modules are distinguished by entity, not just string match.
+
+For compatibility, class member functions are now emitted to both:
+
+- `impl Foo { ... }`
+- `impl __CatlaObject_Foo { ... }`
+
 ## Lifetime analysis summary
 
 See full detail in `docs/lifetime-analysis.md`.
@@ -128,6 +163,29 @@ Optimization debug output:
 2. Several branches in parser/type/codegen are still `todo!()`.
 3. Borrow insertion in codegen is currently type-based, not directly using `LifetimeAnalyzeResults::call_argument_borrow`.
 4. `is_argument_tree` exists in optimizer state but is not currently used in constraint solving behavior.
+
+## Deferred design notes (2026-02-21, per-class object model refactor)
+
+The following are intentionally deferred while moving from shared `CatlaObject<T>` to per-class generated object layout:
+
+1. **`drop` body restrictions**
+   - Planned direction: fully disallow `this.clone()` (or any operation that resurrects self) during `drop`.
+   - Error reporting/enforcement is deferred; behavior may be unchecked temporarily.
+
+2. **RC metadata access safety model**
+   - A trait/mechanism to retrieve ref-count metadata from class values will be needed.
+   - Sealing/soundness strategy is deferred.
+
+3. **Language-level orphan rule policy**
+   - Planned direction: prohibit Catla `implements` forms that would violate Rust coherence (external trait + external concrete).
+   - Parser/type-checker enforcement is deferred.
+
+4. **Code size / API ergonomics tradeoffs**
+   - Per-class generated object wrapper and ref-count plumbing may increase generated code size.
+   - `Deref`-based method resolution edge cases are acknowledged and deferred.
+5. **UFCS-style explicit receiver calls**
+   - Target support: `Struct::func(instance)` style calls for `&self` methods.
+   - Current path rewrite may route this to `__CatlaObject_*::func(...)`, but full auto-borrow/autoref behavior is not yet finalized.
 
 ## Suggested next engineering tasks
 

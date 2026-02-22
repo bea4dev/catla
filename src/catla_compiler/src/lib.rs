@@ -88,4 +88,15 @@ mod test {
         compiler.compile();
         compiler.print_optimization_debug();
     }
+
+    #[test]
+    fn type_infer_debug() {
+        unsafe {
+            std::env::set_var("RUST_BACKTRACE", "full");
+        };
+
+        let (compiler, _) = create_test_compiler(".catla_type_infer_debug");
+        compiler.compile();
+        compiler.print_type_infer_debug();
+    }
 }

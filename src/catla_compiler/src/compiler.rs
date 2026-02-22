@@ -89,6 +89,12 @@ impl CatlaCompiler {
         });
     }
 
+    pub fn print_type_infer_debug(&self) {
+        self.inner.runtime.block_on(async {
+            self.print_type_infer_debug_inner().await;
+        });
+    }
+
     async fn compile_inner(&self) {
         let resouces = self.inner.package_resource_set.get_all();
         let module_names = resouces
@@ -243,10 +249,37 @@ impl CatlaCompiler {
         }
     }
 
+    async fn print_type_infer_debug_inner(&self) {
+        let mut module_names = self
+            .inner
+            .package_resource_set
+            .get_all()
+            .into_iter()
+            .filter_map(|(module_name, resource)| match resource {
+                PackageResource::Module { source_code: _ } => Some(module_name),
+                PackageResource::Package => None,
+            })
+            .collect::<Vec<_>>();
+        module_names.sort();
+
+        let module_lifetime_sources = self
+            .inner
+            .states
+            .module_lifetime_sources
+            .get(module_names.iter())
+            .await;
+
+        for module_name in module_names.iter() {
+            let Some(source) = module_lifetime_sources.get(module_name) else {
+                continue;
+            };
+
+            print_type_infer_result(&source.ast, &source.type_infer_results, &self.inner.user_type_set);
+        }
+    }
+
     async fn compile_module(&self, source_code: SourceCode) {
         let ast = CatlaAST::parse(source_code.clone());
-
-        dbg!(&ast.errors);
 
         let all_crates = &self
             .inner
@@ -257,9 +290,8 @@ impl CatlaCompiler {
             .cloned()
             .collect();
 
-        let (name_resolved_map, module_element_names, errors) =
+        let (name_resolved_map, module_element_names, _errors) =
             resolve_name(ast.ast(), &all_crates, &HashMap::new());
-        dbg!(errors);
 
         let module_element_names = Arc::new(module_element_names);
 
@@ -288,14 +320,12 @@ impl CatlaCompiler {
             .get(&modules)
             .await;
 
-        let (import_map, errors) = collect_import_element(
+        let (import_map, _errors) = collect_import_element(
             ast.ast(),
             &package_resource_set,
             &module_element_name_map,
             &source_code.module_path,
         );
-
-        dbg!(errors);
 
         let mut module_entity_user_type_map = HashMap::new();
         let mut module_name_type_map = HashMap::new();
@@ -451,8 +481,6 @@ impl CatlaCompiler {
 
         implements_element_checker.register_implements(&implements_infos);
         implements_element_checker.check(&user_type_set, &global_implements_infos, &mut errors);
-
-        dbg!(errors);
 
         let lifetime_source = collect_lifetime_source(
             module_name,

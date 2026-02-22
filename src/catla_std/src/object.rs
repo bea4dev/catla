@@ -1,5 +1,4 @@
 use std::{
-    cell::UnsafeCell,
     mem::{ManuallyDrop, MaybeUninit, transmute},
     ops::Deref,
     process::abort,
@@ -8,68 +7,68 @@ use std::{
 
 use crate::dispose::Drop;
 
-#[derive(Debug)]
-pub struct CatlaObject<T: Drop> {
-    value: UnsafeCell<ManuallyDrop<T>>,
-    count_and_flags: UnsafeCell<usize>,
-}
-
-unsafe impl<T: Drop> Sync for CatlaObject<T> {}
-unsafe impl<T: Drop> Send for CatlaObject<T> {}
-
 const BIT_SHIFT_MUTEX: usize = usize::BITS as usize - 1;
 const BIT_SHIFT_HEAP: usize = usize::BITS as usize - 2;
 const BIT_SHIFT_DROP: usize = usize::BITS as usize - 3;
 const COUNTER_BIT_MASK: usize =
     !((1 << BIT_SHIFT_MUTEX) | (1 << BIT_SHIFT_HEAP) | (1 << BIT_SHIFT_DROP));
 
-impl<T: Drop> CatlaObject<T> {
-    pub fn new(value: T, mutex: bool, heap: bool, drop: bool) -> Self {
-        let init_count = 1;
-        let mutex = (mutex as usize) << BIT_SHIFT_MUTEX;
-        let heap = (heap as usize) << BIT_SHIFT_HEAP;
-        let drop = (drop as usize) << BIT_SHIFT_DROP;
-        let count_and_flags = init_count | mutex | heap | drop;
+#[inline(always)]
+pub const fn init_count_and_flags(mutex: bool, heap: bool, drop: bool) -> usize {
+    let init_count = 1;
+    let mutex = (mutex as usize) << BIT_SHIFT_MUTEX;
+    let heap = (heap as usize) << BIT_SHIFT_HEAP;
+    let drop = (drop as usize) << BIT_SHIFT_DROP;
+    init_count | mutex | heap | drop
+}
 
-        Self {
-            value: UnsafeCell::new(ManuallyDrop::new(value)),
-            count_and_flags: UnsafeCell::new(count_and_flags),
-        }
-    }
+#[inline(always)]
+pub const fn mutex(count_and_flags: usize) -> bool {
+    ((count_and_flags >> BIT_SHIFT_MUTEX) & 1) == 1
+}
 
+#[inline(always)]
+pub const fn heap(count_and_flags: usize) -> bool {
+    ((count_and_flags >> BIT_SHIFT_HEAP) & 1) == 1
+}
+
+#[inline(always)]
+pub const fn drop_flag(count_and_flags: usize) -> bool {
+    ((count_and_flags >> BIT_SHIFT_DROP) & 1) == 1
+}
+
+pub trait CatlaObject: Drop + 'static {
+    type Value: 'static;
+
+    fn new(value: Self::Value, mutex: bool, heap: bool, drop: bool) -> Self;
+    fn count_and_flags_ptr(&self) -> *mut usize;
+    fn value_ptr(&self) -> *mut Self::Value;
+}
+
+#[derive(Debug)]
+pub struct CatlaObjectRef<T: CatlaObject> {
+    value: &'static T,
+}
+
+impl<T: CatlaObject> CatlaObjectRef<T> {
     #[inline(always)]
-    pub const fn mutex(count_and_flags: usize) -> bool {
-        ((count_and_flags >> BIT_SHIFT_MUTEX) & 1) == 1
-    }
+    fn add_count(&self) {
+        let count_ptr = self.value.count_and_flags_ptr();
+        let count_and_flags = unsafe { *count_ptr };
 
-    #[inline(always)]
-    pub const fn heap(count_and_flags: usize) -> bool {
-        ((count_and_flags >> BIT_SHIFT_HEAP) & 1) == 1
-    }
-
-    #[inline(always)]
-    pub const fn drop(count_and_flags: usize) -> bool {
-        ((count_and_flags >> BIT_SHIFT_DROP) & 1) == 1
-    }
-
-    #[inline(always)]
-    pub fn add_count(&self) {
-        let count_and_flags = unsafe { *self.count_and_flags.get() };
-
-        if !Self::heap(count_and_flags) && !Self::drop(count_and_flags) {
+        if !heap(count_and_flags) && !drop_flag(count_and_flags) {
             return;
         }
 
-        if Self::mutex(count_and_flags) {
-            let count =
-                unsafe { transmute::<*mut usize, &AtomicUsize>(self.count_and_flags.get()) };
+        if mutex(count_and_flags) {
+            let count = unsafe { transmute::<*mut usize, &AtomicUsize>(count_ptr) };
             let old_count = count.fetch_add(1, Ordering::Relaxed);
 
             if old_count == 0 || (old_count & COUNTER_BIT_MASK) == COUNTER_BIT_MASK {
                 abort();
             }
         } else {
-            unsafe { *self.count_and_flags.get() += 1 };
+            unsafe { *count_ptr += 1 };
 
             if (count_and_flags & COUNTER_BIT_MASK) == COUNTER_BIT_MASK {
                 abort();
@@ -78,19 +77,19 @@ impl<T: Drop> CatlaObject<T> {
     }
 
     #[inline(always)]
-    pub fn sub_count(&self) {
-        let count_and_flags = unsafe { *self.count_and_flags.get() };
+    fn sub_count(&self) {
+        let count_ptr = self.value.count_and_flags_ptr();
+        let count_and_flags = unsafe { *count_ptr };
 
-        if !Self::heap(count_and_flags) && !Self::drop(count_and_flags) {
+        if !heap(count_and_flags) && !drop_flag(count_and_flags) {
             return;
         }
 
-        let should_drop = Self::drop(count_and_flags);
-        let should_free = Self::heap(count_and_flags);
+        let should_drop = drop_flag(count_and_flags);
+        let should_free = heap(count_and_flags);
 
-        if Self::mutex(count_and_flags) {
-            let count =
-                unsafe { transmute::<*mut usize, &AtomicUsize>(self.count_and_flags.get()) };
+        if mutex(count_and_flags) {
+            let count = unsafe { transmute::<*mut usize, &AtomicUsize>(count_ptr) };
             let old_count = count.fetch_sub(1, Ordering::Release);
 
             if (old_count & COUNTER_BIT_MASK) == 1 {
@@ -98,28 +97,30 @@ impl<T: Drop> CatlaObject<T> {
 
                 unsafe {
                     if should_drop {
-                        Drop::drop((&*self.value.get()).deref());
-                        ManuallyDrop::drop(&mut *self.value.get());
+                        Drop::drop(self.value);
                     }
 
                     if should_free {
-                        drop(Box::from_raw(self as *const Self as *mut Self));
+                        drop(Box::from_raw(self.value as *const T as *mut T));
+                    } else if should_drop {
+                        std::ptr::drop_in_place(self.value.value_ptr());
                     }
                 }
             }
         } else {
             let old_count = count_and_flags;
-            unsafe { *self.count_and_flags.get() -= 1 };
+            unsafe { *count_ptr -= 1 };
 
             if (old_count & COUNTER_BIT_MASK) == 1 {
                 unsafe {
                     if should_drop {
-                        Drop::drop((&*self.value.get()).deref());
-                        ManuallyDrop::drop(&mut *self.value.get());
+                        Drop::drop(self.value);
                     }
 
                     if should_free {
-                        drop(Box::from_raw(self as *const Self as *mut Self));
+                        drop(Box::from_raw(self.value as *const T as *mut T));
+                    } else if should_drop {
+                        std::ptr::drop_in_place(self.value.value_ptr());
                     }
                 }
             }
@@ -127,14 +128,32 @@ impl<T: Drop> CatlaObject<T> {
     }
 
     #[inline(always)]
-    pub fn value(&self) -> &mut T {
-        unsafe { &mut *self.value.get() }
+    pub fn heap(value: T::Value, mutex: bool, drop: bool) -> Self {
+        let value = Box::leak(Box::new(T::new(value, mutex, true, drop)));
+        Self { value }
+    }
+
+    #[inline(always)]
+    pub fn stack(
+        value: T::Value,
+        drop: bool,
+        ptr: &mut ManuallyDrop<MaybeUninit<T>>,
+    ) -> Self {
+        ptr.write(T::new(value, false, false, drop));
+        Self {
+            value: unsafe { std::mem::transmute(ptr.assume_init_ref()) },
+        }
+    }
+
+    #[inline(always)]
+    pub fn value(&self) -> &mut T::Value {
+        unsafe { &mut *self.value.value_ptr() }
     }
 
     pub fn count(&self) -> usize {
-        let count_and_flags = unsafe { *self.count_and_flags.get() };
+        let count_and_flags = unsafe { *self.value.count_and_flags_ptr() };
 
-        if !Self::heap(count_and_flags) && !Self::drop(count_and_flags) {
+        if !heap(count_and_flags) && !drop_flag(count_and_flags) {
             return 1;
         }
 
@@ -142,62 +161,20 @@ impl<T: Drop> CatlaObject<T> {
     }
 
     pub fn is_mutex(&self) -> bool {
-        let count_and_flags = unsafe { *self.count_and_flags.get() };
-        Self::mutex(count_and_flags)
+        let count_and_flags = unsafe { *self.value.count_and_flags_ptr() };
+        mutex(count_and_flags)
     }
 
     pub fn into_mutex(&self) {
-        let count_and_flags = unsafe { *self.count_and_flags.get() };
+        let count_and_flags = unsafe { *self.value.count_and_flags_ptr() };
 
-        if !Self::heap(count_and_flags) && !Self::drop(count_and_flags) {
+        if !heap(count_and_flags) && !drop_flag(count_and_flags) {
             abort();
         }
 
-        if !Self::mutex(count_and_flags) {
-            unsafe { *self.count_and_flags.get() |= 1 << BIT_SHIFT_MUTEX };
+        if !mutex(count_and_flags) {
+            unsafe { *self.value.count_and_flags_ptr() |= 1 << BIT_SHIFT_MUTEX };
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct CatlaObjectRef<T: 'static + Drop> {
-    value: &'static CatlaObject<T>,
-}
-
-impl<T: 'static + Drop> CatlaObjectRef<T> {
-    #[inline(always)]
-    pub fn heap(value: T, mutex: bool, drop: bool) -> Self {
-        let value = Box::leak(Box::new(CatlaObject::new(value, mutex, true, drop)));
-        Self { value }
-    }
-
-    #[inline(always)]
-    pub fn stack(
-        value: T,
-        drop: bool,
-        ptr: &mut ManuallyDrop<MaybeUninit<CatlaObject<T>>>,
-    ) -> Self {
-        ptr.write(CatlaObject::new(value, false, false, drop));
-        Self {
-            value: unsafe { std::mem::transmute(ptr.assume_init_ref()) },
-        }
-    }
-
-    #[inline(always)]
-    pub fn value(&self) -> &mut T {
-        self.value.value()
-    }
-
-    pub fn count(&self) -> usize {
-        self.value.count()
-    }
-
-    pub fn is_mutex(&self) -> bool {
-        self.value.is_mutex()
-    }
-
-    pub fn into_mutex(&self) {
-        self.value.into_mutex();
     }
 
     pub fn borrow(&self) -> Self {
@@ -205,27 +182,78 @@ impl<T: 'static + Drop> CatlaObjectRef<T> {
     }
 }
 
-impl<T: 'static + Drop> Clone for CatlaObjectRef<T> {
+impl<T: CatlaObject> Clone for CatlaObjectRef<T> {
     fn clone(&self) -> Self {
-        self.value.add_count();
+        self.add_count();
 
         Self { value: self.value }
     }
 }
 
-impl<T: 'static + Drop> std::ops::Drop for CatlaObjectRef<T> {
+impl<T: CatlaObject> Drop for CatlaObjectRef<T> {
+    fn drop(&self) {
+        Drop::drop(self.value);
+    }
+}
+
+impl<T: CatlaObject> std::ops::Drop for CatlaObjectRef<T> {
     fn drop(&mut self) {
-        self.value.sub_count();
+        self.sub_count();
+    }
+}
+
+impl<T: CatlaObject> Deref for CatlaObjectRef<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.value
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::object::CatlaObjectRef;
+    use std::cell::UnsafeCell;
+
+    use crate::{
+        dispose::Drop,
+        object::{CatlaObject, CatlaObjectRef, init_count_and_flags},
+    };
+
+    #[derive(Debug)]
+    struct TestObject {
+        value: UnsafeCell<i32>,
+        count_and_flags: UnsafeCell<usize>,
+    }
+
+    unsafe impl Sync for TestObject {}
+    unsafe impl Send for TestObject {}
+
+    impl Drop for TestObject {
+        fn drop(&self) {}
+    }
+
+    impl CatlaObject for TestObject {
+        type Value = i32;
+
+        fn new(value: Self::Value, mutex: bool, heap: bool, drop: bool) -> Self {
+            Self {
+                value: UnsafeCell::new(value),
+                count_and_flags: UnsafeCell::new(init_count_and_flags(mutex, heap, drop)),
+            }
+        }
+
+        fn count_and_flags_ptr(&self) -> *mut usize {
+            self.count_and_flags.get()
+        }
+
+        fn value_ptr(&self) -> *mut Self::Value {
+            self.value.get()
+        }
+    }
 
     #[test]
     fn catla_ref_test() {
-        let object = CatlaObjectRef::heap(100, false, true);
+        let object = CatlaObjectRef::<TestObject>::heap(100, false, true);
         assert_eq!(object.count(), 1);
 
         {

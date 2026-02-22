@@ -1,10 +1,10 @@
 use catla_parser::ast::{
-    AddOrSub, AddOrSubExpression, AndExpression, Define, ElementsOrWildCard, EntityID,
-    EqualsExpression, Expression, Factor, FunctionDefine, GenericsDefine, ImportStatement, LetVar,
-    LessOrGreaterExpression, MulOrDivExpression, OrExpression, Primary, PrimaryLeftExpr,
-    PrimarySeparator, Program, SimplePrimary, Spanned, Statement, StatementAttribute,
-    StatementWithTagAndDocs, TypeAttribute, TypeInfo, TypeInfoBase, UserTypeDefine, UserTypeKind,
-    VariableBinding, VariableDefine, WhereClause,
+    AddOrSub, AddOrSubExpression, AndExpression, Define, DefineWithAttribute,
+    ElementsOrWildCard, EntityID, EqualsExpression, Expression, Factor, FunctionDefine,
+    GenericsDefine, ImportStatement, LetVar, LessOrGreaterExpression, MulOrDivExpression,
+    OrExpression, Primary, PrimaryLeftExpr, PrimarySeparator, Program, SimplePrimary, Spanned,
+    Statement, StatementAttribute, StatementWithTagAndDocs, TypeAlias, TypeAttribute, TypeInfo,
+    TypeInfoBase, UserTypeDefine, UserTypeKind, VariableBinding, VariableDefine, WhereClause,
 };
 use catla_name_resolver::{DefineKind, ResolvedInfo};
 use catla_optimization::lifetime::{AllocationKind, LifetimeAnalyzeResults};
@@ -56,6 +56,8 @@ pub(crate) fn codegen_for_program(
                     type_infer_results,
                     user_type_set,
                     module_static_variables,
+                    name_resolved_map,
+                    module_entity_type_map,
                     current_crate_name,
                 )
                 .unwrap_or_else(|| {
@@ -118,6 +120,7 @@ pub(crate) fn codegen_for_program(
                         Define::UserType(user_type_define) => {
                             codegen_user_type_define(
                                 in_impl_scope,
+                                ast,
                                 user_type_define,
                                 type_infer_results,
                                 lifetime_analyze_results,
@@ -150,7 +153,17 @@ pub(crate) fn codegen_for_program(
                                 stack_slot_counter,
                             );
                         }
-                        Define::TypeAlias(type_alias) => todo!(),
+                        Define::TypeAlias(type_alias) => {
+                            codegen_type_alias_define(
+                                in_impl_scope,
+                                define_with_attribute,
+                                type_alias,
+                                type_infer_results,
+                                user_type_set,
+                                builder,
+                                current_crate_name,
+                            );
+                        }
                     }
                 }
             }
@@ -179,6 +192,10 @@ pub(crate) fn codegen_for_program(
                 );
             }
             Statement::Implements(implements) => {
+                if is_drop_implements_statement(implements) {
+                    continue;
+                }
+
                 builder.push_line(
                     format!(
                         "impl{} {} for {} {} {{",
@@ -205,7 +222,7 @@ pub(crate) fn codegen_for_program(
                             .concrete
                             .as_ref()
                             .map(|ty| {
-                                codegen_for_type(
+                                codegen_for_implements_concrete_type(
                                     ty,
                                     type_infer_results,
                                     user_type_set,
@@ -250,6 +267,20 @@ pub(crate) fn codegen_for_program(
                 builder.push_line("}");
             }
         }
+    }
+}
+
+fn codegen_for_implements_concrete_type(
+    ast: &TypeInfo,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    user_type_set: &GlobalUserTypeSet,
+    current_crate_name: &str,
+) -> String {
+    if is_class_type_info(ast, user_type_set) {
+        codegen_for_object_type_without_class_wrapper(ast, current_crate_name)
+            .unwrap_or_else(|| codegen_for_type_without_class_wrapper(ast, current_crate_name))
+    } else {
+        codegen_for_type(ast, type_infer_results, user_type_set, current_crate_name)
     }
 }
 
@@ -489,6 +520,7 @@ fn codegen_for_interface_program(
 
 fn codegen_user_type_define(
     in_impl_scope: bool,
+    source_program: &Program,
     user_type_define: &UserTypeDefine,
     type_infer_results: &HashMap<EntityID, Spanned<Type>>,
     lifetime_analyze_results: Option<&LifetimeAnalyzeResults>,
@@ -614,18 +646,186 @@ fn codegen_user_type_define(
             }
             builder.push_line("}");
 
-            builder.push_line(
-                format!(
-                    "impl{} catla_std::drop::CatlaDrop for {}{}{} {{",
-                    generics, name, generics_arguments, where_clause
-                )
-                .as_str(),
-            );
-            {
-                let scope = builder.scope();
-                scope.push_line("fn drop(&self) {}");
+            if user_type_define.kind.value == UserTypeKind::Class {
+                let object_struct_name = class_object_struct_name(name);
+                let drop_impl_function =
+                    find_drop_function_for_class(source_program, name);
+
+                builder.push_line("#[derive(Debug)]");
+                builder.push_line(
+                    format!(
+                        "pub struct {}{}{} {{",
+                        object_struct_name, generics, where_clause
+                    )
+                    .as_str(),
+                );
+                {
+                    let scope = builder.scope();
+                    scope.push_line(
+                        format!(
+                            "pub value: std::cell::UnsafeCell<{}{}>,",
+                            name, generics_arguments
+                        )
+                        .as_str(),
+                    );
+                    scope.push_line("pub count_and_flags: std::cell::UnsafeCell<usize>,");
+                }
+                builder.push_line("}");
+
+                builder.push_line(
+                    format!(
+                        "unsafe impl{} Sync for {}{}{} {{}}",
+                        generics, object_struct_name, generics_arguments, where_clause
+                    )
+                    .as_str(),
+                );
+                builder.push_line(
+                    format!(
+                        "unsafe impl{} Send for {}{}{} {{}}",
+                        generics, object_struct_name, generics_arguments, where_clause
+                    )
+                    .as_str(),
+                );
+
+                builder.push_line(
+                    format!(
+                        "impl{} {}{}{} {{",
+                        generics, object_struct_name, generics_arguments, where_clause
+                    )
+                    .as_str(),
+                );
+                {
+                    let scope = builder.scope();
+                    scope.push_line(
+                        format!(
+                            "pub fn value(&self) -> &mut {}{} {{",
+                            name, generics_arguments
+                        )
+                        .as_str(),
+                    );
+                    {
+                        let value_scope = scope.scope();
+                        value_scope.push_line("unsafe { &mut *self.value.get() }");
+                    }
+                    scope.push_line("}");
+                }
+                builder.push_line("}");
+
+                builder.push_line(
+                    format!(
+                        "impl{} std::ops::Deref for {}{}{} {{",
+                        generics, object_struct_name, generics_arguments, where_clause
+                    )
+                    .as_str(),
+                );
+                {
+                    let scope = builder.scope();
+                    scope.push_line(format!("type Target = {}{};", name, generics_arguments).as_str());
+                    scope.push_line("fn deref(&self) -> &Self::Target {");
+                    {
+                        let deref_scope = scope.scope();
+                        deref_scope.push_line("unsafe { &*self.value.get() }");
+                    }
+                    scope.push_line("}");
+                }
+                builder.push_line("}");
+
+                builder.push_line(
+                    format!(
+                        "impl{} std::ops::DerefMut for {}{}{} {{",
+                        generics, object_struct_name, generics_arguments, where_clause
+                    )
+                    .as_str(),
+                );
+                {
+                    let scope = builder.scope();
+                    scope.push_line("fn deref_mut(&mut self) -> &mut Self::Target {");
+                    {
+                        let deref_scope = scope.scope();
+                        deref_scope.push_line("unsafe { &mut *self.value.get() }");
+                    }
+                    scope.push_line("}");
+                }
+                builder.push_line("}");
+
+                builder.push_line(
+                    format!(
+                        "impl{} catla_std::dispose::Drop for {}{}{} {{",
+                        generics, object_struct_name, generics_arguments, where_clause
+                    )
+                    .as_str(),
+                );
+                {
+                    let scope = builder.scope();
+                    scope.push_line("fn drop(&self) {");
+                    {
+                        let drop_scope = scope.scope();
+                        drop_scope.push_line("let this = self;");
+
+                        if let Some(drop_impl_function) = drop_impl_function {
+                            if let Some(block) = &drop_impl_function.block {
+                                codegen_for_program(
+                                    block.program,
+                                    false,
+                                    type_infer_results,
+                                    lifetime_analyze_results,
+                                    user_type_set,
+                                    module_static_variables,
+                                    name_resolved_map,
+                                    module_entity_type_map,
+                                    &drop_scope,
+                                    current_crate_name,
+                                    stack_slot_counter,
+                                );
+                            }
+                        }
+                    }
+                    scope.push_line("}");
+                }
+                builder.push_line("}");
+
+                builder.push_line(
+                    format!(
+                        "impl{} catla_std::object::CatlaObject for {}{}{} {{",
+                        generics, object_struct_name, generics_arguments, where_clause
+                    )
+                    .as_str(),
+                );
+                {
+                    let scope = builder.scope();
+                    scope.push_line(format!("type Value = {}{};", name, generics_arguments).as_str());
+
+                    scope.push_line("fn new(value: Self::Value, mutex: bool, heap: bool, drop: bool) -> Self {");
+                    {
+                        let new_scope = scope.scope();
+                        new_scope.push_line("Self {");
+                        {
+                            let init_scope = new_scope.scope();
+                            init_scope.push_line("value: std::cell::UnsafeCell::new(value),");
+                            init_scope.push_line(
+                                "count_and_flags: std::cell::UnsafeCell::new(catla_std::object::init_count_and_flags(mutex, heap, drop)),",
+                            );
+                        }
+                        new_scope.push_line("}");
+                    }
+                    scope.push_line("}");
+
+                    scope.push_line("fn count_and_flags_ptr(&self) -> *mut usize {");
+                    {
+                        let ptr_scope = scope.scope();
+                        ptr_scope.push_line("self.count_and_flags.get()");
+                    }
+                    scope.push_line("}");
+
+                    scope.push_line("fn value_ptr(&self) -> *mut Self::Value {");
+                    {
+                        let ptr_scope = scope.scope();
+                        ptr_scope.push_line("self.value.get()");
+                    }
+                    scope.push_line("}");
+                }
+                builder.push_line("}");
             }
-            builder.push_line("}");
 
             builder.push_line(
                 format!(
@@ -652,6 +852,35 @@ fn codegen_user_type_define(
                 }
             }
             builder.push_line("}");
+
+            if user_type_define.kind.value == UserTypeKind::Class {
+                let object_struct_name = class_object_struct_name(name);
+                builder.push_line(
+                    format!(
+                        "impl{} {}{}{} {{",
+                        generics, object_struct_name, generics_arguments, where_clause
+                    )
+                    .as_str(),
+                );
+                {
+                    let scope = builder.scope();
+                    if let Ok(block) = &user_type_define.block {
+                        codegen_for_user_type_impl_program(
+                            block.program,
+                            type_infer_results,
+                            lifetime_analyze_results,
+                            user_type_set,
+                            module_static_variables,
+                            name_resolved_map,
+                            module_entity_type_map,
+                            &scope,
+                            current_crate_name,
+                            stack_slot_counter,
+                        );
+                    }
+                }
+                builder.push_line("}");
+            }
         }
     }
 }
@@ -689,6 +918,82 @@ fn codegen_for_user_type_impl_program(
             }
         }
     }
+}
+
+fn is_drop_interface_type_info(interface: &TypeInfo) -> bool {
+    let TypeInfoBase::Base(base_type_info) = &interface.base else {
+        return false;
+    };
+
+    base_type_info
+        .path
+        .last()
+        .map(|segment| segment.value == "Drop")
+        .unwrap_or(false)
+}
+
+fn concrete_class_name_from_implements<'a, 'input, 'allocator>(
+    implements: &'a catla_parser::ast::Implements<'input, 'allocator>,
+) -> Option<&'a str> {
+    let concrete = implements.concrete.as_ref().ok()?;
+    let TypeInfoBase::Base(base_type_info) = &concrete.base else {
+        return None;
+    };
+
+    base_type_info.path.last().map(|segment| segment.value)
+}
+
+fn is_drop_implements_statement(implements: &catla_parser::ast::Implements) -> bool {
+    let Some(interface) = implements.interface.as_ref().ok() else {
+        return false;
+    };
+
+    is_drop_interface_type_info(interface)
+}
+
+fn find_drop_function_for_class<'ast, 'input, 'allocator>(
+    program: &'ast Program<'input, 'allocator>,
+    class_name: &str,
+) -> Option<&'ast FunctionDefine<'input, 'allocator>> {
+    for statement in program.statements.iter() {
+        let Statement::Implements(implements) = &statement.statement else {
+            continue;
+        };
+
+        if !is_drop_implements_statement(implements) {
+            continue;
+        }
+
+        let Some(concrete_class_name) = concrete_class_name_from_implements(implements) else {
+            continue;
+        };
+
+        if concrete_class_name != class_name {
+            continue;
+        }
+
+        let Ok(block) = &implements.block else {
+            continue;
+        };
+
+        for statement in block.program.statements.iter() {
+            let Statement::DefineWithAttribute(define_with_attribute) = &statement.statement else {
+                continue;
+            };
+            let Ok(Define::Function(function_define)) = &define_with_attribute.define else {
+                continue;
+            };
+
+            let Some(function_name) = function_define.name.as_ref().ok() else {
+                continue;
+            };
+            if function_name.value == "drop" {
+                return Some(function_define);
+            }
+        }
+    }
+
+    None
 }
 
 fn collect_user_type_fields(
@@ -753,6 +1058,41 @@ fn collect_user_type_fields(
     }
 
     fields
+}
+
+fn codegen_type_alias_define(
+    in_impl_scope: bool,
+    define_with_attribute: &DefineWithAttribute,
+    type_alias: &TypeAlias,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    user_type_set: &GlobalUserTypeSet,
+    builder: &CodeBuilderScope,
+    current_crate_name: &str,
+) {
+    let public = !in_impl_scope
+        && !define_with_attribute
+            .attribute
+            .iter()
+            .any(|attribute| attribute.value == StatementAttribute::Private);
+    let visibility = if public { "pub " } else { "" };
+
+    let name = type_alias
+        .name
+        .as_ref()
+        .map(|name| name.value)
+        .unwrap_or_default();
+    let generics = type_alias
+        .generics
+        .as_ref()
+        .map(|generics| codegen_for_generics_define(generics, current_crate_name))
+        .unwrap_or_default();
+    let alias_type = type_alias
+        .alias_type
+        .as_ref()
+        .map(|ty| codegen_for_type(ty, type_infer_results, user_type_set, current_crate_name))
+        .unwrap_or_else(|_| "()".to_string());
+
+    builder.push_line(format!("{}type {}{} = {};", visibility, name, generics, alias_type).as_str());
 }
 
 fn codegen_function_define(
@@ -1046,7 +1386,9 @@ fn codegen_for_type(
     let declared_is_class = is_class_type_info(ast, user_type_set);
 
     if inferred_is_class || declared_is_class {
-        code = format!("catla_std::object::CatlaObjectRef<{}>", code);
+        let object_code = codegen_for_object_type_without_class_wrapper(ast, current_crate_name)
+            .unwrap_or(code);
+        code = format!("catla_std::object::CatlaObjectRef<{}>", object_code);
     }
 
     code
@@ -1099,6 +1441,56 @@ fn codegen_for_type_without_class_wrapper(ast: &TypeInfo, current_crate_name: &s
     code
 }
 
+fn class_object_struct_name(class_name: &str) -> String {
+    format!("__CatlaObject_{}", class_name)
+}
+
+fn codegen_for_object_type_without_class_wrapper(
+    ast: &TypeInfo,
+    current_crate_name: &str,
+) -> Option<String> {
+    let TypeInfoBase::Base(base_type_info) = &ast.base else {
+        return None;
+    };
+
+    let mut path = if base_type_info.path.len() == 1 {
+        vec![base_type_info.path[0].value.to_string()]
+    } else {
+        base_type_info
+            .path
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| {
+                if index == 0 {
+                    map_module_root(segment.value, current_crate_name)
+                } else {
+                    segment.value.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let Some(last) = path.last_mut() else {
+        return None;
+    };
+    *last = class_object_struct_name(last);
+
+    let mut code = path.join("::");
+    if let Some(generics) = &base_type_info.generics {
+        code += "<";
+        code += generics
+            .types
+            .iter()
+            .map(|generic| codegen_for_type_without_class_wrapper(generic, current_crate_name))
+            .collect::<Vec<_>>()
+            .join(", ")
+            .as_str();
+        code += ">";
+    }
+
+    Some(code)
+}
+
 fn codegen_for_inferred_type(
     ty: &Type,
     user_type_set: &GlobalUserTypeSet,
@@ -1132,7 +1524,10 @@ fn codegen_for_inferred_type(
                 .map(|kind| kind.value == UserTypeKind::Class)
                 .unwrap_or(false)
             {
-                format!("catla_std::object::CatlaObjectRef<{}>", type_name)
+                format!(
+                    "catla_std::object::CatlaObjectRef<{}>",
+                    class_object_struct_name(type_name.as_str())
+                )
             } else {
                 type_name
             }
@@ -1180,6 +1575,31 @@ fn is_class_type_info(type_info: &TypeInfo, user_type_set: &GlobalUserTypeSet) -
                 .map(|kind| kind.value == UserTypeKind::Class)
                 .unwrap_or(false)
     })
+}
+
+fn is_class_literal(
+    literal: &Spanned<&str>,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
+    user_type_set: &GlobalUserTypeSet,
+) -> bool {
+    if let Some(ty) = type_infer_results.get(&EntityID::from(literal)) {
+        return is_class_type(&ty.value, user_type_set);
+    }
+
+    let Some(resolved) = name_resolved_map.get(&EntityID::from(literal)) else {
+        return false;
+    };
+    if resolved.define.kind != DefineKind::UserType {
+        return false;
+    }
+
+    let Some(ty) = module_entity_type_map.get(&resolved.define.entity_id) else {
+        return false;
+    };
+
+    is_class_type(ty, user_type_set)
 }
 
 fn resolve_callee_function_type_for_literal<'a>(
@@ -1595,6 +2015,8 @@ fn codegen_assignment_left_expression(
     type_infer_results: &HashMap<EntityID, Spanned<Type>>,
     user_type_set: &GlobalUserTypeSet,
     module_static_variables: &HashMap<String, bool>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     current_crate_name: &str,
 ) -> Option<String> {
     let primary = extract_assignment_primary(expression)?;
@@ -1603,6 +2025,8 @@ fn codegen_assignment_left_expression(
         type_infer_results,
         user_type_set,
         module_static_variables,
+        name_resolved_map,
+        module_entity_type_map,
         current_crate_name,
     )
 }
@@ -1655,6 +2079,8 @@ fn codegen_assignment_left_primary(
     type_infer_results: &HashMap<EntityID, Spanned<Type>>,
     user_type_set: &GlobalUserTypeSet,
     module_static_variables: &HashMap<String, bool>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     current_crate_name: &str,
 ) -> Option<String> {
     let PrimaryLeftExpr::Simple {
@@ -1692,7 +2118,17 @@ fn codegen_assignment_left_primary(
     if is_mutable_static_root {
         code += format!("(*{}.write().unwrap())", literal.value).as_str();
     } else if starts_with_module_path {
-        code += map_module_root(literal.value, current_crate_name).as_str();
+        if is_class_literal(
+            literal,
+            type_infer_results,
+            name_resolved_map,
+            module_entity_type_map,
+            user_type_set,
+        ) {
+            code += class_object_struct_name(literal.value).as_str();
+        } else {
+            code += map_module_root(literal.value, current_crate_name).as_str();
+        }
     } else {
         code += literal.value;
     }
@@ -1722,7 +2158,19 @@ fn codegen_assignment_left_primary(
             return None;
         }
 
-        code += second.literal.value;
+        if primary_right.separator.value == PrimarySeparator::DoubleColon
+            && is_class_literal(
+                &second.literal,
+                type_infer_results,
+                name_resolved_map,
+                module_entity_type_map,
+                user_type_set,
+            )
+        {
+            code += class_object_struct_name(second.literal.value).as_str();
+        } else {
+            code += second.literal.value;
+        }
 
         let next_is_dot = primary
             .chain
@@ -2104,7 +2552,17 @@ fn codegen_for_primary(
                             code += format!("(*{})", literal.value).as_str();
                         }
                     } else if starts_with_module_path {
-                        code += map_module_root(literal.value, current_crate_name).as_str();
+                        if is_class_literal(
+                            literal,
+                            type_infer_results,
+                            name_resolved_map,
+                            module_entity_type_map,
+                            user_type_set,
+                        ) {
+                            code += class_object_struct_name(literal.value).as_str();
+                        } else {
+                            code += map_module_root(literal.value, current_crate_name).as_str();
+                        }
                     } else {
                         code += literal.value;
                     }
@@ -2173,7 +2631,19 @@ fn codegen_for_primary(
                 code += separator;
 
                 if let Some(second) = &primary_right.second {
-                    code += second.literal.value;
+                    if primary_right.separator.value == PrimarySeparator::DoubleColon
+                        && is_class_literal(
+                            &second.literal,
+                            type_infer_results,
+                            name_resolved_map,
+                            module_entity_type_map,
+                            user_type_set,
+                        )
+                    {
+                        code += class_object_struct_name(second.literal.value).as_str();
+                    } else {
+                        code += second.literal.value;
+                    }
 
                     if let Some(function_call) = &second.function_call {
                         let second_function_type = resolve_callee_function_type_for_literal(
@@ -2250,6 +2720,21 @@ fn codegen_for_primary(
                 })
                 .collect::<Vec<_>>()
                 .join("::");
+            let object_path = new_object
+                .path
+                .iter()
+                .enumerate()
+                .map(|(index, literal)| {
+                    if index == 0 && new_object.path.len() > 1 {
+                        map_module_root(literal.value, current_crate_name)
+                    } else if index + 1 == new_object.path.len() {
+                        class_object_struct_name(literal.value)
+                    } else {
+                        literal.value.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("::");
 
             let fields = new_object
                 .field_assign
@@ -2310,8 +2795,8 @@ fn codegen_for_primary(
                 if in_static_initializer
                 {
                     format!(
-                        "catla_std::object::CatlaObjectRef::heap({}, {}, {})",
-                        value, mutex_flag, requires_drop
+                        "catla_std::object::CatlaObjectRef::<{}>::heap({}, {}, {})",
+                        object_path, value, mutex_flag, requires_drop
                     )
                 } else if object_result
                     .map(|result| result.allocation == AllocationKind::Stack)
@@ -2319,19 +2804,19 @@ fn codegen_for_primary(
                 {
                     if let Some(slot_name) = stack_slots.get(&EntityID::from(new_object)) {
                         format!(
-                            "catla_std::object::CatlaObjectRef::stack({}, {}, &mut {})",
-                            value, requires_drop, slot_name
+                            "catla_std::object::CatlaObjectRef::<{}>::stack({}, {}, &mut {})",
+                            object_path, value, requires_drop, slot_name
                         )
                     } else {
                         format!(
-                            "catla_std::object::CatlaObjectRef::heap({}, {}, {})",
-                            value, mutex_flag, requires_drop
+                            "catla_std::object::CatlaObjectRef::<{}>::heap({}, {}, {})",
+                            object_path, value, mutex_flag, requires_drop
                         )
                     }
                 } else {
                     format!(
-                        "catla_std::object::CatlaObjectRef::heap({}, {}, {})",
-                        value, mutex_flag, requires_drop
+                        "catla_std::object::CatlaObjectRef::<{}>::heap({}, {}, {})",
+                        object_path, value, mutex_flag, requires_drop
                     )
                 }
             } else {

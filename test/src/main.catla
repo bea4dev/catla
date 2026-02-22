@@ -1,18 +1,32 @@
-class TestClass1 {
-    let field: TestClass2
+interface Nat {}
+
+class Zero {}
+implements Nat for Zero {}
+
+class Succ<N: Nat> {
+    let n: N
+}
+implements<N: Nat> Nat for Succ<N> {}
+
+interface Add<R: Nat, Answer: Nat> {
+    function add(let this, r: R) -> Answer;
+}
+implements<N: Nat> Add<N, N> for Zero {
+    function add(let this, r: N) -> N {}
+}
+implements<N: Nat, M: Nat, Sum: Nat> Add<N, Succ<Sum>> for Succ<M> where N: Add<M, Sum> {
+    function add(let this, r: N) -> Succ<Sum> {}
 }
 
-import std::dispose::Drop
-
-implements Drop for TestClass2 {
-    function drop(let this) {}
-}
-
-class TestClass2 {}
+type One = Succ<Zero>
+type Two = Succ<One>
+type Three = Succ<Two>
+type Four = Succ<Three>
 
 function main() {
-    let b = new TestClass2 {}
-    let a = new TestClass1 {
-        field: b
-    }
+    let zero = new Zero {}
+    let one = new One { n: zero }
+    let two = new Two { n: one }
+
+    let three = one.add(two)
 }

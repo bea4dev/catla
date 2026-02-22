@@ -678,6 +678,31 @@ async fn append_missing_pub_mods(
         }
     };
 
+    let is_catla_std_lib = source_path.file_name().and_then(|name| name.to_str()) == Some("lib.rs")
+        && source_path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            == Some("src")
+        && source_path
+            .parent()
+            .and_then(|parent| parent.parent())
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            == Some("catla_std");
+
+    if is_catla_std_lib
+        && !source
+            .lines()
+            .any(|line| line.trim() == "extern crate self as catla_std;")
+    {
+        if !source.is_empty() && !source.ends_with('\n') {
+            source.push('\n');
+        }
+
+        source += "extern crate self as catla_std;\n";
+    }
+
     let existing_modules = source
         .lines()
         .filter_map(|line| {

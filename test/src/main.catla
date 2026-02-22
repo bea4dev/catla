@@ -1,32 +1,28 @@
-interface Nat {}
+class A {}
 
-class Zero {}
-implements Nat for Zero {}
+static var global: A = new A {}
 
-class Succ<N: Nat> {
-    let n: N
-}
-implements<N: Nat> Nat for Succ<N> {}
-
-interface Add<R: Nat, Answer: Nat> {
-    function add(let this, r: R) -> Answer;
-}
-implements<N: Nat> Add<N, N> for Zero {
-    function add(let this, r: N) -> N {}
-}
-implements<N: Nat, M: Nat, Sum: Nat> Add<N, Succ<Sum>> for Succ<M> where N: Add<M, Sum> {
-    function add(let this, r: N) -> Succ<Sum> {}
+interface TestInterface {
+    function test(let this, a: A);
 }
 
-type One = Succ<Zero>
-type Two = Succ<One>
-type Three = Succ<Two>
-type Four = Succ<Three>
+class B {}
+class C {}
+
+implements TestInterface for B {
+    function test(let this, a: A) {}
+}
+implements TestInterface for C {
+    function test(let this, a: A) {
+        global = a
+    }
+}
 
 function main() {
-    let zero = new Zero {}
-    let one = new One { n: zero }
-    let two = new Two { n: one }
+    let a = new A {}
+    let b = new B {}
+    let c = new C {}
 
-    let three = one.add(two)
+    b.test(a)
+    c.test(a)
 }

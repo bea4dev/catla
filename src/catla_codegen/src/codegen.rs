@@ -203,7 +203,10 @@ pub(crate) fn codegen_for_program(
                             .generics
                             .as_ref()
                             .map(|generics| {
-                                codegen_for_generics_define(generics, current_crate_name)
+                                codegen_for_generics_define_with_static_bound(
+                                    generics,
+                                    current_crate_name,
+                                )
                             })
                             .unwrap_or_default(),
                         implements
@@ -276,9 +279,14 @@ fn codegen_for_implements_concrete_type(
     user_type_set: &GlobalUserTypeSet,
     current_crate_name: &str,
 ) -> String {
-    if is_class_type_info(ast, user_type_set) {
-        codegen_for_object_type_without_class_wrapper(ast, current_crate_name)
-            .unwrap_or_else(|| codegen_for_type_without_class_wrapper(ast, current_crate_name))
+    if is_class_type_info_or_inferred(ast, type_infer_results, user_type_set) {
+        codegen_for_object_type_without_class_wrapper(
+            ast,
+            type_infer_results,
+            user_type_set,
+            current_crate_name,
+        )
+        .unwrap_or_else(|| codegen_for_type_without_class_wrapper(ast, current_crate_name))
     } else {
         codegen_for_type(ast, type_infer_results, user_type_set, current_crate_name)
     }
@@ -518,6 +526,154 @@ fn codegen_for_interface_program(
     }
 }
 
+fn codegen_interface_ref_forward_impl(
+    user_type_define: &UserTypeDefine,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    user_type_set: &GlobalUserTypeSet,
+    builder: &CodeBuilderScope,
+    current_crate_name: &str,
+) {
+    if current_crate_name == "std" || current_crate_name == "catla_std" {
+        return;
+    }
+
+    let object_module_path = if current_crate_name == "catla_std" || current_crate_name == "std" {
+        "crate::object"
+    } else {
+        "catla_std::object"
+    };
+    let name = user_type_define
+        .name
+        .as_ref()
+        .map(|name| name.value)
+        .unwrap_or_default();
+    let trait_generics_define = user_type_define
+        .generics
+        .as_ref()
+        .map(|generics| codegen_for_generics_define(generics, current_crate_name))
+        .unwrap_or_default();
+    let trait_generics_arguments = user_type_define
+        .generics
+        .as_ref()
+        .map(codegen_for_generics_arguments)
+        .unwrap_or_default();
+
+    let impl_generics = if trait_generics_define.is_empty() {
+        format!("<T: {}::CatlaObject>", object_module_path)
+    } else {
+        let trait_generics_inner =
+            &trait_generics_define[1..trait_generics_define.len() - 1];
+        format!(
+            "<T: {}::CatlaObject, {}>",
+            object_module_path, trait_generics_inner
+        )
+    };
+
+    let mut where_elements = vec![format!("T: {}{}", name, trait_generics_arguments)];
+    if let Some(where_clause) = user_type_define.where_clause.as_ref() {
+        where_elements.push(
+            codegen_for_where_clause(
+                where_clause,
+                type_infer_results,
+                user_type_set,
+                current_crate_name,
+            )
+            .trim_start_matches("where ")
+            .to_string(),
+        );
+    }
+    let where_clause = if where_elements.is_empty() {
+        String::new()
+    } else {
+        format!(" where {}", where_elements.join(", "))
+    };
+
+    builder.push_line(
+        format!(
+            "impl{} {}{} for {}::CatlaObjectRef<T>{} {{",
+            impl_generics, name, trait_generics_arguments, object_module_path, where_clause
+        )
+        .as_str(),
+    );
+
+    {
+        let scope = builder.scope();
+
+        if let Ok(block) = &user_type_define.block {
+            for statement in block.program.statements.iter() {
+                let Statement::DefineWithAttribute(define_with_attribute) = &statement.statement else {
+                    continue;
+                };
+                let Ok(Define::Function(function_define)) = &define_with_attribute.define else {
+                    continue;
+                };
+
+                let signature = codegen_for_function_signature(
+                    function_define,
+                    type_infer_results,
+                    user_type_set,
+                    current_crate_name,
+                );
+                scope.push_line(format!("{} {{", signature).as_str());
+                {
+                    let function_scope = scope.scope();
+
+                    let Some(function_name) = function_define.name.as_ref().ok().map(|name| name.value) else {
+                        function_scope.push_line("todo!()");
+                        scope.push_line("}");
+                        continue;
+                    };
+
+                    let arguments = function_define
+                        .arguments
+                        .as_ref()
+                        .ok()
+                        .map(|function_arguments| {
+                            function_arguments
+                                .arguments
+                                .iter()
+                                .map(|argument| codegen_for_variable_binding(&argument.binding))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    let has_this = function_define
+                        .arguments
+                        .as_ref()
+                        .ok()
+                        .map(|function_arguments| function_arguments.this_mutability.is_some())
+                        .unwrap_or(false);
+
+                    let call_expression = if has_this {
+                        let mut call_arguments =
+                            vec!["std::ops::Deref::deref(self)".to_string()];
+                        call_arguments.extend(arguments);
+                        format!(
+                            "<T as {}{}>::{}({})",
+                            name,
+                            trait_generics_arguments,
+                            function_name,
+                            call_arguments.join(", ")
+                        )
+                    } else {
+                        format!(
+                            "<T as {}{}>::{}({})",
+                            name,
+                            trait_generics_arguments,
+                            function_name,
+                            arguments.join(", ")
+                        )
+                    };
+
+                    function_scope.push_line(call_expression.as_str());
+                }
+                scope.push_line("}");
+            }
+        }
+    }
+
+    builder.push_line("}");
+}
+
 fn codegen_user_type_define(
     in_impl_scope: bool,
     source_program: &Program,
@@ -620,6 +776,14 @@ fn codegen_user_type_define(
             }
 
             builder.push_line("}");
+
+            codegen_interface_ref_forward_impl(
+                user_type_define,
+                type_infer_results,
+                user_type_set,
+                builder,
+                current_crate_name,
+            );
         }
         UserTypeKind::Class | UserTypeKind::Struct => {
             if user_type_define.kind.value == UserTypeKind::Struct {
@@ -645,6 +809,20 @@ fn codegen_user_type_define(
                 }
             }
             builder.push_line("}");
+
+            if user_type_define.kind.value == UserTypeKind::Class {
+                builder.push_line(
+                    format!(
+                        "{}type {}{} = {}{};",
+                        visibility,
+                        class_value_type_alias_name(name),
+                        generics,
+                        name,
+                        generics_arguments
+                    )
+                    .as_str(),
+                );
+            }
 
             if user_type_define.kind.value == UserTypeKind::Class {
                 let object_struct_name = class_object_struct_name(name);
@@ -784,10 +962,17 @@ fn codegen_user_type_define(
                 }
                 builder.push_line("}");
 
+                let catla_object_impl_generics = user_type_define
+                    .generics
+                    .as_ref()
+                    .map(|generics| {
+                        codegen_for_generics_define_with_static_bound(generics, current_crate_name)
+                    })
+                    .unwrap_or_default();
                 builder.push_line(
                     format!(
                         "impl{} catla_std::object::CatlaObject for {}{}{} {{",
-                        generics, object_struct_name, generics_arguments, where_clause
+                        catla_object_impl_generics, object_struct_name, generics_arguments, where_clause
                     )
                     .as_str(),
                 );
@@ -1093,6 +1278,45 @@ fn codegen_type_alias_define(
         .unwrap_or_else(|_| "()".to_string());
 
     builder.push_line(format!("{}type {}{} = {};", visibility, name, generics, alias_type).as_str());
+
+    if let Ok(alias_type_info) = &type_alias.alias_type {
+        if is_class_type_info_or_inferred(alias_type_info, type_infer_results, user_type_set) {
+            let value_alias_type = codegen_for_type_without_class_wrapper_nested(
+                alias_type_info,
+                type_infer_results,
+                user_type_set,
+                current_crate_name,
+            );
+            builder.push_line(
+                format!(
+                    "{}type {}{} = {};",
+                    visibility,
+                    class_value_type_alias_name(name),
+                    generics,
+                    value_alias_type
+                )
+                .as_str(),
+            );
+
+            if let Some(object_alias_type) = codegen_for_object_type_without_class_wrapper(
+                alias_type_info,
+                type_infer_results,
+                user_type_set,
+                current_crate_name,
+            ) {
+                builder.push_line(
+                    format!(
+                        "{}type {}{} = {};",
+                        visibility,
+                        class_object_struct_name(name),
+                        generics,
+                        object_alias_type
+                    )
+                    .as_str(),
+                );
+            }
+        }
+    }
 }
 
 fn codegen_function_define(
@@ -1311,6 +1535,41 @@ fn codegen_for_generics_define(ast: &GenericsDefine, current_crate_name: &str) -
     code
 }
 
+fn codegen_for_generics_define_with_static_bound(
+    ast: &GenericsDefine,
+    current_crate_name: &str,
+) -> String {
+    let mut code = String::new();
+    code += "<";
+
+    code += ast
+        .elements
+        .iter()
+        .map(|element| {
+            if element.bounds.is_empty() {
+                format!("{}: 'static", element.name.value)
+            } else {
+                format!(
+                    "{}: {} + 'static",
+                    element.name.value,
+                    element
+                        .bounds
+                        .iter()
+                        .map(|bound| codegen_for_type_without_class_wrapper(bound, current_crate_name))
+                        .collect::<Vec<_>>()
+                        .join(" + ")
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+        .as_str();
+
+    code += ">";
+
+    code
+}
+
 fn codegen_for_generics_arguments(ast: &GenericsDefine) -> String {
     format!(
         "<{}>",
@@ -1367,7 +1626,12 @@ fn codegen_for_type(
     user_type_set: &GlobalUserTypeSet,
     current_crate_name: &str,
 ) -> String {
-    let mut code = codegen_for_type_without_class_wrapper(ast, current_crate_name);
+    let mut code = codegen_for_type_without_class_wrapper_nested(
+        ast,
+        type_infer_results,
+        user_type_set,
+        current_crate_name,
+    );
 
     for attribute in ast.attributes.iter() {
         match attribute {
@@ -1379,14 +1643,13 @@ fn codegen_for_type(
         }
     }
 
-    let inferred_is_class = type_infer_results
-        .get(&EntityID::from(ast))
-        .map(|ty| is_class_type(&ty.value, user_type_set))
-        .unwrap_or(false);
-    let declared_is_class = is_class_type_info(ast, user_type_set);
-
-    if inferred_is_class || declared_is_class {
-        let object_code = codegen_for_object_type_without_class_wrapper(ast, current_crate_name)
+    if is_class_type_info_or_inferred(ast, type_infer_results, user_type_set) {
+        let object_code = codegen_for_object_type_without_class_wrapper(
+            ast,
+            type_infer_results,
+            user_type_set,
+            current_crate_name,
+        )
             .unwrap_or(code);
         code = format!("catla_std::object::CatlaObjectRef<{}>", object_code);
     }
@@ -1441,12 +1704,77 @@ fn codegen_for_type_without_class_wrapper(ast: &TypeInfo, current_crate_name: &s
     code
 }
 
+fn codegen_for_type_without_class_wrapper_nested(
+    ast: &TypeInfo,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    user_type_set: &GlobalUserTypeSet,
+    current_crate_name: &str,
+) -> String {
+    let mut code = String::new();
+
+    match &ast.base {
+        TypeInfoBase::Array(_array_type_info) => todo!(),
+        TypeInfoBase::Base(base_type_info) => {
+            if base_type_info.path.len() == 1 {
+                if let Some(mapped) = map_catla_builtin_type(base_type_info.path[0].value) {
+                    code += mapped;
+                } else {
+                    code += base_type_info.path[0].value;
+                }
+            } else {
+                code += base_type_info
+                    .path
+                    .iter()
+                    .enumerate()
+                    .map(|(index, path)| {
+                        if index == 0 {
+                            map_module_root(path.value, current_crate_name)
+                        } else {
+                            path.value.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("::")
+                    .as_str();
+            }
+            if let Some(generics) = &base_type_info.generics {
+                code += "<";
+                code += generics
+                    .types
+                    .iter()
+                    .map(|generic| {
+                        codegen_for_type(
+                            generic,
+                            type_infer_results,
+                            user_type_set,
+                            current_crate_name,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+                    .as_str();
+                code += ">";
+            }
+        }
+        TypeInfoBase::Tuple(_tuple_type_info) => todo!(),
+        TypeInfoBase::This(_) => code += "Self",
+    }
+
+    code
+}
+
 fn class_object_struct_name(class_name: &str) -> String {
     format!("__CatlaObject_{}", class_name)
 }
 
+fn class_value_type_alias_name(class_name: &str) -> String {
+    format!("__CatlaValue_{}", class_name)
+}
+
 fn codegen_for_object_type_without_class_wrapper(
     ast: &TypeInfo,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    user_type_set: &GlobalUserTypeSet,
     current_crate_name: &str,
 ) -> Option<String> {
     let TypeInfoBase::Base(base_type_info) = &ast.base else {
@@ -1481,7 +1809,14 @@ fn codegen_for_object_type_without_class_wrapper(
         code += generics
             .types
             .iter()
-            .map(|generic| codegen_for_type_without_class_wrapper(generic, current_crate_name))
+            .map(|generic| {
+                codegen_for_type(
+                    generic,
+                    type_infer_results,
+                    user_type_set,
+                    current_crate_name,
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ")
             .as_str();
@@ -1575,6 +1910,22 @@ fn is_class_type_info(type_info: &TypeInfo, user_type_set: &GlobalUserTypeSet) -
                 .map(|kind| kind.value == UserTypeKind::Class)
                 .unwrap_or(false)
     })
+}
+
+fn is_class_type_info_or_inferred(
+    type_info: &TypeInfo,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    user_type_set: &GlobalUserTypeSet,
+) -> bool {
+    if type_infer_results
+        .get(&EntityID::from(type_info))
+        .map(|ty| is_class_type(&ty.value, user_type_set))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    is_class_type_info(type_info, user_type_set)
 }
 
 fn is_class_literal(
@@ -2735,6 +3086,21 @@ fn codegen_for_primary(
                 })
                 .collect::<Vec<_>>()
                 .join("::");
+            let class_value_path = new_object
+                .path
+                .iter()
+                .enumerate()
+                .map(|(index, literal)| {
+                    if index == 0 && new_object.path.len() > 1 {
+                        map_module_root(literal.value, current_crate_name)
+                    } else if index + 1 == new_object.path.len() {
+                        class_value_type_alias_name(literal.value)
+                    } else {
+                        literal.value.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("::");
 
             let fields = new_object
                 .field_assign
@@ -2762,12 +3128,6 @@ fn codegen_for_primary(
                 })
                 .collect::<Vec<_>>();
 
-            let value = if fields.is_empty() {
-                format!("{} {{}}", path)
-            } else {
-                format!("{} {{ {} }}", path, fields.join(", "))
-            };
-
             let is_class = type_infer_results
                 .get(&EntityID::from(new_object))
                 .map(|ty| {
@@ -2785,6 +3145,17 @@ fn codegen_for_primary(
                     }
                 })
                 .unwrap_or(true);
+            let value = if is_class {
+                if fields.is_empty() {
+                    format!("{} {{}}", class_value_path)
+                } else {
+                    format!("{} {{ {} }}", class_value_path, fields.join(", "))
+                }
+            } else if fields.is_empty() {
+                format!("{} {{}}", path)
+            } else {
+                format!("{} {{ {} }}", path, fields.join(", "))
+            };
 
             let object_result = lifetime_analyze_results
                 .and_then(|results| results.object_result(EntityID::from(new_object)));

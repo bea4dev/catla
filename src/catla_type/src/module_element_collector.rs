@@ -136,6 +136,13 @@ pub fn collect_module_element_type_for_program(
                                 errors,
                             );
                             let function_type = Arc::new(function_type);
+                            let function_type = Type::Function {
+                                function_info: function_type,
+                                generics: Arc::new(Vec::new()),
+                            };
+
+                            module_element_entity_type_map
+                                .insert(function_define.into(), function_type.clone());
 
                             match element_type_holder {
                                 Some(element_type_holder) => {
@@ -143,10 +150,7 @@ pub fn collect_module_element_type_for_program(
                                         element_type_holder.insert(
                                             name.value.to_string(),
                                             Spanned::new(
-                                                Type::Function {
-                                                    function_info: function_type,
-                                                    generics: Arc::new(Vec::new()),
-                                                },
+                                                function_type.clone(),
                                                 name.span.clone(),
                                             ),
                                         );
@@ -154,20 +158,8 @@ pub fn collect_module_element_type_for_program(
                                 }
                                 None => {
                                     if let Ok(name) = &function_define.name {
-                                        module_element_name_type_map.insert(
-                                            name.value.to_string(),
-                                            Type::Function {
-                                                function_info: function_type.clone(),
-                                                generics: Arc::new(Vec::new()),
-                                            },
-                                        );
-                                        module_element_entity_type_map.insert(
-                                            function_define.into(),
-                                            Type::Function {
-                                                function_info: function_type,
-                                                generics: Arc::new(Vec::new()),
-                                            },
-                                        );
+                                        module_element_name_type_map
+                                            .insert(name.value.to_string(), function_type.clone());
                                     }
                                 }
                             }

@@ -105,6 +105,7 @@ pub fn evaluate_lifetime_sources(
     }
 
     let interface_adjacency = build_interface_adjacency(global_implements_infos, user_type_set);
+    let concrete_method_symbols = collect_concrete_method_symbols(global_implements_infos);
     let drop_required_user_types = collect_drop_required_user_types_for_sources(
         module_sources,
         user_type_set,
@@ -118,6 +119,7 @@ pub fn evaluate_lifetime_sources(
             .or_insert_with(|| FunctionSummary {
                 parameter_escape: vec![false; definition.parameter_count],
                 parameter_constraints: HashSet::new(),
+                returns_object: false,
             });
     }
 
@@ -135,11 +137,14 @@ pub fn evaluate_lifetime_sources(
             let local_summary = analyze_function_summary(
                 definition,
                 &source.name_resolved_map,
+                &source.type_infer_results,
                 &symbol_by_entity,
                 &symbols_by_name,
+                &source.module_entity_type_map,
                 user_type_set,
                 &summaries,
                 &interface_adjacency,
+                &concrete_method_symbols,
                 &drop_required_user_types,
             );
 
@@ -148,6 +153,7 @@ pub fn evaluate_lifetime_sources(
                 .or_insert_with(|| FunctionSummary {
                     parameter_escape: vec![false; definition.parameter_count],
                     parameter_constraints: HashSet::new(),
+                    returns_object: false,
                 });
 
             if entry.parameter_escape.len() < local_summary.parameter_escape.len() {
@@ -169,6 +175,11 @@ pub fn evaluate_lifetime_sources(
                     changed = true;
                 }
             }
+
+            if local_summary.returns_object && !entry.returns_object {
+                entry.returns_object = true;
+                changed = true;
+            }
         }
     }
 
@@ -184,6 +195,7 @@ pub fn evaluate_lifetime_sources(
         let Some(module_result) = results.get_mut(&definition.module_name) else {
             continue;
         };
+        let mut origin_user_types = HashMap::new();
 
         let mut context = AnalyzerContext {
             name_resolved_map: &source.name_resolved_map,
@@ -191,13 +203,15 @@ pub fn evaluate_lifetime_sources(
             module_entity_type_map: &source.module_entity_type_map,
             user_type_set,
             symbol_by_entity: &symbol_by_entity,
-            symbols_by_name: &symbols_by_name,
+            _symbols_by_name: &symbols_by_name,
             summaries: &summaries,
             interface_adjacency: &interface_adjacency,
+            concrete_method_symbols: &concrete_method_symbols,
             drop_required_user_types: &drop_required_user_types,
             call_argument_borrow: &mut module_result.call_argument_borrow,
             object_results: &mut module_result.object_results,
             variable_origins: &mut module_result.variable_origins,
+            origin_user_types: &mut origin_user_types,
         };
 
         analyze_function_with_final_summary(definition, &mut context);
@@ -207,6 +221,7 @@ pub fn evaluate_lifetime_sources(
         let Some(module_result) = results.get_mut(module_name) else {
             continue;
         };
+        let mut origin_user_types = HashMap::new();
 
         let mut context = AnalyzerContext {
             name_resolved_map: &source.name_resolved_map,
@@ -214,13 +229,15 @@ pub fn evaluate_lifetime_sources(
             module_entity_type_map: &source.module_entity_type_map,
             user_type_set,
             symbol_by_entity: &symbol_by_entity,
-            symbols_by_name: &symbols_by_name,
+            _symbols_by_name: &symbols_by_name,
             summaries: &summaries,
             interface_adjacency: &interface_adjacency,
+            concrete_method_symbols: &concrete_method_symbols,
             drop_required_user_types: &drop_required_user_types,
             call_argument_borrow: &mut module_result.call_argument_borrow,
             object_results: &mut module_result.object_results,
             variable_origins: &mut module_result.variable_origins,
+            origin_user_types: &mut origin_user_types,
         };
 
         analyze_module_level_roots(source.ast.ast(), &mut context);
@@ -240,6 +257,7 @@ struct FunctionSymbol {
 struct FunctionSummary {
     parameter_escape: Vec<bool>,
     parameter_constraints: HashSet<(usize, usize)>,
+    returns_object: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -252,6 +270,7 @@ struct ParameterBinding {
 struct FunctionDefinition<'ast, 'input, 'allocator> {
     module_name: String,
     symbol: FunctionSymbol,
+    function_entity: EntityID,
     ast: &'ast FunctionDefine<'input, 'allocator>,
     parameter_bindings: Vec<ParameterBinding>,
     parameter_count: usize,
@@ -460,13 +479,15 @@ struct AnalyzerContext<'a> {
     module_entity_type_map: &'a HashMap<EntityID, Type>,
     user_type_set: &'a GlobalUserTypeSet,
     symbol_by_entity: &'a HashMap<EntityID, FunctionSymbol>,
-    symbols_by_name: &'a HashMap<String, Vec<FunctionSymbol>>,
+    _symbols_by_name: &'a HashMap<String, Vec<FunctionSymbol>>,
     summaries: &'a HashMap<FunctionSymbol, FunctionSummary>,
     interface_adjacency: &'a HashMap<FunctionSymbol, HashSet<FunctionSymbol>>,
+    concrete_method_symbols: &'a HashMap<GlobalUserTypeID, Vec<FunctionSymbol>>,
     drop_required_user_types: &'a HashSet<GlobalUserTypeID>,
     call_argument_borrow: &'a mut HashMap<EntityID, bool>,
     object_results: &'a mut HashMap<EntityID, LifetimeAnalyzeResult>,
     variable_origins: &'a mut HashMap<EntityID, HashSet<EntityID>>,
+    origin_user_types: &'a mut HashMap<EntityID, GlobalUserTypeID>,
 }
 
 pub fn analyze_lifetime<'input, 'allocator>(
@@ -481,6 +502,7 @@ pub fn analyze_lifetime<'input, 'allocator>(
         collect_function_definitions("__single__", ast, module_entity_type_map);
 
     let interface_adjacency = build_interface_adjacency(global_implements_infos, user_type_set);
+    let concrete_method_symbols = collect_concrete_method_symbols(global_implements_infos);
     let drop_required_user_types = collect_drop_required_user_types_for_module(
         module_entity_type_map,
         user_type_set,
@@ -494,6 +516,7 @@ pub fn analyze_lifetime<'input, 'allocator>(
             .or_insert_with(|| FunctionSummary {
                 parameter_escape: vec![false; definition.parameter_count],
                 parameter_constraints: HashSet::new(),
+                returns_object: false,
             });
     }
 
@@ -507,11 +530,14 @@ pub fn analyze_lifetime<'input, 'allocator>(
             let local_summary = analyze_function_summary(
                 definition,
                 name_resolved_map,
+                type_infer_results,
                 &symbol_by_entity,
                 &symbols_by_name,
+                module_entity_type_map,
                 user_type_set,
                 &summaries,
                 &interface_adjacency,
+                &concrete_method_symbols,
                 &drop_required_user_types,
             );
 
@@ -520,6 +546,7 @@ pub fn analyze_lifetime<'input, 'allocator>(
                 .or_insert_with(|| FunctionSummary {
                     parameter_escape: vec![false; definition.parameter_count],
                     parameter_constraints: HashSet::new(),
+                    returns_object: false,
                 });
 
             if entry.parameter_escape.len() < local_summary.parameter_escape.len() {
@@ -541,10 +568,16 @@ pub fn analyze_lifetime<'input, 'allocator>(
                     changed = true;
                 }
             }
+
+            if local_summary.returns_object && !entry.returns_object {
+                entry.returns_object = true;
+                changed = true;
+            }
         }
     }
 
     let mut results = LifetimeAnalyzeResults::new();
+    let mut origin_user_types = HashMap::new();
 
     {
         let mut context = AnalyzerContext {
@@ -553,13 +586,15 @@ pub fn analyze_lifetime<'input, 'allocator>(
             module_entity_type_map,
             user_type_set,
             symbol_by_entity: &symbol_by_entity,
-            symbols_by_name: &symbols_by_name,
+            _symbols_by_name: &symbols_by_name,
             summaries: &summaries,
             interface_adjacency: &interface_adjacency,
+            concrete_method_symbols: &concrete_method_symbols,
             drop_required_user_types: &drop_required_user_types,
             call_argument_borrow: &mut results.call_argument_borrow,
             object_results: &mut results.object_results,
             variable_origins: &mut results.variable_origins,
+            origin_user_types: &mut origin_user_types,
         };
 
         for definition in definitions.iter() {
@@ -593,9 +628,6 @@ fn collect_function_definitions<'ast, 'input, 'allocator>(
         symbols_by_name: &mut HashMap<String, Vec<FunctionSymbol>>,
     ) {
         let function_entity = EntityID::from(function_define);
-        let Some(symbol) = function_symbol_for_entity(function_entity, module_entity_type_map) else {
-            return;
-        };
 
         let parameter_bindings = collect_parameter_bindings(function_define);
         let parameter_count = function_define
@@ -606,6 +638,10 @@ fn collect_function_definitions<'ast, 'input, 'allocator>(
             })
             .unwrap_or(0);
 
+        let Some(symbol) = function_symbol_for_entity(function_entity, module_entity_type_map) else {
+            return;
+        };
+
         symbol_by_entity.insert(function_entity, symbol.clone());
         symbols_by_name
             .entry(symbol.name.clone())
@@ -615,6 +651,7 @@ fn collect_function_definitions<'ast, 'input, 'allocator>(
         definitions.push(FunctionDefinition {
             module_name: module_name.to_string(),
             symbol,
+            function_entity,
             ast: function_define,
             parameter_bindings,
             parameter_count,
@@ -740,7 +777,7 @@ fn function_symbol_from_type(ty: &Type) -> Option<FunctionSymbol> {
         return None;
     };
 
-    let name = function_info.name.as_ref()?.value.clone();
+    let name = function_info.name.as_ref()?.value.to_string();
 
     Some(FunctionSymbol {
         module_path: function_info.module_path.path_name.to_string(),
@@ -807,32 +844,76 @@ fn build_interface_adjacency(
     adjacency
 }
 
+fn collect_concrete_method_symbols(
+    global_implements_infos: &ImplementsInfoSet,
+) -> HashMap<GlobalUserTypeID, Vec<FunctionSymbol>> {
+    let mut concrete_method_symbols = HashMap::<GlobalUserTypeID, Vec<FunctionSymbol>>::new();
+
+    for implements_info in global_implements_infos.all_infos().into_iter() {
+        if implements_info.is_instant {
+            continue;
+        }
+
+        let Type::UserType {
+            user_type_info: concrete_user_type_id,
+            generics: _,
+        } = &implements_info.concrete.value
+        else {
+            continue;
+        };
+
+        for impl_type in implements_info.element_type.values() {
+            let Some(symbol) = function_symbol_from_type(&impl_type.value) else {
+                continue;
+            };
+
+            concrete_method_symbols
+                .entry(*concrete_user_type_id)
+                .or_default()
+                .push(symbol);
+        }
+    }
+
+    for symbols in concrete_method_symbols.values_mut() {
+        let mut dedup = HashSet::new();
+        symbols.retain(|symbol| dedup.insert(symbol.clone()));
+    }
+
+    concrete_method_symbols
+}
+
 fn analyze_function_summary<'ast, 'input, 'allocator>(
     definition: &FunctionDefinition<'ast, 'input, 'allocator>,
     name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    type_infer_results: &HashMap<EntityID, catla_parser::ast::Spanned<Type>>,
     symbol_by_entity: &HashMap<EntityID, FunctionSymbol>,
     symbols_by_name: &HashMap<String, Vec<FunctionSymbol>>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     user_type_set: &GlobalUserTypeSet,
     summaries: &HashMap<FunctionSymbol, FunctionSummary>,
     interface_adjacency: &HashMap<FunctionSymbol, HashSet<FunctionSymbol>>,
+    concrete_method_symbols: &HashMap<GlobalUserTypeID, Vec<FunctionSymbol>>,
     drop_required_user_types: &HashSet<GlobalUserTypeID>,
 ) -> FunctionSummary {
     let mut object_results = HashMap::new();
     let mut call_argument_borrow = HashMap::new();
     let mut variable_origins = HashMap::new();
+    let mut origin_user_types = HashMap::new();
     let mut context = AnalyzerContext {
         name_resolved_map,
-        type_infer_results: &HashMap::new(),
-        module_entity_type_map: &HashMap::new(),
+        type_infer_results,
+        module_entity_type_map,
         user_type_set,
         symbol_by_entity,
-        symbols_by_name,
+        _symbols_by_name: symbols_by_name,
         summaries,
         interface_adjacency,
+        concrete_method_symbols,
         drop_required_user_types,
         call_argument_borrow: &mut call_argument_borrow,
         object_results: &mut object_results,
         variable_origins: &mut variable_origins,
+        origin_user_types: &mut origin_user_types,
     };
 
     let mut state = FunctionState::new(definition.parameter_count);
@@ -863,7 +944,23 @@ fn analyze_function_summary<'ast, 'input, 'allocator>(
     FunctionSummary {
         parameter_escape: state.parameter_escape,
         parameter_constraints: state.parameter_constraints,
+        returns_object: function_returns_object(definition, module_entity_type_map, user_type_set),
     }
+}
+
+fn function_returns_object(
+    definition: &FunctionDefinition,
+    module_entity_type_map: &HashMap<EntityID, Type>,
+    user_type_set: &GlobalUserTypeSet,
+) -> bool {
+    let Some(function_type) = module_entity_type_map.get(&definition.function_entity) else {
+        return false;
+    };
+    let Type::Function { function_info, .. } = function_type else {
+        return false;
+    };
+
+    is_class_type(&function_info.return_type.value, user_type_set)
 }
 
 fn analyze_function_with_final_summary<'ast, 'input, 'allocator>(
@@ -1322,7 +1419,12 @@ fn analyze_primary(
                     second.literal.value,
                     function_call.arguments.len(),
                     is_method_call,
-                    None,
+                    Some(&second.literal),
+                    if is_method_call {
+                        Some(&current_flow)
+                    } else {
+                        None
+                    },
                     context,
                 );
 
@@ -1367,7 +1469,24 @@ fn analyze_primary(
                     }
                 }
 
-                current_flow = ExprFlow::default();
+                let mut return_flow = ExprFlow::default();
+                if merged_return_object(
+                    &candidates,
+                    context.summaries,
+                    context.interface_adjacency,
+                ) {
+                    let return_origin = EntityID::from(function_call);
+                    return_flow.origins.insert(return_origin);
+                    context
+                        .object_results
+                        .entry(return_origin)
+                        .or_insert(LifetimeAnalyzeResult {
+                            allocation: AllocationKind::Heap,
+                            requires_drop: false,
+                        });
+                }
+
+                current_flow = return_flow;
             }
         }
     }
@@ -1449,6 +1568,7 @@ fn analyze_primary_left(
                                 catla_parser::ast::SimplePrimary::Literal(literal) => Some(literal),
                                 _ => None,
                             },
+                            None,
                             context,
                         )
                     })
@@ -1493,7 +1613,24 @@ fn analyze_primary_left(
                     }
                 }
 
-                base_flow = ExprFlow::default();
+                let mut return_flow = ExprFlow::default();
+                if merged_return_object(
+                    &candidates,
+                    context.summaries,
+                    context.interface_adjacency,
+                ) {
+                    let return_origin = EntityID::from(function_call);
+                    return_flow.origins.insert(return_origin);
+                    context
+                        .object_results
+                        .entry(return_origin)
+                        .or_insert(LifetimeAnalyzeResult {
+                            allocation: AllocationKind::Heap,
+                            requires_drop: false,
+                        });
+                }
+
+                base_flow = return_flow;
             }
 
             if escape_context {
@@ -1514,10 +1651,16 @@ fn analyze_primary_left(
             let new_object_entity = EntityID::from(new_object);
 
             if is_class_new_object(new_object, context) {
-                let requires_drop = new_object
+                let concrete_user_type = new_object
                     .path
                     .first()
                     .and_then(|_| resolve_new_object_user_type(new_object, context))
+                    .inspect(|user_type_id| {
+                        context
+                            .origin_user_types
+                            .insert(new_object_entity, *user_type_id);
+                    });
+                let requires_drop = concrete_user_type
                     .map(|user_type_id| context.drop_required_user_types.contains(&user_type_id))
                     .unwrap_or(false);
 
@@ -1941,6 +2084,28 @@ fn merged_parameter_constraints(
     merged
 }
 
+fn merged_return_object(
+    candidates: &[FunctionSymbol],
+    summaries: &HashMap<FunctionSymbol, FunctionSummary>,
+    interface_adjacency: &HashMap<FunctionSymbol, HashSet<FunctionSymbol>>,
+) -> bool {
+    for candidate in candidates.iter() {
+        let closure = equivalent_symbols(candidate, interface_adjacency);
+
+        for symbol in closure.iter() {
+            let Some(summary) = summaries.get(symbol) else {
+                continue;
+            };
+
+            if summary.returns_object {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 fn equivalent_symbols(
     symbol: &FunctionSymbol,
     interface_adjacency: &HashMap<FunctionSymbol, HashSet<FunctionSymbol>>,
@@ -1970,35 +2135,68 @@ fn resolve_call_candidates(
     argument_count: usize,
     is_method_call: bool,
     literal: Option<&catla_parser::ast::Spanned<&str>>,
+    receiver_flow: Option<&ExprFlow>,
     context: &AnalyzerContext,
 ) -> Vec<FunctionSymbol> {
-    if !is_method_call {
-        if let Some(literal) = literal {
-            if let Some(resolved) = context.name_resolved_map.get(&EntityID::from(literal)) {
-                if resolved.define.kind == DefineKind::Function {
-                    if let Some(symbol) = context.symbol_by_entity.get(&resolved.define.entity_id) {
-                        return vec![symbol.clone()];
-                    }
+    if let Some(literal) = literal {
+        if let Some(resolved) = context.name_resolved_map.get(&EntityID::from(literal)) {
+            if resolved.define.kind == DefineKind::Function {
+                if let Some(symbol) = context.symbol_by_entity.get(&resolved.define.entity_id) {
+                    return vec![symbol.clone()];
                 }
             }
         }
     }
 
-    let Some(candidates) = context.symbols_by_name.get(call_name) else {
-        return Vec::new();
-    };
+    if is_method_call {
+        let mut concrete_candidates = Vec::new();
 
-    candidates
-        .iter()
-        .filter(|symbol| {
-            if is_method_call {
-                symbol.arity == argument_count || symbol.arity == argument_count + 1
-            } else {
-                symbol.arity == argument_count
+        if let Some(receiver_flow) = receiver_flow {
+            let mut receiver_user_types = HashSet::<GlobalUserTypeID>::new();
+
+            for origin in receiver_flow.origins.iter().copied() {
+                if let Some(user_type_id) = context.origin_user_types.get(&origin) {
+                    receiver_user_types.insert(*user_type_id);
+                    continue;
+                }
+
+                let Some(inferred_type) = context.type_infer_results.get(&origin) else {
+                    continue;
+                };
+                let Type::UserType {
+                    user_type_info,
+                    generics: _,
+                } = &inferred_type.value
+                else {
+                    continue;
+                };
+
+                receiver_user_types.insert(*user_type_info);
             }
-        })
-        .cloned()
-        .collect()
+
+            for user_type_id in receiver_user_types.into_iter() {
+                let Some(method_symbols) = context.concrete_method_symbols.get(&user_type_id) else {
+                    continue;
+                };
+
+                concrete_candidates.extend(method_symbols.iter().filter(|symbol| {
+                    symbol.name == call_name
+                        && (symbol.arity == argument_count || symbol.arity == argument_count + 1)
+                }));
+            }
+        }
+
+        if !concrete_candidates.is_empty() {
+            let mut dedup = HashSet::new();
+            return concrete_candidates
+                .into_iter()
+                .cloned()
+                .filter(|symbol| dedup.insert(symbol.clone()))
+                .collect();
+        }
+    }
+
+    Vec::new()
 }
 
 fn is_borrowable_expression(expression: &Expression, context: &AnalyzerContext) -> bool {

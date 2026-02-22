@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use catla_name_resolver::{DefineKind, EnvironmentSeparatorKind, ResolvedInfo};
+use catla_parser::CatlaAST;
 use catla_parser::ast::{
     AddOrSubExpression, AndExpression, Define, EntityID, EqualsExpression, Expression, Factor,
     FunctionDefine, LessOrGreaterExpression, MulOrDivExpression, OrExpression, Primary,
     PrimaryLeftExpr, Statement, StatementAttribute, UserTypeKind, VariableBinding,
 };
-use catla_parser::CatlaAST;
 use catla_type::types::{GlobalUserTypeID, GlobalUserTypeSet, ImplementsInfoSet, Type};
 use hashbrown::{HashMap, HashSet};
 
@@ -27,6 +27,7 @@ pub struct LifetimeAnalyzeResults {
     object_results: HashMap<EntityID, LifetimeAnalyzeResult>,
     call_argument_borrow: HashMap<EntityID, bool>,
     variable_origins: HashMap<EntityID, HashSet<EntityID>>,
+    return_origins: HashSet<EntityID>,
 }
 
 impl LifetimeAnalyzeResults {
@@ -35,6 +36,7 @@ impl LifetimeAnalyzeResults {
             object_results: HashMap::new(),
             call_argument_borrow: HashMap::new(),
             variable_origins: HashMap::new(),
+            return_origins: HashSet::new(),
         }
     }
 
@@ -51,6 +53,10 @@ impl LifetimeAnalyzeResults {
 
     pub fn variable_origins(&self, variable_entity_id: EntityID) -> Option<&HashSet<EntityID>> {
         self.variable_origins.get(&variable_entity_id)
+    }
+
+    pub fn is_return_origin(&self, origin_entity_id: EntityID) -> bool {
+        self.return_origins.contains(&origin_entity_id)
     }
 }
 
@@ -100,7 +106,10 @@ pub fn evaluate_lifetime_sources(
         symbol_by_entity.extend(module_symbol_by_entity);
 
         for (name, mut symbols) in module_symbols_by_name {
-            symbols_by_name.entry(name).or_default().append(&mut symbols);
+            symbols_by_name
+                .entry(name)
+                .or_default()
+                .append(&mut symbols);
         }
     }
 
@@ -120,6 +129,9 @@ pub fn evaluate_lifetime_sources(
                 parameter_escape: vec![false; definition.parameter_count],
                 parameter_constraints: HashSet::new(),
                 returns_object: false,
+                returned_parameters: HashSet::new(),
+                returns_fresh_object: false,
+                returns_fresh_heap: false,
             });
     }
 
@@ -154,6 +166,9 @@ pub fn evaluate_lifetime_sources(
                     parameter_escape: vec![false; definition.parameter_count],
                     parameter_constraints: HashSet::new(),
                     returns_object: false,
+                    returned_parameters: HashSet::new(),
+                    returns_fresh_object: false,
+                    returns_fresh_heap: false,
                 });
 
             if entry.parameter_escape.len() < local_summary.parameter_escape.len() {
@@ -178,6 +193,21 @@ pub fn evaluate_lifetime_sources(
 
             if local_summary.returns_object && !entry.returns_object {
                 entry.returns_object = true;
+                changed = true;
+            }
+
+            for parameter_index in local_summary.returned_parameters.iter().copied() {
+                if entry.returned_parameters.insert(parameter_index) {
+                    changed = true;
+                }
+            }
+
+            if local_summary.returns_fresh_object && !entry.returns_fresh_object {
+                entry.returns_fresh_object = true;
+                changed = true;
+            }
+            if local_summary.returns_fresh_heap && !entry.returns_fresh_heap {
+                entry.returns_fresh_heap = true;
                 changed = true;
             }
         }
@@ -212,6 +242,7 @@ pub fn evaluate_lifetime_sources(
             object_results: &mut module_result.object_results,
             variable_origins: &mut module_result.variable_origins,
             origin_user_types: &mut origin_user_types,
+            return_origins: &mut module_result.return_origins,
         };
 
         analyze_function_with_final_summary(definition, &mut context);
@@ -238,6 +269,7 @@ pub fn evaluate_lifetime_sources(
             object_results: &mut module_result.object_results,
             variable_origins: &mut module_result.variable_origins,
             origin_user_types: &mut origin_user_types,
+            return_origins: &mut module_result.return_origins,
         };
 
         analyze_module_level_roots(source.ast.ast(), &mut context);
@@ -258,6 +290,9 @@ struct FunctionSummary {
     parameter_escape: Vec<bool>,
     parameter_constraints: HashSet<(usize, usize)>,
     returns_object: bool,
+    returned_parameters: HashSet<usize>,
+    returns_fresh_object: bool,
+    returns_fresh_heap: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -319,8 +354,11 @@ impl LifetimeTreeArena {
         is_argument_tree: bool,
     ) -> LifetimeTreeRef {
         let node_ref = LifetimeTreeRef(self.nodes.len());
-        self.nodes
-            .push(LifetimeTreeNode::new(alloc_origin, drop_order, is_argument_tree));
+        self.nodes.push(LifetimeTreeNode::new(
+            alloc_origin,
+            drop_order,
+            is_argument_tree,
+        ));
         node_ref
     }
 
@@ -372,7 +410,9 @@ impl LifetimeTreeArena {
     }
 
     fn alloc_origin(&self, node_ref: LifetimeTreeRef) -> Option<EntityID> {
-        self.nodes.get(node_ref.0).and_then(|node| node.alloc_origin)
+        self.nodes
+            .get(node_ref.0)
+            .and_then(|node| node.alloc_origin)
     }
 
     fn has_static_lifetime(&self, node_ref: LifetimeTreeRef) -> bool {
@@ -447,6 +487,7 @@ impl ExprFlow {
 struct FunctionState {
     parameter_escape: Vec<bool>,
     parameter_constraints: HashSet<(usize, usize)>,
+    return_flow: ExprFlow,
     aliases_to_params: HashMap<EntityID, HashSet<usize>>,
     aliases_to_origins: HashMap<EntityID, HashSet<EntityID>>,
     aliases_to_tree_refs: HashMap<EntityID, HashSet<LifetimeTreeRef>>,
@@ -461,6 +502,7 @@ impl FunctionState {
         Self {
             parameter_escape: vec![false; parameter_count],
             parameter_constraints: HashSet::new(),
+            return_flow: ExprFlow::default(),
             aliases_to_params: HashMap::new(),
             aliases_to_origins: HashMap::new(),
             aliases_to_tree_refs: HashMap::new(),
@@ -488,6 +530,7 @@ struct AnalyzerContext<'a> {
     object_results: &'a mut HashMap<EntityID, LifetimeAnalyzeResult>,
     variable_origins: &'a mut HashMap<EntityID, HashSet<EntityID>>,
     origin_user_types: &'a mut HashMap<EntityID, GlobalUserTypeID>,
+    return_origins: &'a mut HashSet<EntityID>,
 }
 
 pub fn analyze_lifetime<'input, 'allocator>(
@@ -517,6 +560,9 @@ pub fn analyze_lifetime<'input, 'allocator>(
                 parameter_escape: vec![false; definition.parameter_count],
                 parameter_constraints: HashSet::new(),
                 returns_object: false,
+                returned_parameters: HashSet::new(),
+                returns_fresh_object: false,
+                returns_fresh_heap: false,
             });
     }
 
@@ -547,6 +593,9 @@ pub fn analyze_lifetime<'input, 'allocator>(
                     parameter_escape: vec![false; definition.parameter_count],
                     parameter_constraints: HashSet::new(),
                     returns_object: false,
+                    returned_parameters: HashSet::new(),
+                    returns_fresh_object: false,
+                    returns_fresh_heap: false,
                 });
 
             if entry.parameter_escape.len() < local_summary.parameter_escape.len() {
@@ -573,6 +622,21 @@ pub fn analyze_lifetime<'input, 'allocator>(
                 entry.returns_object = true;
                 changed = true;
             }
+
+            for parameter_index in local_summary.returned_parameters.iter().copied() {
+                if entry.returned_parameters.insert(parameter_index) {
+                    changed = true;
+                }
+            }
+
+            if local_summary.returns_fresh_object && !entry.returns_fresh_object {
+                entry.returns_fresh_object = true;
+                changed = true;
+            }
+            if local_summary.returns_fresh_heap && !entry.returns_fresh_heap {
+                entry.returns_fresh_heap = true;
+                changed = true;
+            }
         }
     }
 
@@ -595,6 +659,7 @@ pub fn analyze_lifetime<'input, 'allocator>(
             object_results: &mut results.object_results,
             variable_origins: &mut results.variable_origins,
             origin_user_types: &mut origin_user_types,
+            return_origins: &mut results.return_origins,
         };
 
         for definition in definitions.iter() {
@@ -638,7 +703,8 @@ fn collect_function_definitions<'ast, 'input, 'allocator>(
             })
             .unwrap_or(0);
 
-        let Some(symbol) = function_symbol_for_entity(function_entity, module_entity_type_map) else {
+        let Some(symbol) = function_symbol_for_entity(function_entity, module_entity_type_map)
+        else {
             return;
         };
 
@@ -899,6 +965,7 @@ fn analyze_function_summary<'ast, 'input, 'allocator>(
     let mut call_argument_borrow = HashMap::new();
     let mut variable_origins = HashMap::new();
     let mut origin_user_types = HashMap::new();
+    let mut return_origins = HashSet::new();
     let mut context = AnalyzerContext {
         name_resolved_map,
         type_infer_results,
@@ -914,6 +981,7 @@ fn analyze_function_summary<'ast, 'input, 'allocator>(
         object_results: &mut object_results,
         variable_origins: &mut variable_origins,
         origin_user_types: &mut origin_user_types,
+        return_origins: &mut return_origins,
     };
 
     let mut state = FunctionState::new(definition.parameter_count);
@@ -938,13 +1006,32 @@ fn analyze_function_summary<'ast, 'input, 'allocator>(
     }
 
     if let Some(block) = &definition.ast.block {
-        analyze_program_statements(block.program, &mut state, &mut context, false, false);
+        let _ = analyze_program_statements(block.program, &mut state, &mut context, false, false);
+    }
+
+    solve_constraints_for_function(&state, &mut object_results);
+
+    let mut returns_fresh_object = false;
+    let mut returns_fresh_heap = false;
+    for origin in state.return_flow.origins.iter().copied() {
+        returns_fresh_object = true;
+        let allocation = object_results
+            .get(&origin)
+            .map(|result| result.allocation)
+            .unwrap_or(AllocationKind::Heap);
+        if allocation == AllocationKind::Heap {
+            returns_fresh_heap = true;
+            break;
+        }
     }
 
     FunctionSummary {
         parameter_escape: state.parameter_escape,
         parameter_constraints: state.parameter_constraints,
         returns_object: function_returns_object(definition, module_entity_type_map, user_type_set),
+        returned_parameters: state.return_flow.params,
+        returns_fresh_object,
+        returns_fresh_heap,
     }
 }
 
@@ -989,7 +1076,7 @@ fn analyze_function_with_final_summary<'ast, 'input, 'allocator>(
     }
 
     if let Some(block) = &definition.ast.block {
-        analyze_program_statements(block.program, &mut state, context, true, false);
+        let _ = analyze_program_statements(block.program, &mut state, context, true, false);
     }
 
     solve_constraints_for_function(&state, context.object_results);
@@ -1000,7 +1087,7 @@ fn analyze_module_level_roots<'input, 'allocator>(
     context: &mut AnalyzerContext,
 ) {
     let mut state = FunctionState::new(0);
-    analyze_program_statements(program, &mut state, context, true, true);
+    let _ = analyze_program_statements(program, &mut state, context, true, true);
     solve_constraints_for_function(&state, context.object_results);
 }
 
@@ -1010,18 +1097,53 @@ fn analyze_program_statements<'input, 'allocator>(
     context: &mut AnalyzerContext,
     enable_outputs: bool,
     analyze_nested_defines: bool,
-) {
+) -> ExprFlow {
+    let mut last_expression_flow = ExprFlow::default();
     for statement in program.statements.iter() {
         match &statement.statement {
             Statement::Assignment(assignment) => {
                 if let Ok(right) = &assignment.right {
-                    let right_flow = analyze_expression(right, state, context, false, enable_outputs);
+                    let right_flow =
+                        analyze_expression(right, state, context, false, enable_outputs);
 
-                    if let Some((left_variable, crosses_function_boundary)) = extract_variable_entity(
-                        &assignment.left,
-                        &state.aliases_to_params,
-                        context.name_resolved_map,
-                    ) {
+                    if let Some((left_variable, crosses_function_boundary)) =
+                        extract_variable_entity(
+                            &assignment.left,
+                            &state.aliases_to_params,
+                            context.name_resolved_map,
+                        )
+                    {
+                        let mut previous_object_origins = HashSet::new();
+                        if let Some(origins) = state.aliases_to_origins.get(&left_variable) {
+                            previous_object_origins.extend(origins.iter().copied());
+                        }
+                        if let Some(tree_refs) = state.aliases_to_tree_refs.get(&left_variable) {
+                            previous_object_origins.extend(
+                                state
+                                    .lifetime_tree
+                                    .collect_reachable_alloc_origins(tree_refs)
+                                    .into_iter(),
+                            );
+                        }
+
+                        let mut incoming_object_origins = right_flow.origins.clone();
+                        incoming_object_origins.extend(
+                            state
+                                .lifetime_tree
+                                .collect_reachable_alloc_origins(&right_flow.tree_refs)
+                                .into_iter(),
+                        );
+
+                        if !previous_object_origins.is_empty() && !incoming_object_origins.is_empty()
+                        {
+                            for object_entity in previous_object_origins {
+                                set_object_heap(context.object_results, object_entity);
+                            }
+                            for object_entity in incoming_object_origins {
+                                set_object_heap(context.object_results, object_entity);
+                            }
+                        }
+
                         if crosses_function_boundary {
                             apply_escape(&right_flow, state, context.object_results);
                         }
@@ -1038,8 +1160,13 @@ fn analyze_program_statements<'input, 'allocator>(
                             .variable_origins
                             .insert(left_variable, right_flow.origins.clone());
                     } else {
-                        let left_flow =
-                            analyze_expression(&assignment.left, state, context, false, enable_outputs);
+                        let left_flow = analyze_expression(
+                            &assignment.left,
+                            state,
+                            context,
+                            false,
+                            enable_outputs,
+                        );
 
                         if left_flow.params.is_empty() && left_flow.origins.is_empty() {
                             apply_escape(&right_flow, state, context.object_results);
@@ -1048,12 +1175,15 @@ fn analyze_program_statements<'input, 'allocator>(
                         }
                     }
                 }
+                last_expression_flow = ExprFlow::default();
             }
             Statement::Swap(swap_statement) => {
                 if let Ok(right) = &swap_statement.right {
-                    let right_flow = analyze_expression(right, state, context, false, enable_outputs);
+                    let right_flow =
+                        analyze_expression(right, state, context, false, enable_outputs);
                     apply_escape(&right_flow, state, context.object_results);
                 }
+                last_expression_flow = ExprFlow::default();
             }
             Statement::DefineWithAttribute(define_with_attribute) => {
                 if let Ok(define) = &define_with_attribute.define {
@@ -1098,7 +1228,7 @@ fn analyze_program_statements<'input, 'allocator>(
                             if analyze_nested_defines {
                                 if let Define::UserType(user_type_define) = define {
                                     if let Ok(block) = &user_type_define.block {
-                                        analyze_program_statements(
+                                        let _ = analyze_program_statements(
                                             block.program,
                                             state,
                                             context,
@@ -1111,19 +1241,22 @@ fn analyze_program_statements<'input, 'allocator>(
                         }
                     }
                 }
+                last_expression_flow = ExprFlow::default();
             }
             Statement::Drop(drop_statement) => {
                 if let Ok(expression) = &drop_statement.expression {
                     analyze_expression(expression, state, context, false, enable_outputs);
                 }
+                last_expression_flow = ExprFlow::default();
             }
             Statement::Expression(expression) => {
-                analyze_expression(expression, state, context, false, enable_outputs);
+                last_expression_flow =
+                    analyze_expression(expression, state, context, false, enable_outputs);
             }
             Statement::Implements(implements) => {
                 if analyze_nested_defines {
                     if let Ok(block) = &implements.block {
-                        analyze_program_statements(
+                        let _ = analyze_program_statements(
                             block.program,
                             state,
                             context,
@@ -1132,10 +1265,15 @@ fn analyze_program_statements<'input, 'allocator>(
                         );
                     }
                 }
+                last_expression_flow = ExprFlow::default();
             }
-            Statement::Import(_) => {}
+            Statement::Import(_) => {
+                last_expression_flow = ExprFlow::default();
+            }
         }
     }
+
+    last_expression_flow
 }
 
 fn register_binding_alias(
@@ -1153,8 +1291,12 @@ fn register_binding_alias(
                 .unwrap_or_else(|| EntityID::from(literal));
 
             state.aliases_to_params.insert(entity, flow.params.clone());
-            state.aliases_to_origins.insert(entity, flow.origins.clone());
-            state.aliases_to_tree_refs.insert(entity, flow.tree_refs.clone());
+            state
+                .aliases_to_origins
+                .insert(entity, flow.origins.clone());
+            state
+                .aliases_to_tree_refs
+                .insert(entity, flow.tree_refs.clone());
             variable_origins.insert(entity, flow.origins.clone());
 
             for tree_ref in flow.tree_refs.iter().copied() {
@@ -1178,23 +1320,32 @@ fn analyze_expression(
     escape_context: bool,
     enable_outputs: bool,
 ) -> ExprFlow {
-    let flow = match expression {
+    let (flow, apply_escape_for_expression) = match expression {
         Expression::Return(return_expression) => {
             let inner = return_expression
                 .expression
                 .as_ref()
-                .map(|expr| analyze_expression(expr, state, context, true, enable_outputs))
+                .map(|expr| analyze_expression(expr, state, context, false, enable_outputs))
                 .unwrap_or_default();
+            state.return_flow.merge(inner.clone());
+            context.return_origins.extend(inner.origins.iter().copied());
 
-            inner
+            (inner, false)
         }
-        Expression::Closure(_closure) => ExprFlow::default(),
-        Expression::Or(or_expression) => {
-            analyze_or_expression(or_expression, state, context, escape_context, enable_outputs)
-        }
+        Expression::Closure(_closure) => (ExprFlow::default(), true),
+        Expression::Or(or_expression) => (
+            analyze_or_expression(
+                or_expression,
+                state,
+                context,
+                escape_context,
+                enable_outputs,
+            ),
+            true,
+        ),
     };
 
-    if escape_context {
+    if escape_context && apply_escape_for_expression {
         apply_escape(&flow, state, context.object_results);
     }
 
@@ -1390,8 +1541,13 @@ fn analyze_primary(
     escape_context: bool,
     enable_outputs: bool,
 ) -> ExprFlow {
-    let mut current_flow =
-        analyze_primary_left(&primary.left.first, state, context, escape_context, enable_outputs);
+    let mut current_flow = analyze_primary_left(
+        &primary.left.first,
+        state,
+        context,
+        escape_context,
+        enable_outputs,
+    );
 
     for chain in primary.chain.iter() {
         if let Some(second) = &chain.second {
@@ -1407,7 +1563,8 @@ fn analyze_primary(
                     ));
                 }
 
-                let is_method_call = chain.separator.value == catla_parser::ast::PrimarySeparator::Dot;
+                let is_method_call =
+                    chain.separator.value == catla_parser::ast::PrimarySeparator::Dot;
 
                 let mut call_inputs = Vec::new();
                 if is_method_call {
@@ -1460,7 +1617,8 @@ fn analyze_primary(
                 if enable_outputs {
                     for (index, argument) in function_call.arguments.iter().enumerate() {
                         let parameter_index = if is_method_call { index + 1 } else { index };
-                        if !parameter_escape[parameter_index] && is_borrowable_expression(argument, context)
+                        if !parameter_escape[parameter_index]
+                            && is_borrowable_expression(argument, context)
                         {
                             context
                                 .call_argument_borrow
@@ -1469,24 +1627,12 @@ fn analyze_primary(
                     }
                 }
 
-                let mut return_flow = ExprFlow::default();
-                if merged_return_object(
+                current_flow = build_call_return_flow(
                     &candidates,
-                    context.summaries,
-                    context.interface_adjacency,
-                ) {
-                    let return_origin = EntityID::from(function_call);
-                    return_flow.origins.insert(return_origin);
-                    context
-                        .object_results
-                        .entry(return_origin)
-                        .or_insert(LifetimeAnalyzeResult {
-                            allocation: AllocationKind::Heap,
-                            requires_drop: false,
-                        });
-                }
-
-                current_flow = return_flow;
+                    &call_inputs,
+                    EntityID::from(function_call),
+                    context,
+                );
             }
         }
     }
@@ -1613,24 +1759,12 @@ fn analyze_primary_left(
                     }
                 }
 
-                let mut return_flow = ExprFlow::default();
-                if merged_return_object(
+                base_flow = build_call_return_flow(
                     &candidates,
-                    context.summaries,
-                    context.interface_adjacency,
-                ) {
-                    let return_origin = EntityID::from(function_call);
-                    return_flow.origins.insert(return_origin);
-                    context
-                        .object_results
-                        .entry(return_origin)
-                        .or_insert(LifetimeAnalyzeResult {
-                            allocation: AllocationKind::Heap,
-                            requires_drop: false,
-                        });
-                }
-
-                base_flow = return_flow;
+                    &argument_flows,
+                    EntityID::from(function_call),
+                    context,
+                );
             }
 
             if escape_context {
@@ -1664,10 +1798,13 @@ fn analyze_primary_left(
                     .map(|user_type_id| context.drop_required_user_types.contains(&user_type_id))
                     .unwrap_or(false);
 
-                context.object_results.entry(new_object_entity).or_insert(LifetimeAnalyzeResult {
-                    allocation: AllocationKind::Stack,
-                    requires_drop,
-                });
+                context
+                    .object_results
+                    .entry(new_object_entity)
+                    .or_insert(LifetimeAnalyzeResult {
+                        allocation: AllocationKind::Stack,
+                        requires_drop,
+                    });
                 flow.origins.insert(new_object_entity);
                 let owner_ref = match state.origin_tree_refs.get(&new_object_entity).copied() {
                     Some(existing) => existing,
@@ -1691,8 +1828,12 @@ fn analyze_primary_left(
                 owner_flow.tree_refs.insert(owner_ref);
 
                 for (field_name, field_flow) in field_flows.into_iter() {
-                    let child_ref = state.lifetime_tree.get_or_create_child(owner_ref, &field_name);
-                    state.lifetime_tree.set_drop_order(child_ref, new_object.span.start);
+                    let child_ref = state
+                        .lifetime_tree
+                        .get_or_create_child(owner_ref, &field_name);
+                    state
+                        .lifetime_tree
+                        .set_drop_order(child_ref, new_object.span.start);
 
                     for borrowed_ref in field_flow.tree_refs.iter().copied() {
                         state.lifetime_tree.add_borrow(child_ref, borrowed_ref);
@@ -1766,7 +1907,13 @@ fn analyze_primary_left(
                 ));
             }
             if let Ok(block) = &if_expression.first.block {
-                analyze_program_statements(block.program, state, context, enable_outputs, false);
+                flow.merge(analyze_program_statements(
+                    block.program,
+                    state,
+                    context,
+                    enable_outputs,
+                    false,
+                ));
             }
             for chain in if_expression.chain.iter() {
                 match chain {
@@ -1781,23 +1928,23 @@ fn analyze_primary_left(
                             ));
                         }
                         if let Ok(block) = &if_statement.block {
-                            analyze_program_statements(
+                            flow.merge(analyze_program_statements(
                                 block.program,
                                 state,
                                 context,
                                 enable_outputs,
                                 false,
-                            );
+                            ));
                         }
                     }
                     catla_parser::ast::ElseChain::Else { block } => {
-                        analyze_program_statements(
+                        flow.merge(analyze_program_statements(
                             block.program,
                             state,
                             context,
                             enable_outputs,
                             false,
-                        );
+                        ));
                     }
                 }
             }
@@ -1808,7 +1955,13 @@ fn analyze_primary_left(
         }
         PrimaryLeftExpr::Loop { loop_expression } => {
             if let Ok(block) = &loop_expression.block {
-                analyze_program_statements(block.program, state, context, enable_outputs, false);
+                let _ = analyze_program_statements(
+                    block.program,
+                    state,
+                    context,
+                    enable_outputs,
+                    false,
+                );
             }
             ExprFlow::default()
         }
@@ -2106,6 +2259,157 @@ fn merged_return_object(
     false
 }
 
+fn merged_returned_parameters(
+    candidates: &[FunctionSymbol],
+    summaries: &HashMap<FunctionSymbol, FunctionSummary>,
+    interface_adjacency: &HashMap<FunctionSymbol, HashSet<FunctionSymbol>>,
+) -> HashSet<usize> {
+    let mut merged = HashSet::new();
+
+    for candidate in candidates.iter() {
+        let closure = equivalent_symbols(candidate, interface_adjacency);
+
+        for symbol in closure.iter() {
+            let Some(summary) = summaries.get(symbol) else {
+                continue;
+            };
+
+            merged.extend(summary.returned_parameters.iter().copied());
+        }
+    }
+
+    merged
+}
+
+fn merged_fresh_return_allocation(
+    candidates: &[FunctionSymbol],
+    summaries: &HashMap<FunctionSymbol, FunctionSummary>,
+    interface_adjacency: &HashMap<FunctionSymbol, HashSet<FunctionSymbol>>,
+) -> (bool, bool) {
+    let mut returns_fresh_object = false;
+    let mut returns_fresh_heap = false;
+
+    for candidate in candidates.iter() {
+        let closure = equivalent_symbols(candidate, interface_adjacency);
+
+        for symbol in closure.iter() {
+            let Some(summary) = summaries.get(symbol) else {
+                continue;
+            };
+
+            if summary.returns_fresh_object {
+                returns_fresh_object = true;
+            }
+            if summary.returns_fresh_heap {
+                returns_fresh_heap = true;
+            }
+
+            if returns_fresh_object && returns_fresh_heap {
+                return (true, true);
+            }
+        }
+    }
+
+    (returns_fresh_object, returns_fresh_heap)
+}
+
+fn build_call_return_flow(
+    candidates: &[FunctionSymbol],
+    call_inputs: &[ExprFlow],
+    return_entity: EntityID,
+    context: &mut AnalyzerContext,
+) -> ExprFlow {
+    let returns_object =
+        merged_return_object(candidates, context.summaries, context.interface_adjacency);
+    if !returns_object {
+        return ExprFlow::default();
+    }
+
+    let returned_parameters =
+        merged_returned_parameters(candidates, context.summaries, context.interface_adjacency);
+    let (returns_fresh_object, returns_fresh_heap) =
+        merged_fresh_return_allocation(candidates, context.summaries, context.interface_adjacency);
+
+    let mut return_flow = ExprFlow::default();
+    for parameter_index in returned_parameters.into_iter() {
+        let Some(argument_flow) = call_inputs.get(parameter_index) else {
+            continue;
+        };
+        return_flow.merge(argument_flow.clone());
+    }
+
+    if returns_fresh_object {
+        let requires_drop = context
+            .type_infer_results
+            .get(&return_entity)
+            .and_then(|inferred_type| {
+                let Type::UserType {
+                    user_type_info,
+                    generics: _,
+                } = inferred_type
+                    .value
+                    .resolve_type_alias(context.user_type_set)
+                else {
+                    return None;
+                };
+
+                Some(context.drop_required_user_types.contains(&user_type_info))
+            })
+            .unwrap_or(false);
+
+        return_flow.origins.insert(return_entity);
+        let entry = context
+            .object_results
+            .entry(return_entity)
+            .or_insert(LifetimeAnalyzeResult {
+                allocation: if returns_fresh_heap {
+                    AllocationKind::Heap
+                } else {
+                    AllocationKind::Stack
+                },
+                requires_drop,
+            });
+        if returns_fresh_heap {
+            entry.allocation = AllocationKind::Heap;
+        }
+        if requires_drop {
+            entry.requires_drop = true;
+        }
+    } else if return_flow.params.is_empty()
+        && return_flow.origins.is_empty()
+        && return_flow.tree_refs.is_empty()
+    {
+        let requires_drop = context
+            .type_infer_results
+            .get(&return_entity)
+            .and_then(|inferred_type| {
+                let Type::UserType {
+                    user_type_info,
+                    generics: _,
+                } = inferred_type
+                    .value
+                    .resolve_type_alias(context.user_type_set)
+                else {
+                    return None;
+                };
+
+                Some(context.drop_required_user_types.contains(&user_type_info))
+            })
+            .unwrap_or(false);
+
+        return_flow.origins.insert(return_entity);
+        context
+            .object_results
+            .entry(return_entity)
+            .or_insert(LifetimeAnalyzeResult {
+                allocation: AllocationKind::Stack,
+                requires_drop,
+            });
+    }
+
+    return_flow
+}
+
 fn equivalent_symbols(
     symbol: &FunctionSymbol,
     interface_adjacency: &HashMap<FunctionSymbol, HashSet<FunctionSymbol>>,
@@ -2175,7 +2479,8 @@ fn resolve_call_candidates(
             }
 
             for user_type_id in receiver_user_types.into_iter() {
-                let Some(method_symbols) = context.concrete_method_symbols.get(&user_type_id) else {
+                let Some(method_symbols) = context.concrete_method_symbols.get(&user_type_id)
+                else {
                     continue;
                 };
 
@@ -2380,7 +2685,9 @@ fn resolve_new_object_user_type(
         return None;
     }
 
-    let ty = context.module_entity_type_map.get(&resolved.define.entity_id)?;
+    let ty = context
+        .module_entity_type_map
+        .get(&resolved.define.entity_id)?;
     let Type::UserType {
         user_type_info,
         generics: _,
@@ -2404,11 +2711,7 @@ fn collect_drop_required_user_types_for_sources(
         }
     }
 
-    collect_drop_required_user_types(
-        candidate_user_types,
-        user_type_set,
-        global_implements_infos,
-    )
+    collect_drop_required_user_types(candidate_user_types, user_type_set, global_implements_infos)
 }
 
 fn collect_drop_required_user_types_for_module(
@@ -2421,11 +2724,7 @@ fn collect_drop_required_user_types_for_module(
         collect_user_type_ids_in_type(ty, user_type_set, &mut candidate_user_types);
     }
 
-    collect_drop_required_user_types(
-        candidate_user_types,
-        user_type_set,
-        global_implements_infos,
-    )
+    collect_drop_required_user_types(candidate_user_types, user_type_set, global_implements_infos)
 }
 
 fn collect_drop_required_user_types(
@@ -2438,7 +2737,8 @@ fn collect_drop_required_user_types(
 
     candidate_user_types.extend(drop_required_user_types.iter().copied());
 
-    let mut class_field_dependencies = HashMap::<GlobalUserTypeID, HashSet<GlobalUserTypeID>>::new();
+    let mut class_field_dependencies =
+        HashMap::<GlobalUserTypeID, HashSet<GlobalUserTypeID>>::new();
     let mut pending = candidate_user_types.iter().copied().collect::<Vec<_>>();
     let mut visited = HashSet::new();
 
@@ -2520,7 +2820,10 @@ fn collect_direct_drop_implemented_user_types(
         let Type::UserType {
             user_type_info,
             generics: _,
-        } = implements_info.concrete.value.resolve_type_alias(user_type_set)
+        } = implements_info
+            .concrete
+            .value
+            .resolve_type_alias(user_type_set)
         else {
             continue;
         };

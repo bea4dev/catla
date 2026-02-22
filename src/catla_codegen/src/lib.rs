@@ -53,6 +53,7 @@ pub async fn codegen(
                     &scope,
                     current_crate_name,
                     &mut stack_slot_counter,
+                    None,
                 );
             }
 

@@ -50,6 +50,22 @@ pub struct CatlaObjectRef<T: CatlaObject> {
     value: &'static T,
 }
 
+#[derive(Debug)]
+pub enum ReturnPlace<'a, T: CatlaObject> {
+    Heap,
+    Stack(&'a mut ManuallyDrop<MaybeUninit<T>>),
+}
+
+impl<'a, T: CatlaObject> ReturnPlace<'a, T> {
+    #[inline(always)]
+    pub fn reborrow<'b>(&'b mut self) -> ReturnPlace<'b, T> {
+        match self {
+            ReturnPlace::Heap => ReturnPlace::Heap,
+            ReturnPlace::Stack(slot) => ReturnPlace::Stack(&mut **slot),
+        }
+    }
+}
+
 impl<T: CatlaObject> CatlaObjectRef<T> {
     #[inline(always)]
     fn add_count(&self) {
@@ -142,6 +158,19 @@ impl<T: CatlaObject> CatlaObjectRef<T> {
         ptr.write(T::new(value, false, false, drop));
         Self {
             value: unsafe { std::mem::transmute(ptr.assume_init_ref()) },
+        }
+    }
+
+    #[inline(always)]
+    pub fn from_return_place(
+        value: T::Value,
+        mutex: bool,
+        drop: bool,
+        return_place: ReturnPlace<'_, T>,
+    ) -> Self {
+        match return_place {
+            ReturnPlace::Heap => Self::heap(value, mutex, drop),
+            ReturnPlace::Stack(slot) => Self::stack(value, drop, slot),
         }
     }
 

@@ -8,6 +8,7 @@ interface TestInterface {
 
 class B {}
 class C {}
+class TestClass {}
 
 implements TestInterface for B {
     function test(let this, a: A) {}
@@ -18,10 +19,36 @@ implements TestInterface for C {
     }
 }
 
+function make_testclass_direct() -> TestClass {
+    return new TestClass {}
+}
+
+function make_testclass_via_local() -> TestClass {
+    let a = new TestClass {}
+    return a
+}
+
+static var global2: TestClass = new TestClass {}
+
+function choose_testclass() -> TestClass {
+    var a = if true {
+        new TestClass {}
+    } else {
+        new TestClass {}
+    }
+
+    a = new TestClass {}
+
+    return a
+}
+
 function main() {
     let a = new A {}
     let b = new B {}
     let c = new C {}
+    let d = make_testclass_direct()
+    let e = make_testclass_via_local()
+    let f = choose_testclass()
 
     b.test(a)
     c.test(a)

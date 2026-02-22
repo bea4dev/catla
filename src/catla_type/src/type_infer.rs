@@ -2488,6 +2488,103 @@ fn infer_type_for_factor(
     }
 }
 
+fn infer_type_for_block_as_expression(
+    block: &catla_parser::ast::Block,
+    as_expression: bool,
+    type_environment: &mut TypeEnvironment,
+    implements_element_checker: &ImplementsElementChecker,
+    return_type: &Moduled<Type>,
+    this_type: &Option<Type>,
+    generics: &HashMap<EntityID, Arc<GenericType>>,
+    implements_infos: &ImplementsInfoSet,
+    import_map: &HashMap<EntityID, std::vec::Vec<ImportElement>>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
+    moduled_name_type_map: &HashMap<String, Arc<HashMap<String, Type>>>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    user_type_set: &GlobalUserTypeSet,
+    module_path: &ModulePath,
+    package_resource_set: &PackageResourceSet,
+    errors: &mut std::vec::Vec<TypeError>,
+) -> TypeVariableID {
+    let statements = block.program.statements;
+
+    if let Some((last_statement, prefix_statements)) = statements.split_last() {
+        if let Statement::Expression(expression) = &last_statement.statement {
+            if !prefix_statements.is_empty() {
+                let prefix_program = Program {
+                    statements: prefix_statements,
+                    span: block.program.span.clone(),
+                };
+
+                infer_type_for_program(
+                    &prefix_program,
+                    as_expression,
+                    false,
+                    type_environment,
+                    implements_element_checker,
+                    return_type,
+                    this_type,
+                    generics,
+                    implements_infos,
+                    import_map,
+                    module_entity_type_map,
+                    moduled_name_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    package_resource_set,
+                    errors,
+                );
+            }
+
+            return infer_type_for_expression(
+                expression,
+                as_expression,
+                type_environment,
+                implements_element_checker,
+                return_type,
+                this_type,
+                generics,
+                implements_infos,
+                import_map,
+                module_entity_type_map,
+                moduled_name_type_map,
+                name_resolved_map,
+                user_type_set,
+                module_path,
+                package_resource_set,
+                errors,
+            );
+        }
+    }
+
+    infer_type_for_program(
+        block.program,
+        as_expression,
+        false,
+        type_environment,
+        implements_element_checker,
+        return_type,
+        this_type,
+        generics,
+        implements_infos,
+        import_map,
+        module_entity_type_map,
+        moduled_name_type_map,
+        name_resolved_map,
+        user_type_set,
+        module_path,
+        package_resource_set,
+        errors,
+    );
+
+    type_environment.create_type_variable_id_with_type(Moduled::new(
+        Type::Unit,
+        module_path.clone(),
+        block.span.clone(),
+    ))
+}
+
 fn infer_type_for_primary(
     ast: &Primary,
     as_expression: bool,
@@ -2657,8 +2754,11 @@ fn infer_type_for_primary(
                     literal.span.clone(),
                 ),
                 SimplePrimary::Null(range) => todo!(),
-                SimplePrimary::True(range) => todo!(),
-                SimplePrimary::False(range) => todo!(),
+                SimplePrimary::True(range) | SimplePrimary::False(range) => type_environment
+                    .create_type_variable_id_with_type(
+                        Type::Bool.moduled(module_path.clone(), range.clone()),
+                    )
+                    .with_span(range.clone()),
                 SimplePrimary::This(span) | SimplePrimary::LargeThis(span) => match this_type {
                     Some(this_type) => type_environment
                         .create_type_variable_id_with_type(
@@ -3381,7 +3481,157 @@ fn infer_type_for_primary(
         }
         PrimaryLeftExpr::NewArray { new_array } => todo!(),
         PrimaryLeftExpr::NewArrayInit { new_array_init } => todo!(),
-        PrimaryLeftExpr::If { if_expression } => todo!(),
+        PrimaryLeftExpr::If { if_expression } => {
+            let mut branch_types = Vec::new();
+
+            if let Ok(condition) = &if_expression.first.condition {
+                let condition_type_variable_id = infer_type_for_expression(
+                    condition,
+                    as_expression,
+                    type_environment,
+                    implements_element_checker,
+                    return_type,
+                    this_type,
+                    generics,
+                    implements_infos,
+                    import_map,
+                    module_entity_type_map,
+                    moduled_name_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    package_resource_set,
+                    errors,
+                );
+
+                type_environment.unify_type(
+                    Type::TypeVariable(condition_type_variable_id)
+                        .moduled(module_path.clone(), condition.span()),
+                    Type::Bool.moduled(module_path.clone(), condition.span()),
+                    user_type_set,
+                    errors,
+                );
+            }
+
+            if let Ok(block) = &if_expression.first.block {
+                branch_types.push(infer_type_for_block_as_expression(
+                    block,
+                    as_expression,
+                    type_environment,
+                    implements_element_checker,
+                    return_type,
+                    this_type,
+                    generics,
+                    implements_infos,
+                    import_map,
+                    module_entity_type_map,
+                    moduled_name_type_map,
+                    name_resolved_map,
+                    user_type_set,
+                    module_path,
+                    package_resource_set,
+                    errors,
+                ));
+            }
+
+            for chain in if_expression.chain.iter() {
+                match chain {
+                    catla_parser::ast::ElseChain::ElseIf { if_statement } => {
+                        if let Ok(condition) = &if_statement.condition {
+                            let condition_type_variable_id = infer_type_for_expression(
+                                condition,
+                                as_expression,
+                                type_environment,
+                                implements_element_checker,
+                                return_type,
+                                this_type,
+                                generics,
+                                implements_infos,
+                                import_map,
+                                module_entity_type_map,
+                                moduled_name_type_map,
+                                name_resolved_map,
+                                user_type_set,
+                                module_path,
+                                package_resource_set,
+                                errors,
+                            );
+
+                            type_environment.unify_type(
+                                Type::TypeVariable(condition_type_variable_id)
+                                    .moduled(module_path.clone(), condition.span()),
+                                Type::Bool.moduled(module_path.clone(), condition.span()),
+                                user_type_set,
+                                errors,
+                            );
+                        }
+
+                        if let Ok(block) = &if_statement.block {
+                            branch_types.push(infer_type_for_block_as_expression(
+                                block,
+                                as_expression,
+                                type_environment,
+                                implements_element_checker,
+                                return_type,
+                                this_type,
+                                generics,
+                                implements_infos,
+                                import_map,
+                                module_entity_type_map,
+                                moduled_name_type_map,
+                                name_resolved_map,
+                                user_type_set,
+                                module_path,
+                                package_resource_set,
+                                errors,
+                            ));
+                        }
+                    }
+                    catla_parser::ast::ElseChain::Else { block } => {
+                        branch_types.push(infer_type_for_block_as_expression(
+                            block,
+                            as_expression,
+                            type_environment,
+                            implements_element_checker,
+                            return_type,
+                            this_type,
+                            generics,
+                            implements_infos,
+                            import_map,
+                            module_entity_type_map,
+                            moduled_name_type_map,
+                            name_resolved_map,
+                            user_type_set,
+                            module_path,
+                            package_resource_set,
+                            errors,
+                        ));
+                    }
+                }
+            }
+
+            let result_type_variable_id = branch_types
+                .first()
+                .copied()
+                .unwrap_or_else(|| {
+                    type_environment.create_type_variable_id_with_type(Moduled::new(
+                        Type::Unit,
+                        module_path.clone(),
+                        if_expression.span.clone(),
+                    ))
+                });
+
+            for branch_type_variable_id in branch_types.into_iter().skip(1) {
+                type_environment.unify(
+                    result_type_variable_id,
+                    branch_type_variable_id,
+                    user_type_set,
+                    errors,
+                );
+            }
+
+            result_type_variable_id.with_span(if_expression.span.clone())
+        }
         PrimaryLeftExpr::Loop { loop_expression } => todo!(),
     };
 

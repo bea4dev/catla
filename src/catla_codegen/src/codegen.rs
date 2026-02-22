@@ -1,17 +1,20 @@
-use catla_parser::ast::{
-    AddOrSub, AddOrSubExpression, AndExpression, Define, DefineWithAttribute,
-    ElementsOrWildCard, EntityID, EqualsExpression, Expression, Factor, FunctionDefine,
-    GenericsDefine, ImportStatement, LetVar, LessOrGreaterExpression, MulOrDivExpression,
-    OrExpression, Primary, PrimaryLeftExpr, PrimarySeparator, Program, SimplePrimary, Spanned,
-    Statement, StatementAttribute, StatementWithTagAndDocs, TypeAlias, TypeAttribute, TypeInfo,
-    TypeInfoBase, UserTypeDefine, UserTypeKind, VariableBinding, VariableDefine, WhereClause,
-};
 use catla_name_resolver::{DefineKind, ResolvedInfo};
 use catla_optimization::lifetime::{AllocationKind, LifetimeAnalyzeResults};
+use catla_parser::ast::{
+    AddOrSub, AddOrSubExpression, AndExpression, Define, DefineWithAttribute, ElementsOrWildCard,
+    EntityID, EqualsExpression, Expression, Factor, FunctionDefine, GenericsDefine,
+    ImportStatement, LessOrGreaterExpression, LetVar, MulOrDivExpression, OrExpression, Primary,
+    PrimaryLeftExpr, PrimarySeparator, Program, SimplePrimary, Spanned, Statement,
+    StatementAttribute, StatementWithTagAndDocs, TypeAlias, TypeAttribute, TypeInfo, TypeInfoBase,
+    UserTypeDefine, UserTypeKind, VariableBinding, VariableDefine, WhereClause,
+};
 use catla_type::types::{GlobalUserTypeSet, Type};
 use hashbrown::{HashMap, HashSet};
 
-use crate::CodeBuilderScope;
+use crate::{CodeBuilder, CodeBuilderScope};
+
+const RETURN_PLACE_ARG_NAME: &str = "__catla_return_place";
+const RETURN_PLACE_SLOT_MARKER: &str = "__catla_return_place_marker";
 
 pub(crate) fn codegen_for_program(
     ast: &Program,
@@ -25,6 +28,7 @@ pub(crate) fn codegen_for_program(
     builder: &CodeBuilderScope,
     current_crate_name: &str,
     stack_slot_counter: &mut usize,
+    return_place_arg: Option<&'static str>,
 ) {
     for statement in ast.statements.iter() {
         match &statement.statement {
@@ -37,6 +41,15 @@ pub(crate) fn codegen_for_program(
                 let stack_entities =
                     collect_stack_alloc_new_object_entities(right, lifetime_analyze_results);
                 for entity in stack_entities.into_iter() {
+                    if return_place_arg.is_some()
+                        && lifetime_analyze_results
+                            .map(|results| results.is_return_origin(entity))
+                            .unwrap_or(false)
+                    {
+                        stack_slots.insert(entity, RETURN_PLACE_SLOT_MARKER.to_string());
+                        continue;
+                    }
+
                     let slot_name = format!("__catla_stack_slot_{}", *stack_slot_counter);
                     *stack_slot_counter += 1;
 
@@ -74,6 +87,7 @@ pub(crate) fn codegen_for_program(
                         &HashMap::new(),
                         false,
                         ClassValueUsage::Normal,
+                        return_place_arg,
                     )
                 });
                 let right_code = codegen_expression(
@@ -89,6 +103,7 @@ pub(crate) fn codegen_for_program(
                     &stack_slots,
                     false,
                     ClassValueUsage::Normal,
+                    return_place_arg,
                 );
 
                 builder.push_line(format!("{} = {};", left_code, right_code).as_str());
@@ -151,6 +166,7 @@ pub(crate) fn codegen_for_program(
                                 builder,
                                 current_crate_name,
                                 stack_slot_counter,
+                                return_place_arg,
                             );
                         }
                         Define::TypeAlias(type_alias) => {
@@ -169,6 +185,33 @@ pub(crate) fn codegen_for_program(
             }
             Statement::Drop(drop_statement) => todo!(),
             Statement::Expression(expression) => {
+                let mut stack_slots = HashMap::new();
+                let stack_entities =
+                    collect_stack_alloc_new_object_entities(expression, lifetime_analyze_results);
+                for entity in stack_entities.into_iter() {
+                    if return_place_arg.is_some()
+                        && lifetime_analyze_results
+                            .map(|results| results.is_return_origin(entity))
+                            .unwrap_or(false)
+                    {
+                        stack_slots.insert(entity, RETURN_PLACE_SLOT_MARKER.to_string());
+                        continue;
+                    }
+
+                    let slot_name = format!("__catla_stack_slot_{}", *stack_slot_counter);
+                    *stack_slot_counter += 1;
+
+                    builder.push_line(
+                        format!(
+                            "let mut {} = std::mem::ManuallyDrop::new(std::mem::MaybeUninit::uninit());",
+                            slot_name
+                        )
+                        .as_str(),
+                    );
+
+                    stack_slots.insert(entity, slot_name);
+                }
+
                 builder.push_line(
                     format!(
                         "{};",
@@ -182,9 +225,10 @@ pub(crate) fn codegen_for_program(
                             module_entity_type_map,
                             builder,
                             current_crate_name,
-                            &HashMap::new(),
+                            &stack_slots,
                             false,
                             ClassValueUsage::Normal,
+                            return_place_arg,
                         )
                         .as_str()
                     )
@@ -263,6 +307,7 @@ pub(crate) fn codegen_for_program(
                             &scope,
                             current_crate_name,
                             stack_slot_counter,
+                            None,
                         );
                     }
                 }
@@ -315,7 +360,10 @@ pub(crate) fn collect_module_static_variables(ast: &Program) -> HashMap<String, 
             continue;
         };
 
-        static_variables.insert(literal.value.to_string(), variable_define.let_var.value == LetVar::Var);
+        static_variables.insert(
+            literal.value.to_string(),
+            variable_define.let_var.value == LetVar::Var,
+        );
     }
 
     static_variables
@@ -346,8 +394,13 @@ fn resolve_variable_type_code(
                 .as_ref()
                 .ok()
                 .and_then(|binding| match binding {
-                    VariableBinding::Literal(literal) => type_infer_results.get(&EntityID::from(literal)),
-                    VariableBinding::Binding { bindings: _, span: _ } => None,
+                    VariableBinding::Literal(literal) => {
+                        type_infer_results.get(&EntityID::from(literal))
+                    }
+                    VariableBinding::Binding {
+                        bindings: _,
+                        span: _,
+                    } => None,
                 })
         })
         .map(|ty| codegen_for_inferred_type(&ty.value, user_type_set, current_crate_name))
@@ -365,6 +418,7 @@ fn codegen_variable_define(
     builder: &CodeBuilderScope,
     current_crate_name: &str,
     stack_slot_counter: &mut usize,
+    return_place_arg: Option<&'static str>,
 ) {
     let Ok(binding) = variable_define.binding.as_ref() else {
         return;
@@ -397,6 +451,7 @@ fn codegen_variable_define(
                     &HashMap::new(),
                     true,
                     ClassValueUsage::Normal,
+                    None,
                 )
             })
             .unwrap_or_else(|| "todo!()".to_string());
@@ -424,8 +479,18 @@ fn codegen_variable_define(
 
     let mut stack_slots = HashMap::new();
     if let Some(expression) = variable_define.expression.as_ref() {
-        let stack_entities = collect_stack_alloc_new_object_entities(expression, lifetime_analyze_results);
+        let stack_entities =
+            collect_stack_alloc_new_object_entities(expression, lifetime_analyze_results);
         for entity in stack_entities.into_iter() {
+            if return_place_arg.is_some()
+                && lifetime_analyze_results
+                    .map(|results| results.is_return_origin(entity))
+                    .unwrap_or(false)
+            {
+                stack_slots.insert(entity, RETURN_PLACE_SLOT_MARKER.to_string());
+                continue;
+            }
+
             let slot_name = format!("__catla_stack_slot_{}", *stack_slot_counter);
             *stack_slot_counter += 1;
 
@@ -472,6 +537,7 @@ fn codegen_variable_define(
                     &stack_slots,
                     false,
                     ClassValueUsage::Normal,
+                    return_place_arg,
                 )
             )
         })
@@ -529,6 +595,7 @@ fn codegen_for_interface_program(
 fn codegen_interface_ref_forward_impl(
     user_type_define: &UserTypeDefine,
     type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     user_type_set: &GlobalUserTypeSet,
     builder: &CodeBuilderScope,
     current_crate_name: &str,
@@ -561,8 +628,7 @@ fn codegen_interface_ref_forward_impl(
     let impl_generics = if trait_generics_define.is_empty() {
         format!("<T: {}::CatlaObject>", object_module_path)
     } else {
-        let trait_generics_inner =
-            &trait_generics_define[1..trait_generics_define.len() - 1];
+        let trait_generics_inner = &trait_generics_define[1..trait_generics_define.len() - 1];
         format!(
             "<T: {}::CatlaObject, {}>",
             object_module_path, trait_generics_inner
@@ -601,7 +667,8 @@ fn codegen_interface_ref_forward_impl(
 
         if let Ok(block) = &user_type_define.block {
             for statement in block.program.statements.iter() {
-                let Statement::DefineWithAttribute(define_with_attribute) = &statement.statement else {
+                let Statement::DefineWithAttribute(define_with_attribute) = &statement.statement
+                else {
                     continue;
                 };
                 let Ok(Define::Function(function_define)) = &define_with_attribute.define else {
@@ -611,14 +678,25 @@ fn codegen_interface_ref_forward_impl(
                 let signature = codegen_for_function_signature(
                     function_define,
                     type_infer_results,
+                    module_entity_type_map,
                     user_type_set,
                     current_crate_name,
                 );
+                let has_return_place = function_return_object_type_for_function_define(
+                    function_define,
+                    type_infer_results,
+                    module_entity_type_map,
+                    user_type_set,
+                    current_crate_name,
+                )
+                .is_some();
                 scope.push_line(format!("{} {{", signature).as_str());
                 {
                     let function_scope = scope.scope();
 
-                    let Some(function_name) = function_define.name.as_ref().ok().map(|name| name.value) else {
+                    let Some(function_name) =
+                        function_define.name.as_ref().ok().map(|name| name.value)
+                    else {
                         function_scope.push_line("todo!()");
                         scope.push_line("}");
                         continue;
@@ -644,9 +722,11 @@ fn codegen_interface_ref_forward_impl(
                         .unwrap_or(false);
 
                     let call_expression = if has_this {
-                        let mut call_arguments =
-                            vec!["std::ops::Deref::deref(self)".to_string()];
+                        let mut call_arguments = vec!["std::ops::Deref::deref(self)".to_string()];
                         call_arguments.extend(arguments);
+                        if has_return_place {
+                            call_arguments.push(RETURN_PLACE_ARG_NAME.to_string());
+                        }
                         format!(
                             "<T as {}{}>::{}({})",
                             name,
@@ -655,12 +735,16 @@ fn codegen_interface_ref_forward_impl(
                             call_arguments.join(", ")
                         )
                     } else {
+                        let mut call_arguments = arguments;
+                        if has_return_place {
+                            call_arguments.push(RETURN_PLACE_ARG_NAME.to_string());
+                        }
                         format!(
                             "<T as {}{}>::{}({})",
                             name,
                             trait_generics_arguments,
                             function_name,
-                            arguments.join(", ")
+                            call_arguments.join(", ")
                         )
                     };
 
@@ -780,6 +864,7 @@ fn codegen_user_type_define(
             codegen_interface_ref_forward_impl(
                 user_type_define,
                 type_infer_results,
+                module_entity_type_map,
                 user_type_set,
                 builder,
                 current_crate_name,
@@ -793,7 +878,11 @@ fn codegen_user_type_define(
             }
 
             builder.push_line(
-                format!("{}struct {}{}{} {{", visibility, name, generics, where_clause).as_str(),
+                format!(
+                    "{}struct {}{}{} {{",
+                    visibility, name, generics, where_clause
+                )
+                .as_str(),
             );
             {
                 let scope = builder.scope();
@@ -826,8 +915,7 @@ fn codegen_user_type_define(
 
             if user_type_define.kind.value == UserTypeKind::Class {
                 let object_struct_name = class_object_struct_name(name);
-                let drop_impl_function =
-                    find_drop_function_for_class(source_program, name);
+                let drop_impl_function = find_drop_function_for_class(source_program, name);
 
                 builder.push_line("#[derive(Debug)]");
                 builder.push_line(
@@ -898,7 +986,9 @@ fn codegen_user_type_define(
                 );
                 {
                     let scope = builder.scope();
-                    scope.push_line(format!("type Target = {}{};", name, generics_arguments).as_str());
+                    scope.push_line(
+                        format!("type Target = {}{};", name, generics_arguments).as_str(),
+                    );
                     scope.push_line("fn deref(&self) -> &Self::Target {");
                     {
                         let deref_scope = scope.scope();
@@ -954,6 +1044,7 @@ fn codegen_user_type_define(
                                     &drop_scope,
                                     current_crate_name,
                                     stack_slot_counter,
+                                    None,
                                 );
                             }
                         }
@@ -972,15 +1063,22 @@ fn codegen_user_type_define(
                 builder.push_line(
                     format!(
                         "impl{} catla_std::object::CatlaObject for {}{}{} {{",
-                        catla_object_impl_generics, object_struct_name, generics_arguments, where_clause
+                        catla_object_impl_generics,
+                        object_struct_name,
+                        generics_arguments,
+                        where_clause
                     )
                     .as_str(),
                 );
                 {
                     let scope = builder.scope();
-                    scope.push_line(format!("type Value = {}{};", name, generics_arguments).as_str());
+                    scope.push_line(
+                        format!("type Value = {}{};", name, generics_arguments).as_str(),
+                    );
 
-                    scope.push_line("fn new(value: Self::Value, mutex: bool, heap: bool, drop: bool) -> Self {");
+                    scope.push_line(
+                        "fn new(value: Self::Value, mutex: bool, heap: bool, drop: bool) -> Self {",
+                    );
                     {
                         let new_scope = scope.scope();
                         new_scope.push_line("Self {");
@@ -1217,7 +1315,10 @@ fn collect_user_type_fields(
                         VariableBinding::Literal(literal) => {
                             type_infer_results.get(&EntityID::from(literal))
                         }
-                        VariableBinding::Binding { bindings: _, span: _ } => None,
+                        VariableBinding::Binding {
+                            bindings: _,
+                            span: _,
+                        } => None,
                     })
             });
 
@@ -1277,7 +1378,8 @@ fn codegen_type_alias_define(
         .map(|ty| codegen_for_type(ty, type_infer_results, user_type_set, current_crate_name))
         .unwrap_or_else(|_| "()".to_string());
 
-    builder.push_line(format!("{}type {}{} = {};", visibility, name, generics, alias_type).as_str());
+    builder
+        .push_line(format!("{}type {}{} = {};", visibility, name, generics, alias_type).as_str());
 
     if let Ok(alias_type_info) = &type_alias.alias_type {
         if is_class_type_info_or_inferred(alias_type_info, type_infer_results, user_type_set) {
@@ -1338,9 +1440,18 @@ fn codegen_function_define(
     let signature = codegen_for_function_signature(
         function_define,
         type_infer_results,
+        module_entity_type_map,
         user_type_set,
         current_crate_name,
     );
+    let has_return_place = function_return_object_type_for_function_define(
+        function_define,
+        type_infer_results,
+        module_entity_type_map,
+        user_type_set,
+        current_crate_name,
+    )
+    .is_some();
     let has_body = statement
         .compiler_tags
         .iter()
@@ -1369,21 +1480,26 @@ fn codegen_function_define(
         {
             scope.push_line("unreachable!()");
         } else if let Some(block) = &function_define.block {
-                codegen_for_program(
-                    block.program,
-                    false,
-                    type_infer_results,
-                    lifetime_analyze_results,
-                    user_type_set,
-                    module_static_variables,
-                    name_resolved_map,
-                    module_entity_type_map,
-                    &scope,
-                    current_crate_name,
-                    stack_slot_counter,
-                );
-            }
+            codegen_for_program(
+                block.program,
+                false,
+                type_infer_results,
+                lifetime_analyze_results,
+                user_type_set,
+                module_static_variables,
+                name_resolved_map,
+                module_entity_type_map,
+                &scope,
+                current_crate_name,
+                stack_slot_counter,
+                if has_return_place {
+                    Some(RETURN_PLACE_ARG_NAME)
+                } else {
+                    None
+                },
+            );
         }
+    }
 
     builder.push_line("}");
 }
@@ -1391,6 +1507,7 @@ fn codegen_function_define(
 fn codegen_for_function_signature(
     ast: &FunctionDefine,
     type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
     user_type_set: &GlobalUserTypeSet,
     current_crate_name: &str,
 ) -> String {
@@ -1400,11 +1517,19 @@ fn codegen_for_function_signature(
         .as_ref()
         .map(|generics| codegen_for_generics_define(generics, current_crate_name))
         .unwrap_or_default();
+    let return_object_type = function_return_object_type_for_function_define(
+        ast,
+        type_infer_results,
+        module_entity_type_map,
+        user_type_set,
+        current_crate_name,
+    );
     let arguments = codegen_for_function_arguments(
         ast,
         type_infer_results,
         user_type_set,
         current_crate_name,
+        return_object_type.as_deref(),
     );
     let return_type = ast
         .return_type
@@ -1449,6 +1574,7 @@ fn codegen_for_function_arguments(
     type_infer_results: &HashMap<EntityID, Spanned<Type>>,
     user_type_set: &GlobalUserTypeSet,
     current_crate_name: &str,
+    return_object_type: Option<&str>,
 ) -> String {
     let mut arguments = String::new();
     arguments += "(";
@@ -1476,6 +1602,17 @@ fn codegen_for_function_arguments(
         }));
 
         arguments += argument_elements.join(", ").as_str();
+    }
+
+    if let Some(return_object_type) = return_object_type {
+        if arguments.len() > 1 {
+            arguments += ", ";
+        }
+        arguments += format!(
+            "mut {}: catla_std::object::ReturnPlace<'_, {}>",
+            RETURN_PLACE_ARG_NAME, return_object_type
+        )
+        .as_str();
     }
 
     arguments += ")";
@@ -1520,7 +1657,10 @@ fn codegen_for_generics_define(ast: &GenericsDefine, current_crate_name: &str) -
                     element
                         .bounds
                         .iter()
-                        .map(|bound| codegen_for_type_without_class_wrapper(bound, current_crate_name))
+                        .map(|bound| codegen_for_type_without_class_wrapper(
+                            bound,
+                            current_crate_name
+                        ))
                         .collect::<Vec<_>>()
                         .join(" + ")
                 )
@@ -1555,7 +1695,10 @@ fn codegen_for_generics_define_with_static_bound(
                     element
                         .bounds
                         .iter()
-                        .map(|bound| codegen_for_type_without_class_wrapper(bound, current_crate_name))
+                        .map(|bound| codegen_for_type_without_class_wrapper(
+                            bound,
+                            current_crate_name
+                        ))
                         .collect::<Vec<_>>()
                         .join(" + ")
                 )
@@ -1650,7 +1793,7 @@ fn codegen_for_type(
             user_type_set,
             current_crate_name,
         )
-            .unwrap_or(code);
+        .unwrap_or(code);
         code = format!("catla_std::object::CatlaObjectRef<{}>", object_code);
     }
 
@@ -1690,7 +1833,9 @@ fn codegen_for_type_without_class_wrapper(ast: &TypeInfo, current_crate_name: &s
                 code += generics
                     .types
                     .iter()
-                    .map(|generic| codegen_for_type_without_class_wrapper(generic, current_crate_name))
+                    .map(|generic| {
+                        codegen_for_type_without_class_wrapper(generic, current_crate_name)
+                    })
                     .collect::<Vec<_>>()
                     .join(", ")
                     .as_str();
@@ -1978,6 +2123,103 @@ fn resolve_callee_function_type_for_literal<'a>(
     }
 }
 
+fn function_return_object_type_from_type(
+    function_type: &Type,
+    user_type_set: &GlobalUserTypeSet,
+    current_crate_name: &str,
+) -> Option<String> {
+    let Type::Function { function_info, .. } = function_type else {
+        return None;
+    };
+
+    let Type::UserType {
+        user_type_info,
+        generics,
+    } = &function_info.return_type.value
+    else {
+        return None;
+    };
+    let user_type_info = user_type_set.get(*user_type_info);
+    let user_type_info = user_type_info.read().unwrap();
+    if user_type_info
+        .kind
+        .as_ref()
+        .map(|kind| kind.value != UserTypeKind::Class)
+        .unwrap_or(true)
+    {
+        return None;
+    }
+
+    let mut code = class_object_struct_name(user_type_info.name.value.as_str());
+    if !generics.is_empty() {
+        code += "<";
+        code += generics
+            .iter()
+            .map(|generic| codegen_for_inferred_type(generic, user_type_set, current_crate_name))
+            .collect::<Vec<_>>()
+            .join(", ")
+            .as_str();
+        code += ">";
+    }
+    Some(code)
+}
+
+fn function_return_object_type_for_function_define(
+    ast: &FunctionDefine,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
+    user_type_set: &GlobalUserTypeSet,
+    current_crate_name: &str,
+) -> Option<String> {
+    if let Some(return_type) = ast.return_type.as_ref() {
+        if let Ok(type_info) = return_type.type_info.as_ref() {
+            if is_class_type_info_or_inferred(type_info, type_infer_results, user_type_set) {
+                return codegen_for_object_type_without_class_wrapper(
+                    type_info,
+                    type_infer_results,
+                    user_type_set,
+                    current_crate_name,
+                );
+            }
+        }
+    }
+
+    let function_entity = EntityID::from(ast);
+    let function_type = module_entity_type_map.get(&function_entity)?;
+    function_return_object_type_from_type(function_type, user_type_set, current_crate_name)
+}
+
+fn function_returns_class(function_type: Option<&Type>, user_type_set: &GlobalUserTypeSet) -> bool {
+    let Some(Type::Function { function_info, .. }) = function_type else {
+        return false;
+    };
+
+    is_class_type(&function_info.return_type.value, user_type_set)
+}
+
+fn codegen_return_place_argument(
+    call_entity: EntityID,
+    stack_slots: &HashMap<EntityID, String>,
+    in_static_initializer: bool,
+    return_place_arg: Option<&'static str>,
+) -> String {
+    if in_static_initializer {
+        return "catla_std::object::ReturnPlace::Heap".to_string();
+    }
+
+    if let Some(slot_name) = stack_slots.get(&call_entity) {
+        if slot_name == RETURN_PLACE_SLOT_MARKER {
+            if let Some(return_place_arg) = return_place_arg {
+                return format!("{}.reborrow()", return_place_arg);
+            }
+        } else {
+            return format!("catla_std::object::ReturnPlace::Stack(&mut {})", slot_name);
+        }
+    }
+
+    "catla_std::object::ReturnPlace::Heap".to_string()
+}
+
 fn function_argument_usage(
     function_type: Option<&Type>,
     argument_index: usize,
@@ -2080,6 +2322,106 @@ fn collect_stack_alloc_new_object_entities(
     entities
 }
 
+fn collect_stack_alloc_from_program(
+    program: &Program,
+    lifetime_analyze_results: Option<&LifetimeAnalyzeResults>,
+    out_entities: &mut Vec<EntityID>,
+    seen: &mut HashSet<EntityID>,
+) {
+    for statement in program.statements.iter() {
+        match &statement.statement {
+            Statement::Assignment(assignment) => {
+                collect_stack_alloc_from_expression(
+                    &assignment.left,
+                    lifetime_analyze_results,
+                    out_entities,
+                    seen,
+                );
+                if let Ok(right) = &assignment.right {
+                    collect_stack_alloc_from_expression(
+                        right,
+                        lifetime_analyze_results,
+                        out_entities,
+                        seen,
+                    );
+                }
+            }
+            Statement::Swap(swap_statement) => {
+                collect_stack_alloc_from_expression(
+                    &swap_statement.left,
+                    lifetime_analyze_results,
+                    out_entities,
+                    seen,
+                );
+                if let Ok(right) = &swap_statement.right {
+                    collect_stack_alloc_from_expression(
+                        right,
+                        lifetime_analyze_results,
+                        out_entities,
+                        seen,
+                    );
+                }
+            }
+            Statement::DefineWithAttribute(define_with_attribute) => {
+                if let Ok(define) = &define_with_attribute.define {
+                    match define {
+                        Define::Variable(variable_define) => {
+                            if let Some(expression) = variable_define.expression.as_ref() {
+                                collect_stack_alloc_from_expression(
+                                    expression,
+                                    lifetime_analyze_results,
+                                    out_entities,
+                                    seen,
+                                );
+                            }
+                        }
+                        Define::UserType(user_type_define) => {
+                            if let Ok(block) = &user_type_define.block {
+                                collect_stack_alloc_from_program(
+                                    block.program,
+                                    lifetime_analyze_results,
+                                    out_entities,
+                                    seen,
+                                );
+                            }
+                        }
+                        Define::Function(_) | Define::TypeAlias(_) => {}
+                    }
+                }
+            }
+            Statement::Drop(drop_statement) => {
+                if let Ok(expression) = &drop_statement.expression {
+                    collect_stack_alloc_from_expression(
+                        expression,
+                        lifetime_analyze_results,
+                        out_entities,
+                        seen,
+                    );
+                }
+            }
+            Statement::Expression(expression) => {
+                collect_stack_alloc_from_expression(
+                    expression,
+                    lifetime_analyze_results,
+                    out_entities,
+                    seen,
+                );
+            }
+            Statement::Implements(implements) => {
+                if let Ok(block) = &implements.block {
+                    collect_stack_alloc_from_program(
+                        block.program,
+                        lifetime_analyze_results,
+                        out_entities,
+                        seen,
+                    );
+                }
+            }
+            Statement::Import(_) => {}
+        }
+    }
+}
+
 fn collect_stack_alloc_from_expression(
     expression: &Expression,
     lifetime_analyze_results: Option<&LifetimeAnalyzeResults>,
@@ -2089,7 +2431,12 @@ fn collect_stack_alloc_from_expression(
     match expression {
         Expression::Return(return_expression) => {
             if let Some(inner) = return_expression.expression.as_ref() {
-                collect_stack_alloc_from_expression(inner, lifetime_analyze_results, out_entities, seen);
+                collect_stack_alloc_from_expression(
+                    inner,
+                    lifetime_analyze_results,
+                    out_entities,
+                    seen,
+                );
             }
         }
         Expression::Closure(closure) => {
@@ -2104,20 +2451,12 @@ fn collect_stack_alloc_from_expression(
                         );
                     }
                     catla_parser::ast::ExpressionOrBlock::Block(block) => {
-                        for statement in block.program.statements.iter() {
-                            if let Statement::DefineWithAttribute(define_with_attribute) = &statement.statement {
-                                if let Ok(Define::Variable(variable_define)) = &define_with_attribute.define {
-                                    if let Some(expression) = variable_define.expression.as_ref() {
-                                        collect_stack_alloc_from_expression(
-                                            expression,
-                                            lifetime_analyze_results,
-                                            out_entities,
-                                            seen,
-                                        );
-                                    }
-                                }
-                            }
-                        }
+                        collect_stack_alloc_from_program(
+                            block.program,
+                            lifetime_analyze_results,
+                            out_entities,
+                            seen,
+                        );
                     }
                 }
             }
@@ -2146,7 +2485,12 @@ fn collect_stack_alloc_from_or_expression(
         seen,
     );
     for chain in expression.chain.iter() {
-        collect_stack_alloc_from_and_expression(chain, lifetime_analyze_results, out_entities, seen);
+        collect_stack_alloc_from_and_expression(
+            chain,
+            lifetime_analyze_results,
+            out_entities,
+            seen,
+        );
     }
 }
 
@@ -2163,7 +2507,12 @@ fn collect_stack_alloc_from_and_expression(
         seen,
     );
     for chain in expression.chain.iter() {
-        collect_stack_alloc_from_equals_expression(chain, lifetime_analyze_results, out_entities, seen);
+        collect_stack_alloc_from_equals_expression(
+            chain,
+            lifetime_analyze_results,
+            out_entities,
+            seen,
+        );
     }
 }
 
@@ -2284,6 +2633,16 @@ fn collect_stack_alloc_from_primary(
                         seen,
                     );
                 }
+
+                let entity_id = EntityID::from(function_call);
+                if lifetime_analyze_results
+                    .and_then(|results| results.object_result(entity_id))
+                    .map(|result| result.allocation == AllocationKind::Stack)
+                    .unwrap_or(false)
+                    && seen.insert(entity_id)
+                {
+                    out_entities.push(entity_id);
+                }
             }
         }
         PrimaryLeftExpr::NewObject { new_object } => {
@@ -2343,8 +2702,55 @@ fn collect_stack_alloc_from_primary(
                     seen,
                 );
             }
+            if let Ok(block) = &if_expression.first.block {
+                collect_stack_alloc_from_program(
+                    block.program,
+                    lifetime_analyze_results,
+                    out_entities,
+                    seen,
+                );
+            }
+            for chain in if_expression.chain.iter() {
+                match chain {
+                    catla_parser::ast::ElseChain::ElseIf { if_statement } => {
+                        if let Ok(condition) = &if_statement.condition {
+                            collect_stack_alloc_from_expression(
+                                condition,
+                                lifetime_analyze_results,
+                                out_entities,
+                                seen,
+                            );
+                        }
+                        if let Ok(block) = &if_statement.block {
+                            collect_stack_alloc_from_program(
+                                block.program,
+                                lifetime_analyze_results,
+                                out_entities,
+                                seen,
+                            );
+                        }
+                    }
+                    catla_parser::ast::ElseChain::Else { block } => {
+                        collect_stack_alloc_from_program(
+                            block.program,
+                            lifetime_analyze_results,
+                            out_entities,
+                            seen,
+                        );
+                    }
+                }
+            }
         }
-        PrimaryLeftExpr::Loop { loop_expression: _ } => {}
+        PrimaryLeftExpr::Loop { loop_expression } => {
+            if let Ok(block) = &loop_expression.block {
+                collect_stack_alloc_from_program(
+                    block.program,
+                    lifetime_analyze_results,
+                    out_entities,
+                    seen,
+                );
+            }
+        }
     }
 
     for chain in primary.chain.iter() {
@@ -2356,7 +2762,22 @@ fn collect_stack_alloc_from_primary(
         };
 
         for argument in function_call.arguments.iter() {
-            collect_stack_alloc_from_expression(argument, lifetime_analyze_results, out_entities, seen);
+            collect_stack_alloc_from_expression(
+                argument,
+                lifetime_analyze_results,
+                out_entities,
+                seen,
+            );
+        }
+
+        let entity_id = EntityID::from(function_call);
+        if lifetime_analyze_results
+            .and_then(|results| results.object_result(entity_id))
+            .map(|result| result.allocation == AllocationKind::Stack)
+            .unwrap_or(false)
+            && seen.insert(entity_id)
+        {
+            out_entities.push(entity_id);
         }
     }
 }
@@ -2541,6 +2962,129 @@ fn codegen_assignment_left_primary(
     Some(code)
 }
 
+fn codegen_program_as_expression(
+    program: &Program,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    lifetime_analyze_results: Option<&LifetimeAnalyzeResults>,
+    user_type_set: &GlobalUserTypeSet,
+    module_static_variables: &HashMap<String, bool>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
+    current_crate_name: &str,
+    stack_slots: &HashMap<EntityID, String>,
+    in_static_initializer: bool,
+    class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
+) -> String {
+    let temp_builder = CodeBuilder::new();
+    {
+        let scope = temp_builder.scope();
+        let mut stack_slot_counter = program
+            .span
+            .start
+            .saturating_add(program.span.end)
+            .saturating_mul(1024);
+
+        match program.statements.split_last() {
+            Some((last_statement, prefix_statements))
+                if matches!(last_statement.statement, Statement::Expression(_)) =>
+            {
+                if !prefix_statements.is_empty() {
+                    let prefix_program = Program {
+                        statements: prefix_statements,
+                        span: program.span.clone(),
+                    };
+                    codegen_for_program(
+                        &prefix_program,
+                        false,
+                        type_infer_results,
+                        lifetime_analyze_results,
+                        user_type_set,
+                        module_static_variables,
+                        name_resolved_map,
+                        module_entity_type_map,
+                        &scope,
+                        current_crate_name,
+                        &mut stack_slot_counter,
+                        return_place_arg,
+                    );
+                }
+
+                let Statement::Expression(expression) = &last_statement.statement else {
+                    unreachable!();
+                };
+
+                let expression_code = codegen_expression(
+                    expression,
+                    type_infer_results,
+                    lifetime_analyze_results,
+                    user_type_set,
+                    module_static_variables,
+                    name_resolved_map,
+                    module_entity_type_map,
+                    &scope,
+                    current_crate_name,
+                    stack_slots,
+                    in_static_initializer,
+                    class_value_usage,
+                    return_place_arg,
+                );
+                scope.push_line(expression_code.as_str());
+            }
+            _ => {
+                codegen_for_program(
+                    program,
+                    false,
+                    type_infer_results,
+                    lifetime_analyze_results,
+                    user_type_set,
+                    module_static_variables,
+                    name_resolved_map,
+                    module_entity_type_map,
+                    &scope,
+                    current_crate_name,
+                    &mut stack_slot_counter,
+                    return_place_arg,
+                );
+                scope.push_line("()");
+            }
+        }
+    }
+
+    let inner_code = temp_builder.dump();
+    format!("{{\n{}}}", inner_code)
+}
+
+fn codegen_block_as_expression(
+    block: &catla_parser::ast::Block,
+    type_infer_results: &HashMap<EntityID, Spanned<Type>>,
+    lifetime_analyze_results: Option<&LifetimeAnalyzeResults>,
+    user_type_set: &GlobalUserTypeSet,
+    module_static_variables: &HashMap<String, bool>,
+    name_resolved_map: &HashMap<EntityID, ResolvedInfo>,
+    module_entity_type_map: &HashMap<EntityID, Type>,
+    current_crate_name: &str,
+    stack_slots: &HashMap<EntityID, String>,
+    in_static_initializer: bool,
+    class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
+) -> String {
+    codegen_program_as_expression(
+        block.program,
+        type_infer_results,
+        lifetime_analyze_results,
+        user_type_set,
+        module_static_variables,
+        name_resolved_map,
+        module_entity_type_map,
+        current_crate_name,
+        stack_slots,
+        in_static_initializer,
+        class_value_usage,
+        return_place_arg,
+    )
+}
+
 fn codegen_expression(
     ast: &Expression,
     type_infer_results: &HashMap<EntityID, Spanned<Type>>,
@@ -2554,9 +3098,31 @@ fn codegen_expression(
     stack_slots: &HashMap<EntityID, String>,
     in_static_initializer: bool,
     class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
 ) -> String {
     match ast {
-        Expression::Return(return_expression) => todo!(),
+        Expression::Return(return_expression) => match &return_expression.expression {
+            Some(expression) => {
+                let expression_code = codegen_expression(
+                    expression,
+                    type_infer_results,
+                    lifetime_analyze_results,
+                    user_type_set,
+                    module_static_variables,
+                    name_resolved_map,
+                    module_entity_type_map,
+                    builder,
+                    current_crate_name,
+                    stack_slots,
+                    in_static_initializer,
+                    class_value_usage,
+                    return_place_arg,
+                );
+
+                format!("return {}", expression_code)
+            }
+            None => "return".to_string(),
+        },
         Expression::Closure(closure) => todo!(),
         Expression::Or(or_expression) => codegen_or_expression(
             *or_expression,
@@ -2571,6 +3137,7 @@ fn codegen_expression(
             stack_slots,
             in_static_initializer,
             class_value_usage,
+            return_place_arg,
         ),
     }
 }
@@ -2594,6 +3161,7 @@ fn codegen_or_expression(
     stack_slots: &HashMap<EntityID, String>,
     in_static_initializer: bool,
     class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
 ) -> String {
     let left_result = codegen_and_expression(
         &ast.left,
@@ -2608,6 +3176,7 @@ fn codegen_or_expression(
         stack_slots,
         in_static_initializer,
         class_value_usage,
+        return_place_arg,
     );
 
     match ast.chain.len() {
@@ -2629,6 +3198,7 @@ fn codegen_and_expression(
     stack_slots: &HashMap<EntityID, String>,
     in_static_initializer: bool,
     class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
 ) -> String {
     let left_result = codegen_equals_expression(
         &ast.left,
@@ -2643,6 +3213,7 @@ fn codegen_and_expression(
         stack_slots,
         in_static_initializer,
         class_value_usage,
+        return_place_arg,
     );
 
     match ast.chain.len() {
@@ -2664,6 +3235,7 @@ fn codegen_equals_expression(
     stack_slots: &HashMap<EntityID, String>,
     in_static_initializer: bool,
     class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
 ) -> String {
     let left_result = codegen_less_or_greater_expression(
         &ast.left,
@@ -2678,6 +3250,7 @@ fn codegen_equals_expression(
         stack_slots,
         in_static_initializer,
         class_value_usage,
+        return_place_arg,
     );
 
     match ast.chain.len() {
@@ -2699,6 +3272,7 @@ fn codegen_less_or_greater_expression(
     stack_slots: &HashMap<EntityID, String>,
     in_static_initializer: bool,
     class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
 ) -> String {
     let left_result = codegen_add_or_sub_expression(
         &ast.left,
@@ -2713,6 +3287,7 @@ fn codegen_less_or_greater_expression(
         stack_slots,
         in_static_initializer,
         class_value_usage,
+        return_place_arg,
     );
 
     match ast.chain.len() {
@@ -2734,6 +3309,7 @@ fn codegen_add_or_sub_expression(
     stack_slots: &HashMap<EntityID, String>,
     in_static_initializer: bool,
     class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
 ) -> String {
     let left_result = codegen_mul_or_div_expression(
         &ast.left,
@@ -2748,6 +3324,7 @@ fn codegen_add_or_sub_expression(
         stack_slots,
         in_static_initializer,
         class_value_usage,
+        return_place_arg,
     );
 
     match ast.chain.len() {
@@ -2780,6 +3357,7 @@ fn codegen_add_or_sub_expression(
                         stack_slots,
                         in_static_initializer,
                         class_value_usage,
+                        return_place_arg,
                     )
                     .as_str();
                 }
@@ -2803,6 +3381,7 @@ fn codegen_mul_or_div_expression(
     stack_slots: &HashMap<EntityID, String>,
     in_static_initializer: bool,
     class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
 ) -> String {
     let left_result = codegen_for_factor(
         &ast.left,
@@ -2817,6 +3396,7 @@ fn codegen_mul_or_div_expression(
         stack_slots,
         in_static_initializer,
         class_value_usage,
+        return_place_arg,
     );
 
     match ast.chain.len() {
@@ -2838,6 +3418,7 @@ fn codegen_for_factor(
     stack_slots: &HashMap<EntityID, String>,
     in_static_initializer: bool,
     class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
 ) -> String {
     if let Ok(primary) = &ast.primary {
         return codegen_for_primary(
@@ -2853,6 +3434,7 @@ fn codegen_for_factor(
             stack_slots,
             in_static_initializer,
             class_value_usage,
+            return_place_arg,
         );
     }
     String::new()
@@ -2871,6 +3453,7 @@ fn codegen_for_primary(
     stack_slots: &HashMap<EntityID, String>,
     in_static_initializer: bool,
     class_value_usage: ClassValueUsage,
+    return_place_arg: Option<&'static str>,
 ) -> String {
     match &ast.left.first {
         PrimaryLeftExpr::Simple {
@@ -2927,8 +3510,8 @@ fn codegen_for_primary(
                 }
                 SimplePrimary::NumericLiteral(literal) => code += literal.value,
                 SimplePrimary::Null(range) => todo!(),
-                SimplePrimary::True(range) => todo!(),
-                SimplePrimary::False(range) => todo!(),
+                SimplePrimary::True(_range) => code += "true",
+                SimplePrimary::False(_range) => code += "false",
                 SimplePrimary::This(range) => todo!(),
                 SimplePrimary::LargeThis(range) => todo!(),
             }
@@ -2943,14 +3526,12 @@ fn codegen_for_primary(
                     ),
                     _ => None,
                 };
-
-                code += format!(
-                    "({})",
-                    function_call
-                        .arguments
-                        .iter()
-                        .enumerate()
-                        .map(|(argument_index, expression)| codegen_expression(
+                let mut argument_codes = function_call
+                    .arguments
+                    .iter()
+                    .enumerate()
+                    .map(|(argument_index, expression)| {
+                        codegen_expression(
                             expression,
                             type_infer_results,
                             lifetime_analyze_results,
@@ -2967,11 +3548,24 @@ fn codegen_for_primary(
                                 argument_index,
                                 user_type_set,
                             ),
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-                .as_str();
+                            return_place_arg,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if function_returns_class(left_function_type, user_type_set)
+                    || type_infer_results
+                        .get(&EntityID::from(function_call))
+                        .map(|ty| is_class_type(&ty.value, user_type_set))
+                        .unwrap_or(false)
+                {
+                    argument_codes.push(codegen_return_place_argument(
+                        EntityID::from(function_call),
+                        stack_slots,
+                        in_static_initializer,
+                        return_place_arg,
+                    ));
+                }
+                code += format!("({})", argument_codes.join(", ")).as_str();
             }
 
             for primary_right in ast.chain.iter() {
@@ -3004,13 +3598,12 @@ fn codegen_for_primary(
                             module_entity_type_map,
                         );
 
-                        code += format!(
-                            "({})",
-                            function_call
-                                .arguments
-                                .iter()
-                                .enumerate()
-                                .map(|(argument_index, expression)| codegen_expression(
+                        let mut argument_codes = function_call
+                            .arguments
+                            .iter()
+                            .enumerate()
+                            .map(|(argument_index, expression)| {
+                                codegen_expression(
                                     expression,
                                     type_infer_results,
                                     lifetime_analyze_results,
@@ -3027,11 +3620,24 @@ fn codegen_for_primary(
                                         argument_index,
                                         user_type_set,
                                     ),
-                                ))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )
-                        .as_str();
+                                    return_place_arg,
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        if function_returns_class(second_function_type, user_type_set)
+                            || type_infer_results
+                                .get(&EntityID::from(function_call))
+                                .map(|ty| is_class_type(&ty.value, user_type_set))
+                                .unwrap_or(false)
+                        {
+                            argument_codes.push(codegen_return_place_argument(
+                                EntityID::from(function_call),
+                                stack_slots,
+                                in_static_initializer,
+                                return_place_arg,
+                            ));
+                        }
+                        code += format!("({})", argument_codes.join(", ")).as_str();
                     }
                 }
             }
@@ -3123,6 +3729,7 @@ fn codegen_for_primary(
                             stack_slots,
                             in_static_initializer,
                             ClassValueUsage::Normal,
+                            return_place_arg,
                         )
                     )
                 })
@@ -3159,12 +3766,17 @@ fn codegen_for_primary(
 
             let object_result = lifetime_analyze_results
                 .and_then(|results| results.object_result(EntityID::from(new_object)));
-            let requires_drop = object_result.map(|result| result.requires_drop).unwrap_or(true);
-            let mutex_flag = if in_static_initializer { "true" } else { "false" };
+            let requires_drop = object_result
+                .map(|result| result.requires_drop)
+                .unwrap_or(true);
+            let mutex_flag = if in_static_initializer {
+                "true"
+            } else {
+                "false"
+            };
 
             if is_class {
-                if in_static_initializer
-                {
+                if in_static_initializer {
                     format!(
                         "catla_std::object::CatlaObjectRef::<{}>::heap({}, {}, {})",
                         object_path, value, mutex_flag, requires_drop
@@ -3174,10 +3786,24 @@ fn codegen_for_primary(
                     .unwrap_or(false)
                 {
                     if let Some(slot_name) = stack_slots.get(&EntityID::from(new_object)) {
-                        format!(
-                            "catla_std::object::CatlaObjectRef::<{}>::stack({}, {}, &mut {})",
-                            object_path, value, requires_drop, slot_name
-                        )
+                        if slot_name == RETURN_PLACE_SLOT_MARKER {
+                            if let Some(return_place_arg) = return_place_arg {
+                                format!(
+                                    "catla_std::object::CatlaObjectRef::<{}>::from_return_place({}, {}, {}, {}.reborrow())",
+                                    object_path, value, mutex_flag, requires_drop, return_place_arg
+                                )
+                            } else {
+                                format!(
+                                    "catla_std::object::CatlaObjectRef::<{}>::heap({}, {}, {})",
+                                    object_path, value, mutex_flag, requires_drop
+                                )
+                            }
+                        } else {
+                            format!(
+                                "catla_std::object::CatlaObjectRef::<{}>::stack({}, {}, &mut {})",
+                                object_path, value, requires_drop, slot_name
+                            )
+                        }
                     } else {
                         format!(
                             "catla_std::object::CatlaObjectRef::<{}>::heap({}, {}, {})",
@@ -3196,7 +3822,131 @@ fn codegen_for_primary(
         }
         PrimaryLeftExpr::NewArray { new_array } => todo!(),
         PrimaryLeftExpr::NewArrayInit { new_array_init } => todo!(),
-        PrimaryLeftExpr::If { if_expression } => todo!(),
+        PrimaryLeftExpr::If { if_expression } => {
+            let mut code = String::new();
+
+            let first_condition_code = if_expression
+                .first
+                .condition
+                .as_ref()
+                .map(|condition| {
+                    codegen_expression(
+                        condition,
+                        type_infer_results,
+                        lifetime_analyze_results,
+                        user_type_set,
+                        module_static_variables,
+                        name_resolved_map,
+                        module_entity_type_map,
+                        builder,
+                        current_crate_name,
+                        stack_slots,
+                        in_static_initializer,
+                        ClassValueUsage::Normal,
+                        return_place_arg,
+                    )
+                })
+                .unwrap_or_else(|_| "false".to_string());
+
+            let first_block_code = if_expression
+                .first
+                .block
+                .as_ref()
+                .map(|block| {
+                        codegen_block_as_expression(
+                            block,
+                        type_infer_results,
+                        lifetime_analyze_results,
+                        user_type_set,
+                        module_static_variables,
+                        name_resolved_map,
+                        module_entity_type_map,
+                        current_crate_name,
+                            stack_slots,
+                            in_static_initializer,
+                            class_value_usage,
+                            return_place_arg,
+                        )
+                    })
+                .unwrap_or_else(|_| "{\n()\n}".to_string());
+
+            code += format!("if {} {}", first_condition_code, first_block_code).as_str();
+
+            let mut has_else = false;
+            for chain in if_expression.chain.iter() {
+                match chain {
+                    catla_parser::ast::ElseChain::ElseIf { if_statement } => {
+                        let condition_code = if_statement
+                            .condition
+                            .as_ref()
+                            .map(|condition| {
+                                codegen_expression(
+                                    condition,
+                                    type_infer_results,
+                                    lifetime_analyze_results,
+                                    user_type_set,
+                                    module_static_variables,
+                                    name_resolved_map,
+                                    module_entity_type_map,
+                                    builder,
+                                    current_crate_name,
+                                    stack_slots,
+                                    in_static_initializer,
+                                    ClassValueUsage::Normal,
+                                    return_place_arg,
+                                )
+                            })
+                            .unwrap_or_else(|_| "false".to_string());
+                        let block_code = if_statement
+                            .block
+                            .as_ref()
+                            .map(|block| {
+                                codegen_block_as_expression(
+                                    block,
+                                    type_infer_results,
+                                    lifetime_analyze_results,
+                                    user_type_set,
+                                    module_static_variables,
+                                    name_resolved_map,
+                                    module_entity_type_map,
+                                    current_crate_name,
+                                    stack_slots,
+                                    in_static_initializer,
+                                    class_value_usage,
+                                    return_place_arg,
+                                )
+                            })
+                            .unwrap_or_else(|_| "{\n()\n}".to_string());
+
+                        code += format!(" else if {} {}", condition_code, block_code).as_str();
+                    }
+                    catla_parser::ast::ElseChain::Else { block } => {
+                        let block_code = codegen_block_as_expression(
+                            block,
+                            type_infer_results,
+                            lifetime_analyze_results,
+                            user_type_set,
+                            module_static_variables,
+                            name_resolved_map,
+                            module_entity_type_map,
+                            current_crate_name,
+                            stack_slots,
+                            in_static_initializer,
+                            class_value_usage,
+                            return_place_arg,
+                        );
+                        code += format!(" else {}", block_code).as_str();
+                        has_else = true;
+                    }
+                }
+            }
+
+            if !has_else {
+                code += " else {\n()\n}";
+            }
+
+            code
+        }
         PrimaryLeftExpr::Loop { loop_expression } => todo!(),
     }
 }
